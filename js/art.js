@@ -297,21 +297,37 @@ export function paintSky(look, discArt = false) {
 const HORIZON_SEED = 70413;
 
 // How the band is laid out, top to bottom, as fractions of its own height. Row 0
-// is the highest — see the note in scene.js about where the band is hung, and
-// why everything below about 0.69 is buried behind the planet's own limb.
-// `treeBase` is deliberately ABOVE the limb at 0.69, and that is the one number
-// here that has to be got right rather than chosen. The woods' fill runs from
-// there to the bottom of the sheet, so it is what the planet's own edge cuts
-// through — and if it starts any lower, the strip between the crowns and the
-// limb shows whatever is behind them. It did: a pale band of haze under the
-// trees, reading as a river nobody had drawn.
+// is the highest — see the note in scene.js about where the band is hung, which
+// is what decides which of these rows you can actually see.
+//
+// TWO ROWS MATTER MORE THAN THE REST, and both are set against the planet's limb
+// rather than chosen by eye:
+//
+//   `treeTop` at 0.48 sits ABOVE the limb's 0.567, so the crowns break the
+//   horizon. That is the whole read of a far treeline — a nodding row of tops
+//   with the trunks and everything under them behind the hill. HOW FAR above is
+//   the trade: this leaves 0.087 of sheet standing proud of the limb, against
+//   0.147 at the 0.42 it was, and the difference is all mountain. At 0.42 the
+//   wood took 40% of the visible band and the near range had almost nowhere to
+//   show; at 0.48 it takes 24% and the hills read behind it again. Below about
+//   0.52 it stops being a wood and becomes a green fringe.
+//
+//   `treeBase` at 0.78 sits BELOW the limb's 0.744 AT THE TOP OF A HOP. The
+//   woods' fill runs from there to the bottom of the sheet, so treeBase is the
+//   row where bumpy crowns give way to flat green — and a hop uncovers every
+//   row from 0.567 down to 0.744. Put treeBase at 0.64, as it was, and 0.10 of
+//   flat green swings into frame on every hop, which is exactly the slab this
+//   was reported as. Past 0.744 the reveal is crowns the whole way.
+//
+// The gap between them is why `count` had to go up and `grow` had to arrive:
+// twice the depth needs twice the blobs to stay a wood rather than a scatter.
 const SKYLINE = {
   farPeak: 0.20,
   farBase: 0.62,
   nearPeak: 0.33,
   nearBase: 0.66,
-  treeTop: 0.50,
-  treeBase: 0.64,
+  treeTop: 0.48,
+  treeBase: 0.78,
   hazeTo: 0.62,
 };
 
@@ -370,15 +386,60 @@ function range(g, W, H, rand, { peak, base, count, jitter, saddle, fill }) {
 // is a line round the union rather than a line round each blob. Stroking would
 // draw the buried halves too and the treeline would come out as a heap of
 // circles, which is the same lesson the blossoms taught.
-function treeline(g, W, H, rand, { top, base, count, ink, fill }) {
+// THE UNIT HERE IS A BUSH, NOT A CIRCLE, and that is the whole of the change
+// from what stood here before. A lap of single circles on a baseline reads as
+// what it is — a scatter of green dots — however many you draw and however big
+// you draw them, because the eye is given no group to see. What it wants is a
+// shape with shoulders: several lobes over one body, wider than it is tall and
+// tallest in the middle. Draw thirty of those and it reads as a wood, because
+// the thing being repeated is a bush.
+//
+// `size` is a bush's radius as a fraction of the band's height, so it is
+// independent of `count` — those two were the same knob when the radius came
+// off `step`, and asking for more trees asked for smaller ones in the same
+// breath.
+//
+// `top` is the top of the SILHOUETTE, not the highest foot. Bushes are placed by
+// their feet, and a bush stands `reach` above its own foot, so the foot range
+// starts that far down. Getting this wrong is invisible until you try to lower
+// the treeline and it does not move.
+//
+// Outlined the way every soft thing in this world is outlined — by
+// UNDERPAINTING. The whole run is filled once in ink a hair oversize and once in
+// green on top, so what shows is a line round the union rather than a line round
+// each lobe. Stroking would draw the buried halves too and the wood would come
+// out as a heap of circles, which is the same lesson the blossoms taught, and
+// doubly so now that a single bush is six overlapping arcs.
+function treeline(g, W, H, rand, { top, base, count, size, ink, fill }) {
   const step = W / count;
   const lap = [];
   for (let i = 0; i < count; i++) {
-    const x = i * step + step * (rand() - 0.5) * 0.7;
-    const r = step * (0.55 + rand() * 0.75);
-    // Crowns nod up and down along the row; a treeline of one height is a hedge.
-    const y = base * H - (base - top) * H * (0.35 + rand() * 0.65);
-    lap.push([x, y, r]);
+    const cx = i * step + step * (rand() - 0.5) * 0.9;
+    const R = size * H * (0.75 + rand() * 0.5);
+
+    // How far this bush's crown stands above its own foot, which is what the
+    // lobe placing below works out to: 0.85R of lift plus the top lobe's own
+    // radius. Kept as one number so the foot range and the silhouette agree.
+    const reach = R * 1.5;
+    const footTop = top * H + reach;
+    const cy = footTop + (base * H - footTop) * rand();
+
+    // The lobes, walked left to right with a sine for the shoulders. Without
+    // the dome term they come out as a row of equal balls — a caterpillar,
+    // not a bush.
+    const lobes = 4 + Math.floor(rand() * 3);
+    for (let j = 0; j < lobes; j++) {
+      const t = j / (lobes - 1);
+      const dome = Math.sin(Math.PI * t);
+      lap.push([
+        cx + (t - 0.5) * R * 1.9,
+        cy - R * (0.30 + 0.55 * dome) * (0.85 + rand() * 0.30),
+        R * (0.55 + 0.25 * dome) * (0.85 + rand() * 0.30),
+      ]);
+    }
+    // ...and the body they sit on. Without it a bush is a ring of balls with
+    // the field showing through the middle of it.
+    lap.push([cx, cy - R * 0.34, R * 0.86]);
   }
   const paint = (grow, style) => {
     g.beginPath();
@@ -388,7 +449,7 @@ function treeline(g, W, H, rand, { top, base, count, ink, fill }) {
         g.arc(x + off, y, r + grow, 0, TAU);
       }
     }
-    // The ground the crowns stand on, so the row has no daylight under it.
+    // The ground the bushes stand on, so the row has no daylight under it.
     g.rect(-W, base * H, W * 3, H);
     g.fillStyle = style;
     g.fill();
@@ -431,13 +492,17 @@ export function paintHorizon() {
   g.fillStyle = haze;
   g.fillRect(0, SKYLINE.nearPeak * H, W, (SKYLINE.hazeTo - SKYLINE.nearPeak) * H);
 
-  // Twice as many crowns as the first pass had, which is the difference between
-  // woods across a valley and a hedge at the end of the garden. A portrait phone
-  // shows a twelfth of the lap, so this puts eighteen or so on screen — about
-  // what the reference frames carry.
+  // 260 BUSHES, not 260 circles — each one is six or seven arcs, so this is
+  // some seventeen hundred of them round the lap. `size` 0.05 makes a bush 19
+  // to 32 texels in the radius and near enough three of those across, so a bush
+  // is 60 to 100 texels wide against the 353 a portrait phone shows: five or
+  // six across the frame per row, two or three rows deep. That overlap is the
+  // point. Below about four per row the wood breaks into separate clumps with
+  // field between them, and above about eight the shoulders stop reading and it
+  // goes back to being a hedge.
   treeline(g, W, H, rand, {
     top: SKYLINE.treeTop, base: SKYLINE.treeBase,
-    count: 216, ink: PAL.horizonTreeInk, fill: PAL.horizonTree,
+    count: 260, size: 0.05, ink: PAL.horizonTreeInk, fill: PAL.horizonTree,
   });
 
   return c;
@@ -919,7 +984,7 @@ export const SHADOW_ROOM = [92, 84, 80];
 // ------------------------------------------------------------- water light
 //
 // The squiggles of light lying on a pond. A tiling sheet, scrolled slowly across
-// the surface by water.js — see driftGlints.
+// the surface by water.js — see driftWater.
 //
 // SEAMLESS IS THE WHOLE JOB HERE, and it is why every mark is drawn up to nine
 // times. A tile whose marks stop at its edges shows a grid the moment it

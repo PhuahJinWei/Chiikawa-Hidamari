@@ -253,6 +253,12 @@ export class PlanetCamera {
     this.feet = 0;
     this._vy = 0;
     this._air = false;
+    // How far BELOW the surface the drawn eye still is, while it catches up
+    // with a snap the model already made — see _fall and player.pullMs. It is
+    // the only one of these four that is not part of the model at all: nothing
+    // asks it where you are, and it exists so that a ground height which has to
+    // change instantly does not have to LOOK as though it did.
+    this._pull = 0;
     // The run. `sprintOn` is armed by a tap on the sprint button and stands
     // down BY ITSELF when you stop — see _walk — so it means "this movement
     // is a run", never "running is switched on": there is no state to forget
@@ -969,6 +975,9 @@ export class PlanetCamera {
     this.feet = this.stand;
     this._vy = 0;
     this._air = false;
+    // Nothing to catch up with: this is a placement, not a movement, and a lag
+    // carried into one would ease the eye up from a spot it was never at.
+    this._pull = 0;
   }
 
   // How high the walk is allowed to treat itself as being, for deciding what
@@ -1030,6 +1039,12 @@ export class PlanetCamera {
       // table that the jump alone cannot reach. Falling: land on it, and reach
       // adds nothing, so only a surface genuinely at or under the feet counts.
       if ((rising && ground > this.stand + 1e-4) || (!rising && this.feet <= ground)) {
+        // Banked BEFORE the feet are moved, because it is exactly the distance
+        // they are about to be moved by. Added rather than assigned: a catch
+        // that lands while an earlier one is still easing off inherits the
+        // remainder instead of throwing it away, which is what stops a second
+        // pull-up snapping out the first.
+        this._pull += ground - this.feet;
         move = ground - this.stand;
         this.feet = ground;
         this.stand = ground;
@@ -1041,6 +1056,14 @@ export class PlanetCamera {
       if (ground > this.stand + 1e-4) {
         // A kerb. Anything taller than stepUp is not reachable this way — it is
         // solid until you are above it, so the walk never brought you here.
+        //
+        // It banks the same lag as a catch, and it needs it just as badly: a
+        // step up is a whole kerb of eye movement in one frame, arriving while
+        // you walk on the flat. This was invisible for as long as stepUp was
+        // 0.25 and nothing in the world was under it — the rule ran on nothing.
+        // Raising it to 0.32 to take in the cushions is what made the step real,
+        // and a real step needs the ease or it is a stair that teleports you.
+        this._pull += ground - this.feet;
         move = ground - this.stand;
         this.stand = ground;
         this.feet = ground;
@@ -1055,6 +1078,15 @@ export class PlanetCamera {
     if (move !== 0) {
       this.alt += move;
       this.altT += move;
+    }
+
+    // ...and the lag giving itself up. Against the clock like everything else
+    // that eases here, so it means the same on a 120Hz phone as on a 60Hz one.
+    // Zeroed rather than left to decay forever, since it is added into a
+    // position every frame and an exponential never actually arrives.
+    if (this._pull !== 0) {
+      this._pull *= Math.exp(-dtMs / p.pullMs);
+      if (Math.abs(this._pull) < 1e-4) this._pull = 0;
     }
   }
 
@@ -1116,7 +1148,7 @@ export class PlanetCamera {
     // altitude is re-read afterwards because `_standOn` moves the surface the
     // eye is measured from, and `altT` was set before anybody knew where that
     // surface was going to be.
-    this._standOn(this.anchor);
+    this._standOn(this.anchor);      // clears the pull with it
     if (this.altT <= CONFIG.camera.eyeHeight + this.stand + 1e-3) {
       this.altT = this.eyeAlt;
       this.alt = this.altT;
@@ -1198,8 +1230,12 @@ export class PlanetCamera {
     } else {
       this._coast(dtMs);
       // Nothing to stand on up here, and a fall left half-finished would be
-      // waiting to resume the moment you set down somewhere else entirely.
+      // waiting to resume the moment you set down somewhere else entirely. The
+      // pull goes with it for the same reason: it is a debt against a surface
+      // you have just left, and paying it out on landing somewhere else would
+      // ease the eye up out of ground it was never under.
       if (this._air) { this._air = false; this._vy = 0; this.feet = this.stand; }
+      this._pull = 0;
     }
 
     // The walk cycle: head rises on each footfall, and tips a little from side
@@ -1230,7 +1266,14 @@ export class PlanetCamera {
     // added, and meaning the same thing whenever the jump ends where it began.
     // Where it does not, `alt` has already been moved by the same amount in the
     // other direction (see _fall), so the sum never jumps.
-    const hop = this.feet - this.stand;
+    //
+    // Less the pull, which is what makes that true of CATCHES as well as falls.
+    // The cancellation only works when the feet were already level with the
+    // ground they land on, which is a fall and is not a mantle: catching a lip
+    // moves the feet as well as the surface, and the two no longer cancel. The
+    // pull is precisely the leftover, so subtracting it here holds the eye still
+    // on the frame of the catch and then hands the difference back over pullMs.
+    const hop = this.feet - this.stand - this._pull;
 
     const height = R + this.alt + bob + hop;
 

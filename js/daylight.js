@@ -6,6 +6,22 @@
 // `tint` is the multiply colour for the unlit sprites. Without it the planet
 // would go dark at night while the characters stayed lit like cutouts pasted
 // over a photograph.
+//
+// Night's was #A2B3D8 — 70% of full daylight — and it survived the whole of the
+// interior rework untouched, which is how it ended up wrong. Once the room went
+// to 38% the OUTSIDE was the brightest place on the planet after dark, and the
+// house showed it worst: its skin is a near-white drawing, so a near-white
+// drawing at 70% made the building the palest thing in a night scene and left
+// it looking lit even with every lamp in it switched off.
+//
+// It is a moon now rather than an overcast afternoon. Dark enough that the
+// lamps, the stars and the moon are the bright things — which is the whole
+// point of having spent this long on them — and no darker than that, because
+// this is also the light somebody has to walk the planet by.
+//
+// It moves with `ambient` below, never alone. That one lights the ground and
+// this one lights everything standing on the ground, and a gap between them
+// reads immediately as props cut from a different picture than the hillside.
 
 import { CONFIG } from './config.js';
 
@@ -49,12 +65,36 @@ import { CONFIG } from './config.js';
 // `tintIn` is the multiply colour for everything standing INSIDE the house —
 // the wall you see from the rug, the furniture, whoever is home. It lives in
 // this table rather than one of its own so the scrubber interpolates it for
-// free, but it is NOT the outdoor tint with the lights turned down, and the
-// difference carries the whole fiction: night in there is WARM. Outside, night
-// is the tint that turns the grass the colour of moonlight; inside, the lamps
-// are on — that is what the lit windows have been saying from across the
-// planet all along, and walking in to find the same cold blue would contradict
-// the glow that drew you to the door.
+// free. It is NOT the outdoor tint with the lights turned down — a room is
+// enclosed, so it keeps a table of its own — but nor is it, any longer, a
+// warm one.
+//
+// IT IS THE DARK, AND THE DARK IS COOL. Night's was #EFDBBE: six sevenths of
+// full daylight in a warm cream, laid flat over a near-white wall. Two things
+// were wrong with it and they are worth separating, because only one of them
+// was a number.
+//
+// The number: at six sevenths, midnight indoors rendered about a seventh dimmer
+// than noon, evenly, corner to corner. It did not read as night.
+//
+// The idea: it was warm because this tint WAS the lamplight. With no real
+// lights in the room, painting the average of "somebody has the lamps on" over
+// every surface was the only way to say it. There are two real lights in here
+// now, with falloff and a facing term, so the warmth has somewhere better to
+// live — and the moment it moved there, keeping a warm ambient as well meant
+// saying it twice and leaving the lamps nothing to add.
+//
+// So the rule is now the one the reference art uses: the room's own colour is
+// what is left when no lamp reaches — dark, desaturated and slightly COOL,
+// because unlit corners are not warm, they are simply unlit. Every warm thing
+// in the room is a lamp or something a lamp is touching. That is what makes a
+// lantern read as the only light source in the place rather than as the
+// brightest part of an already-lit room.
+//
+// Its partner is ROOM_LIT in scene.js, which is what the lamps put back. The
+// two are one setting in two files: turn this down without turning that up and
+// the room is merely gloomy; turn that up without this down and it is a lit box
+// again.
 //
 // `haze` is how much of the far range is AIR rather than range — 0 leaves the
 // hills their own colour, 1 dissolves them into the sky at their feet. Only the
@@ -158,8 +198,17 @@ export const LOOK = {
     disc: '#F4F1DC', discAt: [300, 238], discR: 15, glow: 0.22, stars: true,
     swatch: '#012F4E',
     cloud: '#0A3352', cloudAlpha: 0.30,
-    ambient: ['#9FB2DE', 0.88], dir: ['#C3D0F5', 0.38],
-    tint: '#A2B3D8', tintIn: '#EFDBBE', lamps: 1, haze: 0.76,
+    // The ambient comes DOWN with the tint below and the directional does not,
+    // which is the whole shape of this hour. `ambient` is the only thing lighting
+    // the half of the planet the moon has turned away from, and `tint` is what
+    // everything standing on it wears; the two have to move together or the
+    // grass ends up brighter than the trees growing out of it. `dir` staying
+    // where it is means the moon keeps picking out the sides of things that face
+    // it — against a darker ground that reads as more moonlight, not less,
+    // because what makes a moon read is the gap between its side and the other
+    // one.
+    ambient: ['#9FB2DE', 0.60], dir: ['#C3D0F5', 0.38],
+    tint: '#75819C', tintIn: '#5C626B', lamps: 1, haze: 0.76,
     mirror: 0.58, glint: 0.40,
   },
 };

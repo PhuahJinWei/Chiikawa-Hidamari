@@ -170,13 +170,25 @@ function press(th, pass) {
 // It also means the boil can never be felt, only seen: `pickGround` raycasts the
 // ground and nothing here, so a wandering line cannot move a tap.
 //
-// How far the pen wanders between passes, in radians on the sphere. SMALL, and
-// bounded by something real rather than by taste: the line has to go on covering
-// the water's own edge at its thinnest, or a pass would open a hairline of bare
-// body along the shore. Half the line at its thinnest is RING_W * 0.65, and this
-// sits comfortably inside that. It works out at about a third of the line's
-// width, which is what a boil actually looks like — you see the line breathing,
-// not the pond changing shape.
+// How far the pen wanders between passes, in radians on the sphere. Measured on
+// the built geometry it moves the line about 0.019 world units against a stroke
+// 0.054 across — a third of its own width, which is what a boil looks like: the
+// line breathing, not the pond changing shape.
+//
+// WHAT ACTUALLY BOUNDS IT is the BED, not the line's own width, and the first
+// draft of this note had that wrong. The obvious worry is that a wandering line
+// stops covering the water's edge and opens a hairline of something bare — and
+// it does stop covering it: the inner edge strays as far as 1.0027 of the rim on
+// the lake and 1.0055 on the small pond. What is under there is the bed, painted
+// the water's own colour out to BED_OVER (1.015), so what shows is water where
+// water should be. The invariant that matters is therefore `inner edge < 1.015
+// of rim`, and it holds with about three times the headroom.
+//
+// THE SMALL POND IS THE BINDING CASE, because this and RING_W are absolute
+// angles while the ponds are not the same size: the same wander is a bigger
+// fraction of a smaller rim. Anything that raises either number should be
+// checked against the pond rather than the lake, which is the one that looks
+// fine right up until it doesn't.
 const RING_BOIL = 0.0016;
 
 // How far the pen lifts in a different PLACE each pass, in turns. Small on
@@ -490,7 +502,11 @@ export function lakeGeo(R, lake, scale = 1, lift = LIFT, flat = null) {
 // The ticks ride in the same buffers as separate quads. They are the same pen
 // on the same drawing and there is no reason to spend a second draw call on
 // them.
-function ringGeo(R, lake) {
+//
+// `pass` is which of the boil's drawings this is — see RING_BOIL. Everything
+// that makes this pass differ from the others is driven from the one phase it
+// derives, so there is exactly one place to look when the shore is misbehaving.
+function ringGeo(R, lake, pass = 0) {
   const C = new THREE.Vector3();
   const E = new THREE.Vector3();
   const N = new THREE.Vector3();
@@ -501,6 +517,22 @@ function ringGeo(R, lake) {
   const pos = [];
   const idx = [];
   const d = new THREE.Vector3();
+  const phase = pass * PASS_STEP;
+
+  // WHERE THIS PASS PUT THE LINE, as a multiple of RING_BOIL to be laid along
+  // the rim's normal. Three harmonics again, and all three periodic in a whole
+  // turn so the ring still closes on itself — a wobble that did not come back
+  // to where it started would leave a step in the shore at theta zero.
+  //
+  // The wavelengths are LONG (four, seven and eleven per lap) because that is
+  // what redrawing looks like: a hand misses a curve by a little over a long
+  // sweep. Short wavelengths here would be the line vibrating, which is a
+  // different and much worse thing.
+  const wander = (th) => (
+    Math.sin(th * 4 + phase * 1.7) * 0.52
+    + Math.sin(th * 7 - phase * 2.3) * 0.31
+    + Math.sin(th * 11 + phase * 3.1) * 0.17
+  );
 
   // A bearing's point on the shore, in radians on the sphere.
   const shore = (th) => {
@@ -543,7 +575,11 @@ function ringGeo(R, lake) {
   const ink = (turn) => {
     let k = 1;
     for (const [at, half] of RING_GAPS) {
-      const off = Math.abs(((turn - at + 0.5) % 1 + 1) % 1 - 0.5);
+      // Where this pass happened to lift — see GAP_DRIFT. Keyed off the gap's
+      // own position as well as the phase, so the three breaks drift
+      // independently rather than sliding round the pond in convoy.
+      const here = at + Math.sin(phase * 1.9 + at * 31) * GAP_DRIFT;
+      const off = Math.abs(((turn - here + 0.5) % 1 + 1) % 1 - 0.5);
       if (off >= half) continue;
       const t = off / half;
       const s = t <= GAP_CORE ? 0 : (t - GAP_CORE) / (1 - GAP_CORE);
@@ -556,9 +592,16 @@ function ringGeo(R, lake) {
     const turn = c / RING_COLS;
     const th = turn * TAU;
     const [u, v, nx, ny] = frame(th);
-    const w = RING_W * Math.max(0.25, press(th)) * ink(turn);
-    put(u - nx * w, v - ny * w);
-    put(u + nx * w, v + ny * w);
+    // The pen off the rim by this pass's wander, then the ribbon laid either
+    // side of where it ended up. The NORMAL is the rim's own, un-wandered: the
+    // offset is small and smooth, so borrowing the true curve's normal costs
+    // nothing and saves differentiating a curve that only exists to be drawn.
+    const off = wander(th) * RING_BOIL;
+    const cu = u + nx * off;
+    const cv = v + ny * off;
+    const w = RING_W * Math.max(0.25, press(th, phase)) * ink(turn);
+    put(cu - nx * w, cv - ny * w);
+    put(cu + nx * w, cv + ny * w);
   }
   for (let c = 0; c < RING_COLS; c++) {
     const i = c * 2;
@@ -601,10 +644,17 @@ function ringGeo(R, lake) {
       const [u, v, nx, ny] = frame(th);
       // Out past the line by its own width and a little air, then leaned off
       // radial — the reference's ticks sit at a slant, not on spokes.
-      const cu = u + nx * (RING_W + TICK_OUT);
-      const cv = v + ny * (RING_W + TICK_OUT);
-      const cos = Math.cos(tick.tilt);
-      const sin = Math.sin(tick.tilt);
+      //
+      // THE LINE'S OWN WANDER IS ADDED IN, so the ticks travel with the stroke
+      // they belong to instead of standing still while it breathes past them.
+      // They lean a little differently each pass too: they are three flicks of
+      // the same wrist, and the wrist is what is being redrawn.
+      const off = wander(th) * RING_BOIL;
+      const cu = u + nx * (RING_W + TICK_OUT + off);
+      const cv = v + ny * (RING_W + TICK_OUT + off);
+      const lean = tick.tilt + Math.sin(phase * 3.3 + j * 1.7) * 0.11;
+      const cos = Math.cos(lean);
+      const sin = Math.sin(lean);
       stroke(cu, cv, nx * cos - ny * sin, nx * sin + ny * cos, TICK_LEN[j], TICK_W);
     }
   }
@@ -634,7 +684,7 @@ function glintTexture() {
 }
 
 // The wave lines' three drawings, shared by every pond the same way — see
-// NAMI_FRAMES in art.js for why there are three of one picture. driftGlints
+// NAMI_FRAMES in art.js for why there are three of one picture. driftWater
 // flips which one is worn.
 let NAMI_TEX = null;
 
@@ -667,8 +717,19 @@ export function buildLake(R, lake) {
   // painted first and then covered by the pond it outlines. This was free while
   // the ink lived underneath and wanted to go first; a line drawn ON the water
   // has to join the queue the water is in.
+  // Three drawings of the line, one per pass of the boil — see RING_BOIL. Built
+  // here rather than shared between ponds like the sheets above are, because a
+  // ring is the shape of ITS OWN lake and there is nothing to share.
+  //
+  // Cheap enough not to think about: a pass is under five hundred vertices, so
+  // all three for both ponds come to about forty kilobytes of static buffer,
+  // uploaded once. The alternative — rewriting one buffer every boil step — is
+  // more code and more work per frame to save memory nobody is short of.
+  const ringGeos = [];
+  for (let f = 0; f < NAMI_FRAMES; f++) ringGeos.push(ringGeo(R, lake, f));
+
   const ink = new THREE.Mesh(
-    ringGeo(R, lake),
+    ringGeos[0],
     new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false }),
   );
 
@@ -765,6 +826,7 @@ export function buildLake(R, lake) {
     meshes: [ink, body, nami, glint],
     glintMat: glint.material,
     namiMat: nami.material,
+    ringGeos,
     // Handed out ready-made rather than rebuilt from lat/lon by every caller.
     // Whoever asks how near a pond is asks every frame, for everybody.
     centre,
@@ -844,21 +906,28 @@ const _sky = new THREE.Color();
 const _deep = new THREE.Color(PAL.waterDeep);
 const _ink = new THREE.Color(PAL.waterInk);
 
-// The surface animates: the glints crawl, and the wave lines boil and creep.
-// One clock for every pond on the planet, driven by scene.js's update, because
-// two ponds sparkling out of step with each other would be two weathers.
+// The surface animates: the glints crawl, and the wave lines and the shore both
+// boil. One clock for every pond on the planet, driven by scene.js's update,
+// because two ponds sparkling out of step with each other would be two weathers.
 //
-// The map offset rather than the UVs: the geometry never changes and the
-// texture is already set to repeat, so this is a few floats a frame against
+// ONE PASS NUMBER DRIVES BOTH BOILS, deliberately. A cel is redrawn all at once,
+// so an animator who reboils the water reboils the shore in the same breath; two
+// clocks here would be two hands working on one drawing, which is a thing the
+// eye catches even when it cannot say why.
+//
+// The map offset rather than the UVs: the geometry never changes and the texture
+// is already set to repeat, so the crawl is a few floats a frame against
 // rewriting a buffer.
 //
-// The boil is a map SWAP, guarded so it costs a comparison on the frames it
-// does nothing, which is nearly all of them. The offset is then written to
-// whichever drawing is live — all three share one drift, so a flip never
+// Both boils are SWAPS — a texture for the waves, a whole geometry for the
+// shore — and both are guarded, so on the frames that change nothing (nearly all
+// of them) this costs two comparisons. The drift offset is then written to
+// whichever wave drawing is live; all three share one drift, so a flip never
 // teleports the lines it is wiggling.
-export function driftGlints(ponds, seconds) {
+export function driftWater(ponds, seconds) {
   const nami = namiTextures();
-  const frame = nami[Math.floor(seconds / NAMI_STEP) % nami.length];
+  const pass = Math.floor(seconds / NAMI_STEP) % NAMI_FRAMES;
+  const frame = nami[pass];
   for (const p of ponds) {
     p.glintMat.map.offset.set(
       (seconds * GLINT_DRIFT) % 1,
@@ -871,5 +940,7 @@ export function driftGlints(ponds, seconds) {
       -((seconds * NAMI_DRIFT) % 1),
       (seconds * NAMI_DRIFT * 0.31) % 1,
     );
+    const ring = p.ringGeos[pass];
+    if (p.ink.geometry !== ring) p.ink.geometry = ring;
   }
 }

@@ -1081,12 +1081,38 @@ with rounded tips — what a small stroke of a round nib actually leaves.
 **The wave lines BOIL rather than travel.** Hand-drawn water doesn't slide
 anywhere; it is redrawn, and no two passes of a hand agree. So `paintNami`
 draws the same sheet three times — layout seeded identically, the pen's wobble
-seeded by the frame — and `driftGlints` flips between the drawings a little
+seeded by the frame — and `driftWater` flips between the drawings a little
 over twice a second. Every line wiggles in place and nothing travels, plus a
 creep of the whole sheet at half the glints' rate on another bearing, so the
 two kinds of mark belong to slightly different currents. The nami mesh sits at
 renderOrder 4.7, between the fish (4.5) and the glints (5): a wave line passes
 OVER a fish, which is the surface being between you and the animal.
+
+**The shoreline boils with them, on one clock.** `ringGeo` takes a pass number
+and builds three drawings of the line — three long-wavelength harmonics (four,
+seven and eleven per lap, all periodic in a whole turn so the ring still closes)
+wander the pen off the rim, the pressure term gains a per-pass component, the
+gaps slide a little, and the ticks travel with the stroke they belong to and
+lean slightly differently. `driftWater` swaps the whole geometry, guarded, so on
+the frames that change nothing it costs a comparison. One pass number drives both
+boils deliberately: a cel is redrawn all at once, and two clocks would be two
+hands working on one drawing.
+
+**Only the ink moves.** This is the design constraint, not a detail. `lakeRim` is
+the one shape the mesh, `inLake`, `lakeReach`, the bed and every fish all ask, so
+a boil that wobbled the *rim* would wobble where you can walk, where you can cast
+and where a fish is turned back — invisibly, and none of it wanted. The rim is
+untouched; the pen is offset from it per pass. It also can't be felt, only seen:
+`pickGround` raycasts the ground and nothing here.
+
+What bounds the wander is the **bed**, not the line's own width, and the first
+draft of that note was wrong. A wandering line does stop covering the water's
+edge — the inner edge strays to 1.0027 of the rim on the lake, 1.0055 on the
+small pond — but what's under there is the bed, painted the water's own colour
+out to `BED_OVER` (1.015). So the invariant is `inner edge < 1.015 of rim`, and it
+holds with about 3× headroom. **The small pond binds it**, because `RING_BOIL` and
+`RING_W` are absolute angles while the ponds aren't the same size; raise either
+and check against the pond, not the lake.
 
 **The bed is one flat fill of the water's own colour.** It was a sand band round
 a mud middle, and the sand — pushed past the water's ink by `BED_OVER` plus the
@@ -1681,13 +1707,37 @@ the surface you belong to and it does not move while you are above it, so the
 guarantee survives the rewrite — measured, a hop on flat ground spends zero
 frames outside first person, peaks where it always did, and lands back at zero.
 
-Three margins, and they are three different ideas that all look like slack:
+**The snap is instant and the picture is not**, which is the difference between
+a mantle and a teleport. Catching a lip moves your feet by up to the whole
+`mantle` in one frame, and stepping up a kerb moves them by the kerb; the
+`stand`-moves-`alt` cancellation above only holds when the feet were already
+level with the ground they arrive on, which is true of a fall and false of a
+catch. So the leftover is banked as `_pull` and given back over `pullMs`. The
+eye does not move at all on the frame of the catch, and what plays out instead
+is a short pull-up onto the surface.
+
+Measured against the eye's own fastest honest movement — 0.065 in a frame, at
+the bottom of a hop — a table catch used to move it 0.224, three and a half
+times as fast as anything the arc ever does. It is now 0.065: the largest
+single-frame movement anywhere in the vertical model is the jump's own takeoff.
+Traced through a catch, the surface under you goes from 0.30 to 0.72 while the
+camera moves 0.056, in line with the 0.049–0.056 steps it was already taking.
+
+Four margins, and they are four different ideas that all look like slack:
 
 | | what it is | where it applies |
 | --- | --- | --- |
 | `stepUp` | the kerb you walk up without jumping | on the ground |
 | `mantle` | the ledge you catch while rising | going up only |
 | `ledge` | the overhang you keep before falling | standing, and coming down |
+| `pullMs` | how long the eye takes to catch up | after any of the above moves it |
+
+`stepUp` is measured against what is actually in the room rather than picked as
+a fraction of anything. At 0.25 it sounded ankle-high and cleared nothing at
+all — the cushions build to 0.28 and 0.30, so every standable thing in the world
+needed a hop and the kerb rule was dead code. The next things up are the box at
+0.38 and the smallest stump at 0.36, so 0.32 separates "step onto the bedding"
+from "climb onto the furniture" with room either side.
 
 The asymmetry on `mantle` is the one worth knowing. Granted on the way *down*
 as well, a hop taken while merely pressed against a table climbs onto it —

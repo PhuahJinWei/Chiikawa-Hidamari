@@ -32,7 +32,7 @@ import {
   setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, lakeReach,
   perchAlongRay,
 } from './sphere.js';
-import { buildLake, driftGlints, waterHour } from './water.js';
+import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
 import { Hand } from './hand.js';
 
@@ -237,7 +237,13 @@ const NIGHT_ART = { house: 'houseNight' };
 // be careful with: it lands on the drawing itself, and much past 0.3 it stops
 // looking like a lit doorway and starts bleaching that whole side of the dome.
 const LAMP_POOL = { reach: 2.15, spill: 1.35, alpha: 0.52 };
-const LAMP_BLOOM = { alpha: 0.28 };
+// `near` and `far` are where the glow in the air fades out as you walk up to
+// it — see _syncBloom. `near` is inside the doorstep (3.8) on purpose, so the
+// beacon is fully gone by the time you are close enough to look through the
+// door rather than at it; `far` is about a house-and-a-half further out, which
+// is far enough that the fade happens while the building is still a shape on a
+// hillside rather than a thing you are walking into.
+const LAMP_BLOOM = { alpha: 0.28, near: 3.4, far: 11.0 };
 
 // ...and what the same light adds to anything standing in it, at the centre.
 // Below the pool's alpha on purpose: the pool is a decal seen at a grazing
@@ -245,6 +251,17 @@ const LAMP_BLOOM = { alpha: 0.28 };
 // goes on a card face-on to you at full strength. Matching the two numbers
 // makes the grass brighter than the ground it grows out of.
 const LAMP_LIT = { strength: 0.24 };
+
+// The falloff a lamp OUT IN THE OPEN dies away with, fitted rather than
+// guessed: paintLampGlow's gradient reads 0.30 of full at 0.40 of the radius
+// and 0.08 at 0.68, and (1-t)^2.4 gives 0.30 and 0.07. Anything standing in
+// that pool therefore brightens at the same rate as the pool under it — two
+// falloffs that disagree read as a sprite that does not belong to the light it
+// is in.
+//
+// A number rather than a literal in the shader because it is now per LIGHT
+// (see uLampFall): the room's lamps lie on a different stamp and answer 2.0.
+const LAMP_FALL = 2.4;
 const LAMP_COLOR = '#FFD489';
 
 // ...and what the SUN adds to a surface turned toward it, at full noon.
@@ -281,13 +298,25 @@ const ROOM_LIGHT = { lantern: true, bulb: true };
 // What a room light adds to the surfaces around it, and how fast that dies off
 // with distance.
 //
-// `strength` is above the house's 0.24 rather than below it, which is the
-// opposite of what "a small lamp in a small room" suggests and is right for a
-// reason that has nothing to do with the lamp. The house's term lands on cards
-// standing out on open grass under a whole sky's worth of ambient; this one
-// lands on furniture in a shut room where the lamp is very nearly the only
-// light there is. The number is what it takes to read as lit against the
-// interior's own warm tint, which has already lifted everything in there.
+// `strength` is well above the house's 0.24, which is the opposite of what "a
+// small lamp in a small room" suggests and is right for a reason that has
+// nothing to do with the size of the lamp. The house's term lands on cards out
+// on open grass under a whole sky's worth of ambient; this one lands on
+// furniture in a shut room after dark, where the lamp is not the main light —
+// it is very nearly the ONLY light.
+//
+// It was 0.30 while night's tintIn still stood at six sevenths of daylight, and
+// the two were fighting: a flat wash held the whole room up and the lamps had a
+// tenth of the picture left to argue with. Measured, switching both room lights
+// off moved the room by about 20 of 190 — a light source you could turn off
+// without much happening, which is the definition of one that is not working.
+//
+// The wash is gone (see tintIn in daylight.js) and this is what replaces it.
+// The two numbers are a pair and have to be read together: this is how far a
+// lamp lifts a surface it is right next to, back to somewhere inviting, and the
+// tint is the dark everything falls to once out of reach. Move one without the
+// other and the room goes flat again — dull if this is too low, and back to an
+// evenly lit box if it is too high.
 //
 // `falloff` is 2.0 and NOT the house's 2.4, and the difference is measured
 // rather than chosen. The two pools are painted by different stamps: the wall's
@@ -299,7 +328,50 @@ const ROOM_LIGHT = { lantern: true, bulb: true };
 // term follows the stamp it shares a floor with. A lamp whose pool and whose
 // light on the furniture disagree about how far it reaches reads as two
 // different lamps in one place.
-const ROOM_LIT = { strength: 0.30, falloff: 2.0 };
+const ROOM_LIT = { strength: 0.72, falloff: 2.0 };
+
+// How much of the room's darkness the CAST are excused from — see the lift in
+// _syncInterior. 0 would have them wear the room like the furniture does; 1
+// would leave them at full daylight in a black room, cut out and pasted on.
+//
+// Better than half, which is a lot, and the reference is why: in it a character
+// sits in a cave lit by one lantern and is drawn very nearly white. The room is
+// allowed to go dark around them precisely BECAUSE they do not go with it —
+// take the cheat away and the honest thing to do would be to keep the room
+// bright enough to see faces in, which is the flat lit box this whole rework
+// exists to get out of.
+// `out` is the same cheat under the open sky, and it is smaller because the
+// dark out there is a different dark: moonlight rather than the absence of a
+// lamp, and it falls on the grass as well, so nobody is being singled out by it.
+//
+// It exists at all because of a number. When night's outdoor tint came down to
+// match the room, Chiikawa measured 38.5% against grass at 41% — a white
+// character DARKER than the hillside behind them, with their brightest pixel
+// landing on exactly the same value as the field. That is not a dim character,
+// it is a missing one.
+//
+// Both of these are free by day and need no guard: at noon the tint is #FFFFFF
+// and lifting white toward white changes nothing. They only bite once the hour
+// has something to lift out of.
+const CAST_LIFT = { in: 0.58, out: 0.34 };
+
+// How much of the house's pool alpha a lamp INDOORS lays on the boards.
+//
+// It was 0.62 and is written down here rather than typed twice, because it is
+// typed twice — once on the pool's own material and once on the record that
+// dims it — and the two silently disagreeing is a lamp whose light does not
+// match its own switch.
+//
+// Down to 0.34 for a reason that is really about the lantern's reach. These
+// stamps are ADDITIVE and they overlap: the bulb's pool is centred on the
+// middle of the floor and the lantern's, now seven of its own heights across,
+// covers most of the same boards. Two of them at the old alpha summed past
+// white over the whole middle of the room — measured at #F8E9D7 corner to
+// corner, which is not a lit floor, it is a floor with its grain washed off.
+// Halving it lets two lamps overlap and still leave the boards looking like
+// boards, and one lamp alone — which is the scene the reference actually shows
+// — lands where it did before.
+const ROOM_POOL = 0.34;
 
 // The tapped-spot marker. `lift` clears the surface by more than a quad this
 // wide sags away from it — 1.16 across a globe of radius 8 drops 0.021 at the
@@ -388,6 +460,18 @@ const _cB = new THREE.Color();
 // mid-lerp at the point it runs.
 const _cH = new THREE.Color();
 const _cT = new THREE.Color();
+// ...and a fourth, for the lamp glass in _syncInterior. The lean above it has
+// already spent _cB by the time the loop runs.
+const _cC = new THREE.Color();
+// Where the house is, for the bloom's distance fade — see _syncBloom. Its own
+// scratch because it is read in update(), where the shared ones are all busy.
+const _bloomAt = new THREE.Vector3();
+// Where a room light is standing, as a surface direction, so it can be asked
+// which side of the wall it is on — see the roomLights loop in update().
+const _lightDir = new THREE.Vector3();
+// What "no tint at all" multiplies to. A lamp alight is lifted the whole way to
+// this, which is the same as not being tinted — see `emits`.
+const WHITE = new THREE.Color(0xffffff);
 
 // Where a pixel of the sky texture actually sits, as a direction in the sky's
 // own frame — which `_aimSky` then turns to stand over wherever you are.
@@ -820,6 +904,14 @@ export class Globe {
     // and somebody walking through the front door is not the hour.
     this._lampAt = 0;
     this._occupancy = 1;
+    // ...and how much of that is actually getting OUT of the house, which is a
+    // different question and the one everything outdoors reads. See
+    // _syncHouseLit. Starts dark: nothing is lit until the room says so.
+    this._houseLit = 0;
+    // The room's total reach, for weighting each lamp's share of that. Summed
+    // once as the lights are built, because it cannot change afterwards — a
+    // lamp can be switched off or carried away, but its reach is its own.
+    this._roomReach = 0;
 
     // Everything overhead lives in one group, and that group belongs to you
     // rather than to the world: `_aimSky` turns it every frame so its axis is
@@ -882,15 +974,34 @@ export class Globe {
     // rather than nudged. Stood at eye height on a planet this small the limb is
     // 34.4 degrees BELOW level — see the note in CONFIG.camera — and on a dome
     // of this radius, seen from a camera 9.7 out from the middle, that lands at
-    // about 122 degrees of polar angle. So the band runs from 104 to 130: the
-    // hills occupy the sky above the limb, and everything past it is buried
-    // behind the planet by the depth test, the way a real range has its feet cut
-    // off by the near hillside.
+    // 121.7 degrees of polar angle. The hills occupy the sky above that;
+    // everything past it is buried behind the planet by the depth test, the way
+    // a real range has its feet cut off by the near hillside.
+    //
+    // FROM at 107 puts that limb at row 0.567 of the sheet, which is INSIDE the
+    // treeline — SKYLINE.treeTop is 0.50 — so what you get standing still is a
+    // row of crowns breaking the horizon with the rest of the wood buried, the
+    // way a distant treeline actually reads. It ran at 104 and then 105.1, both
+    // of which held the whole wood above the limb and stood it on a strip of
+    // flat green.
+    //
+    // THE HOP IS WHY IT CAN GO THIS LOW, and the arithmetic belongs here. A hop
+    // is 0.60, which takes the camera to 10.3, the limb to 39.0 degrees down and
+    // 126.3 on the dome — row 0.744. Every one of those 4.6 degrees uncovers
+    // sheet that was behind the planet a moment ago, and moving the band moves
+    // the limb's row with it, so no value of FROM avoids the reveal. What fills
+    // it is SKYLINE.treeBase, which is set past 0.744 for exactly this reason:
+    // the wood goes on being wood for the whole of the hop. See the note on it
+    // in art.js.
+    //
+    // The band's foot at 133 is the other limit: it clears the hop apex by 6.7
+    // degrees, near enough 0.9 of altitude, so hopping off anything much over
+    // knee height would still run out of sheet and show sky under the range.
     //
     // Transparent and depth-tested for that reason, and drawn after both sky
     // domes: `skyA` does not depth-test at all, so anything sharing the opaque
     // pass with it would be painted straight over.
-    const HORIZON_FROM = 104 * (Math.PI / 180);
+    const HORIZON_FROM = 107.0 * (Math.PI / 180);
     const HORIZON_SPAN = 26 * (Math.PI / 180);
     // Repeat rather than clamp, which is what lets the filter sample ACROSS the
     // wrap. The band's shapes are periodic by construction, but canvas has no
@@ -1290,6 +1401,31 @@ export class Globe {
       // masonry as the lamp is, and there is nothing between you and it.
       uLampInner: { value: new Array(N).fill(0) },
       uLampLevel: { value: new Array(N).fill(0) },
+      // WHICH SIDE OF THE WALL THIS LAMP IS ON: 0 out on the grass, 1 under the
+      // roof. It replaces what used to be a split in the loop bounds, and the
+      // reason it had to is a lamp somebody can pick up.
+      //
+      // The old arrangement gave the outdoor materials slots 0..NOUT and the
+      // indoor ones NOUT..N, so which world a light belonged to was decided
+      // once, at build, by where its slot fell. That was true of every light in
+      // the app right up until the lantern became a thing you could carry — and
+      // then it was false in the worst way: carrying it outdoors lit precisely
+      // nothing, because no material out there had a loop that could reach its
+      // slot. Measured at a delta of 0.000 with the lamp at the player's feet.
+      //
+      // Now every loop walks every light and asks this instead. A lamp crossing
+      // the threshold changes one number and the whole world starts or stops
+      // seeing it. Nothing has to know that it is being carried, or by whom —
+      // see where update() sets it, which only asks where the light IS.
+      uLampIn: { value: new Array(N).fill(0) },
+      // ...and the shape of its own falloff, which used to be baked into
+      // whichever loop was reading it — 2.4 outdoors, 2.0 in the room. That is
+      // a property of the LAMP, not of the surface it lands on: the two figures
+      // are fitted to two different painted stamps (see paintLampGlow and
+      // paintItemGlow), and a lantern carried onto the grass takes its own pool
+      // with it. Held per light so it goes on agreeing with that pool wherever
+      // the pool goes.
+      uLampFall: { value: new Array(N).fill(LAMP_FALL) },
       // ONE colour for every lamp in the app, and it holds only because the
       // two ends were matched by hand: LAMP_COLOR here and PAL.lampGlow, which
       // the room's pools are drawn in, are both #FFD489. That match was a note
@@ -1325,6 +1461,8 @@ export class Globe {
       uniform float uLampReach[${N}];
       uniform float uLampInner[${N}];
       uniform float uLampLevel[${N}];
+      uniform float uLampIn[${N}];
+      uniform float uLampFall[${N}];
       uniform vec3 uLampTint;
       uniform float uLampMix;
       varying vec3 vLampAt;
@@ -1357,7 +1495,11 @@ export class Globe {
     // falloff, a wall offset and an exponent that have to agree forever. `w` is
     // 1.0 in the card version, so `w * w` costs it nothing and the two loops
     // stay one loop.
-    const lampLoop = (facing) => `for ( int i = 0; i < ${NOUT}; i++ ) {
+    // It walks EVERY light and masks by `uLampIn`, where it used to walk only
+    // the outdoor slots. Same result for a lamp that stays where it was put,
+    // and the only arrangement under which one that gets carried out of the
+    // house can light the grass it is carried onto.
+    const lampLoop = (facing) => `for ( int i = 0; i < ${N}; i++ ) {
          vec3 toLamp = uLampAt[ i ] - vLampAt;
          float dist = length( toLamp );
          float t = ( dist - uLampInner[ i ] ) / uLampReach[ i ];
@@ -1365,13 +1507,18 @@ export class Globe {
     ? 'float w = clamp( dot( normalize( vLampN ), toLamp / max( dist, 0.0001 ) ) * 0.5 + 0.5, 0.0, 1.0 );'
     : 'float w = 1.0;'}
          outgoingLight += uLampTint * uLampLevel[ i ] * uLampMix * w * w
-           * pow( clamp( 1.0 - t, 0.0, 1.0 ), 2.4 );
+           * ( 1.0 - uLampIn[ i ] )
+           * pow( clamp( 1.0 - t, 0.0, 1.0 ), uLampFall[ i ] );
        }`;
     const LAMP_LOOP = lampLoop(false);
     const LAMP_ADD = `${LAMP_LOOP}
        #include <opaque_fragment>`;
 
-    const litByLamp = NOUT === 0 ? () => {} : (material) => {
+    // Guarded on N and not on NOUT any more: an outdoor surface can now be lit
+    // by a lamp that was built as a room light and carried out to it, so what
+    // decides whether the grass needs patching is whether the world has any
+    // lights at all.
+    const litByLamp = N === 0 ? () => {} : (material) => {
       material.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, this.lampUniforms);
         shader.uniforms.uLampMix = { value: 1 };
@@ -1432,15 +1579,20 @@ export class Globe {
     // fragments report as front-facing while their normals still point out into
     // the masonry. It is a uniform and not a #define so that every material in
     // here still shares one compiled program.
+    // Every light, masked by `uLampIn` — the mirror of the outdoor loop above,
+    // and the reason the room does not take the house's own porch light is now
+    // that the house's lamp says it is OUTDOORS rather than that its slot fell
+    // below a boundary. A carried lantern brought back through the door starts
+    // lighting the furniture again on the frame it crosses.
     const ROOM_ADD = `vec3 lampN = normalize( vLampN ) * uLampFace;
-       for ( int i = ${NOUT}; i < ${N}; i++ ) {
+       for ( int i = 0; i < ${N}; i++ ) {
          vec3 toLamp = uLampAt[ i ] - vLampAt;
          float dist = length( toLamp );
          float t = ( dist - uLampInner[ i ] ) / uLampReach[ i ];
-         float fall = pow( clamp( 1.0 - t, 0.0, 1.0 ), ${ROOM_LIT.falloff.toFixed(1)} );
+         float fall = pow( clamp( 1.0 - t, 0.0, 1.0 ), uLampFall[ i ] );
          float w = dot( lampN, toLamp / max( dist, 0.0001 ) ) * 0.5 + 0.5;
          w = clamp( w, 0.0, 1.0 );
-         outgoingLight += uLampTint * uLampLevel[ i ] * fall * w * w;
+         outgoingLight += uLampTint * uLampLevel[ i ] * uLampIn[ i ] * fall * w * w;
        }
        #include <opaque_fragment>`;
 
@@ -1494,7 +1646,7 @@ export class Globe {
     `;
     // The facing build of the loop, because everything this patcher touches has
     // a normal — that is the whole reason it exists. See lampLoop.
-    const SUN_ADD = `${NOUT ? lampLoop(true) : ''}
+    const SUN_ADD = `${N ? lampLoop(true) : ''}
        outgoingLight += uSunTint * ( uSunLevel * max( dot( normalize( vLampN ), uSunDir ), 0.0 ) );
        #include <opaque_fragment>`;
 
@@ -1540,16 +1692,27 @@ export class Globe {
     // `uLampLift` puts the surface back on the planet before the distance is
     // taken, and it is zero for everyone but the held item — see NO_LIFT and the
     // note where the hand is patched.
+    // ONE loop now, where it was two.
+    //
+    // It used to need two because the character's side and the light's side
+    // were different KINDS of thing: the character's was a live uniform and the
+    // light's was which half of the array its slot fell in, so the only way to
+    // pair them was to write both halves out and weight each. Now that a lamp
+    // carries its own side, both are numbers and the pairing is arithmetic —
+    // `mix` picks out the lights on the same side of the wall as the body, and
+    // is 1 only when the two agree.
+    //
+    // The truth table is the whole of it: outdoors reading an outdoor lamp is
+    // mix(1,0,0) = 1; outdoors reading a room lamp is mix(0,1,0) = 0; indoors
+    // reading a room lamp is mix(0,1,1) = 1; indoors reading the house's own
+    // porch light is mix(1,0,1) = 0, which is the flat wash this mask exists to
+    // keep off somebody standing in their own front room.
     const CAST_ADD = `vec3 lampFrom = vLampAt + uLampLift;
-       for ( int i = 0; i < ${NOUT}; i++ ) {
+       for ( int i = 0; i < ${N}; i++ ) {
          float t = ( distance( lampFrom, uLampAt[ i ] ) - uLampInner[ i ] ) / uLampReach[ i ];
-         outgoingLight += uLampTint * uLampLevel[ i ] * ( 1.0 - uLampSide )
-           * pow( clamp( 1.0 - t, 0.0, 1.0 ), 2.4 );
-       }
-       for ( int i = ${NOUT}; i < ${N}; i++ ) {
-         float t = ( distance( lampFrom, uLampAt[ i ] ) - uLampInner[ i ] ) / uLampReach[ i ];
-         outgoingLight += uLampTint * uLampLevel[ i ] * uLampSide
-           * pow( clamp( 1.0 - t, 0.0, 1.0 ), ${ROOM_LIT.falloff.toFixed(1)} );
+         float sameSide = mix( 1.0 - uLampIn[ i ], uLampIn[ i ], uLampSide );
+         outgoingLight += uLampTint * uLampLevel[ i ] * sameSide
+           * pow( clamp( 1.0 - t, 0.0, 1.0 ), uLampFall[ i ] );
        }
        #include <opaque_fragment>`;
 
@@ -2176,12 +2339,22 @@ export class Globe {
 
       // How far past the horizon this one's own height keeps it in view: a
       // tall tree clears the curve a little longer than a stump does.
+      //
+      // The FULL height, not the half. The last part of a prop to sink is its
+      // tip, and a tip at h stays in sight until the arc to it reaches
+      // acos(R/(R+h)) past the camera's own horizon — that is the whole
+      // formula, there is no half in it. It read `h * 0.5`, under which the
+      // house was culled while its top 0.8 units still stood above the limb:
+      // walk away and it vanished mid-view, walk back and it arrived the same
+      // way. A stump never showed the bug — its tip is close enough to its
+      // half — which is why it read as "tall things pop" and not as "the cull
+      // is early".
       this.sprites.push({
         anchor, holder, mesh, lit, shell, retired: !!shell,
         trunk: shell ? trunk : null, treeH: shell ? h : 0,
         normal: item.dir, small: size.small,
         type: item.type,
-        horizon: Math.acos(clampUnit(R / (R + h * 0.5))),
+        horizon: Math.acos(clampUnit(R / (R + h))),
         standoff: h / 2,
         seen: true,
       });
@@ -2227,6 +2400,13 @@ export class Globe {
     this.interior = null;
     this.tintIn = new THREE.Color('#FFFFFF');
     this._tintInBase = new THREE.Color('#FFFFFF');
+    // The room's colour as the CAST wear it, which is not the room's colour —
+    // see the lift in _syncInterior. Kept as its own value because two places
+    // write it: the hour, and stepping through the door.
+    this.tintCast = new THREE.Color('#FFFFFF');
+    // ...and the same for the cast out under the sky, which is a smaller lift
+    // off a different dark — see CAST_LIFT.
+    this.tintCastOut = new THREE.Color('#FFFFFF');
 
     // ------------------------------------------------------------ the house
     //
@@ -2888,7 +3068,7 @@ export class Globe {
               // window across open grass; this is one small lamp in a room
               // three strides across, and at 0.52 it read as a puddle of paint
               // rather than as light on boards.
-              opacity: lit ? LAMP_POOL.alpha * 0.62 : 0,
+              opacity: lit ? LAMP_POOL.alpha * ROOM_POOL : 0,
             }),
           );
           // Over the floor and its rug, under everything standing on it.
@@ -2899,7 +3079,17 @@ export class Globe {
           if (f.ceiling) pool.position.y = -rad;
           anchor.add(pool);
 
-          this.interiorTintables.push(pool.material);
+          // NOT a tintable, and this is the one place that rule is worth
+          // spelling out: the pool is LIGHT, not a surface. Everything in that
+          // list gets the room's own darkness multiplied into it, which is
+          // exactly right for boards and a rug and exactly backwards for the
+          // lamplight lying on them — it would dim the light by how dark the
+          // room it is lighting is. The house's pools out on the grass have
+          // never been tinted for the same reason; this one was, and it went
+          // unnoticed only because the old night tint was so close to white
+          // that multiplying by it did nothing. Against the real dark it halves
+          // them. Its colour is the lamp's, its brightness is the switch, and
+          // the hour has no say in either.
 
           // EVERY LIGHT IS COLLECTED NOW, not only the wired one.
           //
@@ -2929,7 +3119,7 @@ export class Globe {
               night: !!f.night,
               on: new THREE.Color(built.glow.on || PAL.lampLit),
               off: new THREE.Color(built.glow.off || PAL.lampGlass),
-              poolAlpha: LAMP_POOL.alpha * 0.62,
+              poolAlpha: LAMP_POOL.alpha * ROOM_POOL,
               // Only glass has these; a solid pane stays as opaque as it was
               // built, and `undefined` here is what says so.
               dim: built.glow.dim,
@@ -2960,6 +3150,15 @@ export class Globe {
             // held to, and what keeps a lamp and the patch of floor under it
             // agreeing about how far the light gets.
             this.lampUniforms.uLampReach.value[slot] = built.glow.reach;
+            // ...and its own falloff, fitted to the stamp its pool is drawn
+            // with rather than to the one the house's windows use. It travels
+            // with the lamp, so a lantern carried onto the grass goes on
+            // agreeing with the pool it is carrying. See uLampFall.
+            this.lampUniforms.uLampFall.value[slot] = ROOM_LIT.falloff;
+            // Indoors, which is where the config stands it. Not left at that,
+            // though — update() asks the light where it actually is on every
+            // frame, which is what lets it be picked up and taken outside.
+            this.lampUniforms.uLampIn.value[slot] = 1;
             const level = lit ? ROOM_LIT.strength : 0;
             this.lampUniforms.uLampLevel.value[slot] = level;
             // `night` is the switch, and it is the difference between the two
@@ -2975,8 +3174,12 @@ export class Globe {
             // working at all, and it is the only one of the three anybody can
             // change from inside the world. Both lists carry it and both read
             // it the same way — see _syncItemLights.
+            // Its share of the room's total light, for working out how much of
+            // it escapes to the windows — see _syncHouseLit.
+            this._roomReach += built.glow.reach;
             this.roomLights.push({
               at, slot, level, night: !!f.night, art: f.art, on: true,
+              reach: built.glow.reach,
               // A hung light has no bearing — see `ceiling` in the furniture
               // table — so nothing can stand near it or far from it, and
               // `lightNear` treats being in the room as being under it.
@@ -3098,7 +3301,10 @@ export class Globe {
       s.anchor.getWorldPosition(this.lampUniforms.uLampAt.value[s.lit.slot]);
     }
     for (const L of this.roomLights) {
-      L.at.getWorldPosition(this.lampUniforms.uLampAt.value[L.slot]);
+      const at = this.lampUniforms.uLampAt.value[L.slot];
+      L.at.getWorldPosition(at);
+      _lightDir.copy(at).sub(this.world.position).normalize();
+      this.lampUniforms.uLampIn.value[L.slot] = this.isInside(_lightDir) ? 1 : 0;
     }
 
     // A lamplit prop takes three slots rather than one. Its night card and its
@@ -3669,6 +3875,11 @@ export class Globe {
     _cA.set(a.tint);
     this.tint.copy(_cA).lerp(_cB.set(b.tint), t);
     for (const m of this.tintables) m.color.copy(this.tint);
+    // ...and the same hour as the CAST wear it out here, lifted clear of the
+    // moonlight so a white character does not sink into a moonlit hillside.
+    // See CAST_LIFT. Worked out here, beside the tint it comes from, because
+    // two places write it onto somebody: the hour, and the door.
+    this.tintCastOut.copy(this.tint).lerp(WHITE, CAST_LIFT.out);
 
     // The far range, which takes the tint and is then washed into the air —
     // see the note where it is built, and `haze` in daylight.js.
@@ -3723,7 +3934,7 @@ export class Globe {
     // below calls — the lamps are an input to the interior's colour.
     for (const ch of this.cast) {
       if (this.isInside(ch.dir)) continue;
-      for (const m of ch.tintables) m.color.copy(this.tint);
+      for (const m of ch.tintables) m.color.copy(this.tintCastOut);
     }
 
     this._setLamps(a.lamps + (b.lamps - a.lamps) * t);
@@ -3781,8 +3992,16 @@ export class Globe {
     // HOUR, and an early return here would leave it wearing yesterday's sky
     // through every fade that happens by daylight. The interior follows for
     // the same reason — its colour is part hour, part lamps.
-    this._syncGlow();
+    // The item lights first, and they carry the house's own glow along behind
+    // them — that is the order causation runs in here: the hour decides what is
+    // burning in the room, and what is burning in the room decides what the
+    // building shows to the world. See the tail of _syncItemLights.
     this._syncItemLights();
+    // ...and then the glow again REGARDLESS, because it is part hour and part
+    // lamps: _syncHouseLit only re-applies it when what is burning has changed,
+    // and a fade that moves only the sky's colour would otherwise leave the
+    // window frames wearing yesterday's.
+    this._syncGlow();
     this._syncInterior();
   }
 
@@ -3814,6 +4033,16 @@ export class Globe {
       _cA.copy(L.off).lerp(L.on, k);
       L.glass.userData.baseColor.copy(_cA);
       L.glass.color.copy(_cA);
+      // ...and how much of the room's darkness this glass is allowed to wear,
+      // which is the exact opposite of how lit it is. A bulb that is OFF is an
+      // object in the room and takes the room's colour like the table does; a
+      // bulb that is ON is the thing the room's colour is being made BY, and
+      // multiplying the dark into it would have the lamp dimmed by the gloom it
+      // exists to hold off. Read by _syncInterior, which owns the multiply.
+      //
+      // Taken off `k` rather than off the hour, so it follows the switch for
+      // free: turn the lamp off and its glass goes back to wearing the room.
+      L.glass.userData.emits = k;
       // HOW CLEAR it is, not only what colour. A bulb switched off is a shell
       // you see the room through; one alight is a body of light. Held at one
       // opacity it read as a solid ball every morning, which is the one hour a
@@ -3833,6 +4062,11 @@ export class Globe {
       const k = L.on ? (L.night ? this._lamps : 1) : 0;
       this.lampUniforms.uLampLevel.value[L.slot] = k * L.level;
     }
+    // ...and what the house shows to the world, which is downstream of every
+    // switch just written. Here rather than at the call sites so that flipping
+    // a light anywhere — the hour, a switch on the wall, a lamp carried out of
+    // the room — cannot reach the lamps without also reaching the windows.
+    this._syncHouseLit();
   }
 
   // The lights you can reach from where you are standing, nearest first.
@@ -3891,16 +4125,47 @@ export class Globe {
   _syncInterior() {
     if (!this._tintInBase) return;
     this.tintIn.copy(this._tintInBase);
+    // Softened from 0.7, because the room it is dimming is no longer bright.
+    // This lean and the occupancy both used to be needed to say "nobody home";
+    // now the lamps themselves already come up scaled by occupancy — see
+    // _setLamps, where `k` is the hour TIMES how full the house is — so an empty
+    // room is dim before this is applied at all. At the old weight, on the new
+    // tint, the two dimmings stacked and the empty room went to a hole in the
+    // hillside rather than to a dark room.
     const lean = (this._lampShape || 0) * (1 - this._occupancy);
-    if (lean > 0) this.tintIn.lerp(_cB.set('#5A5450'), lean * 0.7);
+    if (lean > 0) this.tintIn.lerp(_cB.set('#5A5450'), lean * 0.45);
     for (const m of this.interiorTintables) {
       const base = m.userData.baseColor;
+      // What a lamp's own glass wears, which is less of the room's dark the
+      // more of it is alight — see the note where `emits` is written. Lifted
+      // toward white rather than skipped outright, so a half-lit lamp mid-dusk
+      // is half in the room and half out of it instead of snapping between.
+      const emits = m.userData.emits;
+      if (emits > 0) {
+        _cC.copy(this.tintIn).lerp(WHITE, emits);
+        if (base) m.color.copy(base).multiply(_cC);
+        else m.color.copy(_cC);
+        continue;
+      }
       if (base) m.color.copy(base).multiply(this.tintIn);
       else m.color.copy(this.tintIn);
     }
+    // ...and whoever is home, who are allowed to CHEAT.
+    //
+    // The one place in the app where a thing deliberately refuses the light it
+    // is standing in, and it is not a fudge — it is what the reference art
+    // does. A character in a dark room is drawn very nearly as bright as a
+    // character in a lit one, because the eye is meant to be on them and a face
+    // that has gone the colour of the wall behind it has stopped being a face.
+    // Anime lights a cast by what matters rather than by where the lamps are.
+    //
+    // Held apart in `tintCast` rather than applied here, because the crossing
+    // in update() writes the same colour when somebody steps through the door
+    // and the two must not drift.
+    this.tintCast.copy(this.tintIn).lerp(WHITE, CAST_LIFT.in);
     for (const ch of this.cast) {
       if (!this.isInside(ch.dir)) continue;
-      for (const m of ch.tintables) m.color.copy(this.tintIn);
+      for (const m of ch.tintables) m.color.copy(this.tintCast);
     }
   }
 
@@ -3939,13 +4204,64 @@ export class Globe {
   //
   // The dark outline drawn into the same sheet takes the warmth too, and that
   // is fine — it is nearly black, so a warmer nearly-black is still a line.
+  //
+  // `over` eased from 1.28 to 1.10 when the room behind it went properly dark.
+  // The overdrive was doing a job that no longer needs doing: with a near-white
+  // interior there was nothing much to see through an opening, so the frame
+  // around it had to carry the whole "somebody is home" signal by clipping.
+  // What you look through now is a genuinely lamplit room against genuinely
+  // dark walls, and that is a better signal than a blown-out frame — at 1.28
+  // the frame was the brightest thing on the building and the light it promised
+  // was brighter than the light inside it.
   _syncGlow() {
     if (!this.houseGlow) return;
-    const over = 1.28;
+    const over = 1.10;
     _cA.copy(this.tint);
     _cB.set(LAMP_COLOR).multiplyScalar(over);
-    _cA.lerp(_cB, this._lamps);
+    _cA.lerp(_cB, this._houseLit);
     for (const m of this.houseGlow) m.color.copy(_cA);
+  }
+
+  // How much light is getting OUT of the house — which is what every warm thing
+  // on the OUTSIDE of it is drawn from: the glow on the window frames, the
+  // bloom over the door, the pool on the grass, and the warm this building adds
+  // to whatever is standing near it.
+  //
+  // It used to be `_lamps`, and `_lamps` is the HOUR: how late it is and
+  // whether anybody is home. Those were the same question right up until the
+  // lamps grew switches. After that, a house with every light turned off went
+  // on advertising itself across the planet, because nothing joined the switch
+  // on the wall to the glow at the window — measured with both lights off and
+  // the frames still sitting at #FFDD8F, a full warm yellow, on a dark house.
+  //
+  // So this asks the room what is actually burning in it. Weighted by reach,
+  // because the bulb lights the whole room and the lantern lights a corner, and
+  // a house showing only the lantern should show less at its windows than one
+  // with both lit.
+  //
+  // A lamp CARRIED OUT does not count. It is not in the room any more — it is
+  // lighting the grass directly by then, and counting it here as well would
+  // have the windows brighten as you walked the lantern away from them.
+  //
+  // `_lampShape` and not `_lamps` for the hour, deliberately: that is the dusk
+  // curve WITHOUT occupancy folded in. Occupancy already reaches the wired bulb
+  // through its own switch, and a lantern somebody left burning in an empty
+  // house should still show at the window — that is a house with a light on,
+  // whoever is or is not home.
+  _syncHouseLit() {
+    let lit = 0;
+    if (this._roomReach > 0) {
+      for (const L of this.roomLights) {
+        if (!L.on) continue;
+        if (this.lampUniforms.uLampIn.value[L.slot] < 0.5) continue;
+        lit += (L.night ? this._lamps : 1) * (L.reach / this._roomReach);
+      }
+    }
+    const v = (this._lampShape || 0) * Math.min(1, lit);
+    if (v === this._houseLit) return;
+    this._houseLit = v;
+    this._syncGlow();
+    for (const s of this.litProps) this._syncLamp(s);
   }
 
   // How lit the windows are for a reason that has nothing to do with the hour:
@@ -3967,11 +4283,14 @@ export class Globe {
   // eventually gets stuck on.
   _syncLamp(s) {
     const { night, bloom, pool, slot } = s.lit;
-    const on = s.seen && this._lamps > 0;
+    // Everything here is what ESCAPES the building, so all of it reads
+    // `_houseLit` — what is burning inside — rather than `_lamps`, which is
+    // only the hour. See _syncHouseLit.
+    const on = s.seen && this._houseLit > 0;
     // What this lamp adds to everything standing in it. Not gated on `seen`:
     // that flag is about the card for this house having gone over the horizon,
     // and a bush a few paces the near side of it is still stood in the light.
-    this.lampUniforms.uLampLevel.value[slot] = this._lamps * LAMP_LIT.strength;
+    this.lampUniforms.uLampLevel.value[slot] = this._houseLit * LAMP_LIT.strength;
     // A retired card never comes back, whatever the hour does. The house is
     // geometry now and its night sheet is kept only so this machinery still has
     // the object it expects to find; showing it would hang the old drawing in
@@ -3980,9 +4299,41 @@ export class Globe {
     bloom.visible = on;
     pool.visible = on;
     if (!on) return;
-    night.material.opacity = this._lamps;
-    bloom.material.opacity = this._lamps * LAMP_BLOOM.alpha;
-    pool.material.opacity = this._lamps * LAMP_POOL.alpha;
+    night.material.opacity = this._houseLit;
+    pool.material.opacity = this._houseLit * LAMP_POOL.alpha;
+    // The bloom's own brightness is not the lamps alone any more — it also
+    // depends on how far off you are standing. Written in one place so the
+    // per-frame fade and this cannot disagree.
+    this._syncBloom();
+  }
+
+  // The glow in the air over the door, faded out as you walk up to it.
+  //
+  // The bloom is a BEACON: it exists so a lit house reads as lit from the far
+  // side of the planet, and at that range it is the only thing doing that job.
+  // Up close it is a lie, and it became a measurable one the moment the room
+  // behind it went dark — the doorway measured 226 of luminance from outside
+  // against a room that averages 135. You saw a blazing warm opening, stepped
+  // through it, and arrived somewhere greyer than the door had promised.
+  //
+  // Fading it over the approach keeps the story and drops the lie: from across
+  // the meadow the glow is what draws you, and by the doorstep it is gone and
+  // what you are looking at is the actual lamplit room through an actual hole.
+  // Nothing about the room changes as you walk — only the overlay in front of
+  // it stops standing in for what is behind.
+  //
+  // Measured to the ANCHOR rather than to the door itself, which is a hair
+  // cruder and a good deal steadier: the door's own group swings round the
+  // shell as the building is placed, and a fade that moved with it would
+  // brighten and dim as you circled the house at a constant distance.
+  _syncBloom() {
+    const s = this.house;
+    if (!s || !s.lit) return;
+    const b = LAMP_BLOOM;
+    _bloomAt.copy(s.anchor.position).add(this.world.position);
+    const d = this.camera.position.distanceTo(_bloomAt);
+    const f = Math.max(0, Math.min(1, (d - b.near) / (b.far - b.near)));
+    s.lit.bloom.material.opacity = this._houseLit * b.alpha * f;
   }
 
   // Shove the loose furniture about with your feet. `at` is where you are
@@ -4482,7 +4833,33 @@ export class Globe {
     // lamp takes its light with it and nothing has to remember to move it —
     // the same arrangement its pool has always been in.
     for (const L of this.roomLights) {
-      L.at.getWorldPosition(this.lampUniforms.uLampAt.value[L.slot]);
+      const at = this.lampUniforms.uLampAt.value[L.slot];
+      L.at.getWorldPosition(at);
+      // ...and which side of the wall it is on THIS frame — see uLampIn.
+      //
+      // Asked of the light's own position rather than of whoever might be
+      // carrying it, and that is the whole reason this works. A lamp shoved
+      // across the floor by somebody's foot, set down out on the grass, or held
+      // in a hand that has just walked through the front door all arrive here
+      // by the same route: they are somewhere, and somewhere is either under
+      // the roof or it is not. Nothing has to tell the lighting that an item
+      // was picked up, and nothing can forget to.
+      _lightDir.copy(at).sub(this.world.position).normalize();
+      this.lampUniforms.uLampIn.value[L.slot] = this.isInside(_lightDir) ? 1 : 0;
+    }
+    // ...and the house's own glow, which the line above can change: carrying
+    // the lantern out through the door takes its light out of the room, and a
+    // room with nothing left burning in it should stop showing at its windows
+    // as you walk away with the reason they were lit. Cheap, and it early-outs
+    // on every frame where nothing moved.
+    this._syncHouseLit();
+
+    // The glow over the door, which fades as you walk up to it — see
+    // _syncBloom. Driven from here rather than from _syncLamp because it
+    // follows the CAMERA, and the camera moves on frames when the hour and the
+    // horizon both have nothing to say.
+    if (this.house && this.house.lit && this.house.lit.bloom.visible) {
+      this._syncBloom();
     }
 
     // Which lamps whatever you are holding reads, which is simply which lamps
@@ -4558,7 +4935,11 @@ export class Globe {
       const inside = this.isInside(ch.dir);
       if (inside === ch._wasInside) continue;
       ch._wasInside = inside;
-      const c = inside ? this.tintIn : this.tint;
+      // `tintCast` and not `tintIn`: indoors the cast are lifted clear of the
+      // room's dark — see CAST_LIFT. Outdoors there is no such cheat, because
+      // the night out there is moonlight rather than the absence of a lamp and
+      // nobody is being lost in it.
+      const c = inside ? this.tintCast : this.tintCastOut;
       for (const m of ch.tintables) m.color.copy(c);
       // Which set of lamps they read, switched on the same crossing and for the
       // same reason the colour is. A hard switch, matching the tint above: the
@@ -4596,11 +4977,12 @@ export class Globe {
       if (sh) sh.uniforms.uTime.value = t / 1000;
     }
 
-    // The light on the water crawling across it. Two floats a pond, and no
-    // shader at all — the glint sheet is set to repeat, so sliding its offset
-    // moves every highlight at once. One clock for both ponds, because two
-    // ponds sparkling out of step would be two different afternoons.
-    if (this.ponds) driftGlints(this.ponds, t / 1000);
+    // The surface of the water: the light crawling across it, and the boil that
+    // redraws the wave lines and the shore. No shader at all — the sheets are
+    // set to repeat so sliding an offset moves every highlight at once, and the
+    // boil is a swap. One clock for both ponds, because two ponds sparkling out
+    // of step would be two different afternoons.
+    if (this.ponds) driftWater(this.ponds, t / 1000);
 
     // ...and the fish under them, who mind where you are stood.
     if (this.fish) this.fish.update(t, anchor);

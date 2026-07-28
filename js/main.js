@@ -415,7 +415,10 @@ let waterQuietUntil = 0;
 //
 // A pinch is therefore two *camera* fingers, never the pad plus one.
 const pointers = new Map();
-const pad = { id: null, travel: 0, lastX: 0, lastY: 0 };
+// `grab` is a loose piece that was under the finger when the pad took it — see
+// onDown. The pad keeps hold of it so that letting go without having pushed can
+// mean "pick that up" rather than nothing at all.
+const pad = { id: null, travel: 0, lastX: 0, lastY: 0, grab: null };
 const look = { id: null, mode: null, ch: null, lastX: 0, lastY: 0, travel: 0 };
 const pinch = { a: null, b: null, start: 0 };
 
@@ -853,18 +856,31 @@ function onDown(e) {
     return;
   }
 
-  // A reachable loose piece takes the touch from the pad, exactly as a
-  // character does and for the identical reason. The pad owns the whole
-  // lower-left quadrant, which is precisely where a bear on the floor at your
-  // feet projects — without this, the one thing you are standing over is the
-  // one thing you cannot pick up.
+  // A reachable loose piece under the finger. The pad owns the whole lower-left
+  // quadrant, which is precisely where something on the floor at your feet
+  // projects — so the two want the same touch and one of them has to give.
   const grabbable = (!hit && rig.isFirstPerson && !inventory.heldUnique)
     ? globe.pickLoose(raycaster, rig.anchor, UNIQUE_ARTS) : null;
 
   // The movement pad: one at a time, on foot, in its corner, on empty ground.
-  if (!hit && !grabbable && pad.id === null && rig.isFirstPerson && inStickZone(e)) {
+  //
+  // IT NO LONGER GIVES THAT CORNER UP. It used to: a grabbable piece took the
+  // touch away from the pad outright, so that the thing you were standing over
+  // was not the one thing you could never pick up. That was the right aim and
+  // the wrong trade, and setting a lamp down showed why — a piece PUT at your
+  // feet stays at your feet, so it sat in the pad's corner and swallowed the
+  // stick for as long as it was there. You could not walk away from the thing,
+  // which meant you could not walk away from the bug either.
+  //
+  // So the pad takes the touch and the DECISION MOVES TO THE RELEASE, which is
+  // the same bargain a character already strikes a few lines up: drag to use
+  // the stick, let go without pushing to pick the thing up. A press that turns
+  // into a walk was never a grab, and a press that never moved was never a
+  // walk, so nothing has to be guessed at the moment the finger lands.
+  if (!hit && pad.id === null && rig.isFirstPerson && inStickZone(e)) {
     pad.id = e.pointerId;
     pad.travel = 0;
+    pad.grab = grabbable;
     pad.lastX = e.clientX;
     pad.lastY = e.clientY;
     showStick(e);
@@ -1003,6 +1019,19 @@ function goToHouse(houseDir) {
   else rig.goStand(houseDir, CONFIG.interior.doorstep);
 }
 
+// Take a loose piece into the hand.
+//
+// Shared, because two different gestures now mean it and they must not drift:
+// a tap out in the world, and a tap on the pad's own corner — which is where
+// anything lying at your feet appears. See the pad's `grab`.
+function takeLoose(loose) {
+  const id = Object.keys(ITEMS).find((k) => ITEMS[k].art === loose.art);
+  if (!id) return;
+  // The hand is one hand: a held card goes back in the pouch first.
+  inventory.putAway();
+  inventory.setUnique(id, { state: 'hand' });
+}
+
 function onUp(e) {
   pointers.delete(e.pointerId);
   const now = performance.now();
@@ -1023,6 +1052,14 @@ function onUp(e) {
     // means nothing now: the stick is for walking and a tap is for pointing,
     // and the pad's corner is the one place a tap could never have been
     // pointing at anything anyway.
+    //
+    // With ONE exception, and it is the reason the pad keeps `grab`: a thing
+    // lying at your feet is pointing at something, and the pad's corner is
+    // exactly where it appears. Let go without having pushed the stick and the
+    // press was a tap on that; push the stick and it was a walk, and the piece
+    // is still there to be tapped when you come back.
+    if (pad.grab && pad.travel < CONFIG.player.tapSlop) takeLoose(pad.grab);
+    pad.grab = null;
     lastTouchAt = now;
     rig.markTouched(now);
     return;
@@ -1084,12 +1121,7 @@ function onUp(e) {
       const grab = (rig.isFirstPerson && !inventory.heldUnique)
         ? globe.pickLoose(raycaster, rig.anchor, UNIQUE_ARTS) : null;
       if (grab) {
-        const id = Object.keys(ITEMS).find((k) => ITEMS[k].art === grab.art);
-        if (id) {
-          // The hand is one hand: a held card goes back in the pouch first.
-          inventory.putAway();
-          inventory.setUnique(id, { state: 'hand' });
-        }
+        takeLoose(grab);
       } else if (rig.isFirstPerson && inventory.heldUnique
         && putDownWhereTapped(raycaster, e)) {
         // PUTTING SOMETHING DOWN BEATS THE HOUSE, and for the same reason

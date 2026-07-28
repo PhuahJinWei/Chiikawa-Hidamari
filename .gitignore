@@ -4,6 +4,9 @@ asset/generated test image/
 # Claude Code local tooling config
 .claude/
 
+# Dev-only art preview page — imports js/art.js, not part of the site
+preview.html
+
 # OS
 Thumbs.db
 ehthumbs.db

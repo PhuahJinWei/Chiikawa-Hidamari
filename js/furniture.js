@@ -1830,6 +1830,9 @@ export function buildLantern(h) {
     box.union(c.geometry.boundingBox.clone().applyMatrix4(c.matrixWorld));
   }
 
+  // See the note on `reach` below, which is what this is.
+  const lampReach = h * 7.0;
+
   return {
     group: g,
     fills: [brass, glass],
@@ -1844,10 +1847,22 @@ export function buildLantern(h) {
     // WEARS and the hour has an opinion about it: see the tint note in
     // fillMat. Whoever turns it on writes to the material, not to the mesh.
     glow: {
-      // Reach, as a multiple of the piece's own height. The house's pools run
-      // 2.15 of the card's width; a lantern is a smaller light and this is a
-      // smaller room, so it lights a corner rather than a garden.
-      reach: h * 2.6,
+      // Reach, as a multiple of the piece's own height, and the ONE number the
+      // pool on the boards, the falloff and the light on the furniture are all
+      // cut from — scene.js reads it back rather than keeping a second copy, so
+      // a lamp and the patch of floor under it can never disagree about how far
+      // it gets. It appears twice below only because the foot has to be a
+      // fraction of it; that is why it is a variable and not a literal.
+      //
+      // SEVEN of its own height, up from 2.6. The old figure lit a corner —
+      // which is exactly what the note here used to claim it was for — and it
+      // was fitted when the room's own tint sat at six sevenths of daylight and
+      // a lamp had only to add a highlight to something already lit. Against a
+      // room that is genuinely dark the lamp IS the light, and 0.88 units of it
+      // in a room 3.2 across left everything past arm's reach in the black.
+      // The reference this was rebuilt against has a single lantern owning
+      // something like half the floor. Seven is that.
+      reach: lampReach,
       lit: glass,
       colour: PAL.lampGlow,
       // The bite out of the middle of the pool, as a fraction of its reach.
@@ -1858,7 +1873,7 @@ export function buildLantern(h) {
       // as a yellow foot on a brass lamp. The house's lamps have always had
       // this hole for the same reason; a light should not light the thing it is
       // standing on.
-      hole: (h * 0.30) / (h * 2.6),
+      hole: (h * 0.30) / lampReach,
       // How high the glass sits, so the pool can be told where its source is
       // without measuring the mesh back out again.
       at: glassY + glassH / 2,

@@ -1327,14 +1327,48 @@ export const CONFIG = {
     // How high a lip you walk up without jumping at all. Below this a standable
     // thing is a kerb; at or above it, it is a wall until you hop.
     //
-    // It exists because the alternative is worse in both directions. Nought
-    // means the cushions — 0.16 and 0.17 — have to be JUMPED onto, and a room
-    // where you hop over the bedding reads as an assault course. Much more than
-    // this and you drift up the side of the futon (0.60) without meaning to,
-    // which is a floor that has stopped being flat. A quarter of a unit is
-    // ankle-high against an eye of 1.7: things you would step over, and nothing
-    // you would climb.
-    stepUp: 0.25,
+    // It exists because the alternative is worse in both directions. Too low
+    // and the cushions have to be JUMPED onto, and a room where you hop over
+    // the bedding reads as an assault course. Too high and you drift up the
+    // side of the futon (0.59) without meaning to, which is a floor that has
+    // stopped being flat.
+    //
+    // MEASURED AGAINST WHAT IS ACTUALLY IN THE ROOM, not chosen as a fraction
+    // of anything. It was 0.25, which sounded ankle-high and turned out to
+    // clear nothing at all: the cushions build to 0.28 and 0.30, so every
+    // standable thing in the world needed a hop and the kerb rule was dead
+    // code. The next thing up is the box at 0.38 and the smallest stump at
+    // 0.36, so anywhere in 0.31–0.35 separates "step onto the bedding" from
+    // "climb onto the furniture". 0.32 sits at the bottom of that window,
+    // because the failure on the high side — sliding up the futon by accident
+    // — is much worse than the failure on the low side.
+    stepUp: 0.32,
+
+    // How long the eye takes to catch up when the ground under it moves.
+    //
+    // This is the whole of what stops a mantle reading as a teleport, and it is
+    // a rendering lag rather than a physics one — where your feet ARE is
+    // decided instantly, as it must be, and only the drawing of it is eased.
+    //
+    // The snap is unavoidable and correct. Catch a lip on the way up and the
+    // feet jump from wherever they physically are to the surface, which can be
+    // the whole `mantle` — 0.38 — in a single frame. Step up a kerb and it is
+    // the kerb's height, likewise at once. Measured against the eye's own
+    // fastest honest movement (0.065 in a frame, at the bottom of a hop), a
+    // table catch moved it 0.224: three and a half times as fast as anything
+    // the arc ever does, arriving mid-air while you are watching the edge you
+    // aimed at. That is the lurch, and it is entirely in the picture rather
+    // than in the model.
+    //
+    // So the drawn feet keep the gap and give it up over this. The composition
+    // cancels by construction on the frame of the catch — see the note in the
+    // rig — so the eye does not move at all at the moment of it, and what plays
+    // out instead is a short pull-up onto the surface, which is what a mantle
+    // is meant to look like in the first place.
+    //
+    // 120ms is about seven frames: fast enough to read as being pulled rather
+    // than lifted, slow enough that the eye never outruns its own arc.
+    pullMs: 120,
 
     // ...and how far ABOVE your feet you can still catch a ledge while rising.
     //
