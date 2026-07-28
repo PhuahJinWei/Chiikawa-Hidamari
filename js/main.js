@@ -594,6 +594,40 @@ function uniqueByItem(id) {
   return globe.looseByArt(ITEMS[id].art);
 }
 
+// The picture a slot in the pack shows, whatever kind of thing is in it.
+//
+// `itemIcon` is the answer for everything that was PAINTED, and it has no
+// answer for a unique — there is no bear drawing and there never was, so a
+// stowed bear fell through its branches to the tuft of grass at the bottom and
+// sat in the bag as a chip you could not tell from a handful of weeds. Which
+// is a very good way for a lamp to look like it vanished.
+//
+// So a unique is photographed instead, once per piece, off its own build — see
+// snapshot in scene.js. Its own copy, and its own MATERIALS, which is the part
+// worth writing down: two of the materials a built piece wears are module-level
+// singletons shared by every stick of furniture in the house (the ink, and the
+// colour the legs are drawn in), and those are on the tint list. A chip taken
+// at midnight would have baked the room's midnight into its outline and kept it
+// there for the rest of the session. The clones wear `baseColor` — the colour
+// the piece was built in — so the chip is the thing itself under no particular
+// hour, the way a drawing of it would be.
+const uniqueChips = {};
+function packIcon(id) {
+  const it = ITEMS[id];
+  if (it.kind !== 'unique') return itemIcon(id);
+  if (!uniqueChips[it.art]) {
+    const obj = HAND_BUILDERS[it.art]();
+    obj.traverse((o) => {
+      if (!o.material) return;
+      const base = o.material.userData.baseColor;
+      o.material = o.material.clone();
+      if (base) o.material.color.copy(base);
+    });
+    uniqueChips[it.art] = globe.snapshot(obj);
+  }
+  return uniqueChips[it.art];
+}
+
 // Set the held unique down at `spot` — or, if the spot is water, watch it go
 // under and start the walk home. With no spot it goes straight home. The one
 // exit every held-unique state shares.
@@ -1262,7 +1296,7 @@ function paintPack() {
     if (cell) {
       const img = document.createElement('img');
       img.alt = ITEMS[cell.id].name;
-      img.src = itemIcon(cell.id).toDataURL();
+      img.src = packIcon(cell.id).toDataURL();
       slot.appendChild(img);
       // The count only when there is more than one. A ×1 on every chip is
       // noise: the drawing already says "one of these".
@@ -2281,7 +2315,11 @@ function frame(now) {
 
   // The anchor comes from the rig a few lines up, and has to: the sky is hung
   // off where you are stood, so it is stale by a frame if read any earlier.
-  globe.update(now, rig.anchor);
+  //
+  // The rig also answers whether you are on the ground, because it is the only
+  // thing that can. The scene sees a camera that has been lifted, and cannot
+  // tell a jump or a tabletop from the sky — see the hand in scene.js.
+  globe.update(now, rig.anchor, rig.isFirstPerson);
 
   // The rod, if it is out. It reels itself in when you walk off; leaving the
   // ground is the one thing it cannot see from the anchor alone, so that is

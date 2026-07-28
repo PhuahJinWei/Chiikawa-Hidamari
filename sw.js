@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v60';
+const CACHE = 'hidamari-v61';
 
 const ASSETS = [
   './',

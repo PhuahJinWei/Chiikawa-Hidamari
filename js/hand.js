@@ -84,6 +84,15 @@ export class Hand {
     this.card.frustumCulled = false;
     this.group.add(this.card);
 
+    // The materials of a held BUILT piece that wear the hour.
+    //
+    // The card above has one material and scene.js has always had it on its
+    // tint list. A built piece arrives with materials of its own, made fresh by
+    // the hand's builders, and those were on no list at all — so a bear held up
+    // at midnight was lit like a bear held up at noon, which is the one thing
+    // the note on `mat` above says must not happen. Collected here so whoever
+    // owns the hour has something to write to without walking the graph.
+    this.heldMats = [];
     this._tex = null;
     // Where the scale is and where it is going: 0 is an empty hand, 1 is the
     // card up. Airborne squashes the target to zero without forgetting it, so
@@ -199,9 +208,23 @@ export class Hand {
     // it, which a hand-held object arguably should.
     this.group.add(this.meshHolder);
     this._want = 1;
+
+    // What in it wears the hour. `baseColor` is the mark of a fill — see
+    // fillMat in furniture.js — and it is exactly the right test, because the
+    // two things it excludes are the two that must be excluded: the shared ink,
+    // which would stop being an outline the moment it dimmed, and the additive
+    // halos, which are light and cannot be darkened by the dark they are
+    // holding off.
+    this.heldMats = [];
+    obj.traverse((o) => {
+      const m = o.material;
+      if (!m || !m.userData || !m.userData.baseColor) return;
+      if (this.heldMats.indexOf(m) < 0) this.heldMats.push(m);
+    });
   }
 
   _dropMesh() {
+    this.heldMats = [];
     if (!this.meshHolder) return;
     this.group.remove(this.meshHolder);
     this.meshHolder = null;

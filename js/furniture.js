@@ -1831,7 +1831,7 @@ export function buildLantern(h) {
   }
 
   // See the note on `reach` below, which is what this is.
-  const lampReach = h * 7.0;
+  const lampReach = h * 10.0;
 
   return {
     group: g,
@@ -1854,14 +1854,18 @@ export function buildLantern(h) {
       // it gets. It appears twice below only because the foot has to be a
       // fraction of it; that is why it is a variable and not a literal.
       //
-      // SEVEN of its own height, up from 2.6. The old figure lit a corner —
-      // which is exactly what the note here used to claim it was for — and it
-      // was fitted when the room's own tint sat at six sevenths of daylight and
-      // a lamp had only to add a highlight to something already lit. Against a
-      // room that is genuinely dark the lamp IS the light, and 0.88 units of it
-      // in a room 3.2 across left everything past arm's reach in the black.
-      // The reference this was rebuilt against has a single lantern owning
-      // something like half the floor. Seven is that.
+      // TEN of its own height — 3.4 units — and it has been climbing: 2.6 lit
+      // a corner, which is what the note here once claimed it was for; 7 was
+      // fitted to the reference frame where one lantern owns half the floor;
+      // and 10 is half a stride more on top of that, asked for by eye once the
+      // lamp was something you could set down in the open. On the grass there
+      // is no wall three paces out to catch the light, so the same reach that
+      // filled a room read as a small circle in a field.
+      //
+      // What keeps this honest as it grows is ROOM_POOL in scene.js: the pool
+      // stamps are additive and this one now overlaps the bulb's over most of
+      // the floor, and that constant is what stops the two of them summing the
+      // boards past white.
       reach: lampReach,
       lit: glass,
       colour: PAL.lampGlow,
@@ -2158,7 +2162,15 @@ export function buildBulb(h) {
     glow: {
       // A bare bulb in a small room throws further than a lantern on the
       // floor, and from higher up, so its pool is wider and softer.
-      reach: h * 3.4,
+      //
+      // 4.6 heights is 4.7 units, up from 3.5, and the number to check it
+      // against is the geometry it has to beat: the bulb hangs 2.3 above the
+      // middle of a floor whose wall stands 3.2 out, so the FOOT of the wall —
+      // the farthest lit thing in the room — is about 3.9 away through the
+      // air. At 3.5 that put the room's own corners at the last tenth of the
+      // falloff, which is why the walls held their gloom right up to the
+      // skirting; at 4.7 the same corners sit at t≈0.83 and get a real share.
+      reach: h * 4.6,
       lit: glass,
       haloes,
       dim: GLASS_DIM,

@@ -1002,69 +1002,15 @@ html, body {
   opacity: 0.66;
 }
 
+/* Sized off the viewport width, like everything else on this screen, so the
+   name keeps its proportion to the meadow it is written on. The ceiling is for
+   a tablet, where 15vw of a 768pt screen would be a poster. */
 .start-title {
   margin: 0;
-  font-size: clamp(2rem, 11vw, 3rem);
+  font-size: clamp(2.5rem, 14.5vw, 3.8rem);
   font-weight: 700;
   line-height: 1.22;
   text-shadow: 0 2px 0 rgba(255, 255, 255, 0.85);
-}
-
-/* ---- what the three gestures are
-
-   One pill holding all three rather than a pill each: three stacked chips were
-   a wall of interface across the middle of a drawing that is now doing the
-   talking, and they landed on the hills besides. */
-
-.start-hints {
-  list-style: none;
-  margin: 1.1rem auto 0;
-  padding: 0.36rem 0.8rem;
-  width: fit-content;
-  max-width: 100%;
-  display: flex;
-  /* Sized to leave a little air at 375px, which is the narrowest phone worth
-     tuning for. Wrapping is the safety net below that: two short lines beat
-     three labels pushed out through the side of their own pill. */
-  gap: 0.7rem;
-  flex-wrap: wrap;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgba(255, 253, 247, 0.78);
-  border: 2px solid rgba(91, 76, 68, 0.16);
-}
-
-.start-hint {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.76rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.hint-mark {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--paper);
-  border: 2px solid rgba(91, 76, 68, 0.5);
-}
-
-/* Set on the <svg> only, so it reaches the shapes by inheritance and the one
-   filled dot can still say so with a presentation attribute of its own. */
-.hint-mark svg {
-  display: block;
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 /* ---- the loading road
@@ -1075,7 +1021,7 @@ html, body {
 
 .loadbar {
   --p: 0;
-  --car-w: 82px;
+  --car-w: 104px;
   position: relative;
   width: 100%;
   max-width: 22rem;
@@ -1083,8 +1029,8 @@ html, body {
   /* The driver overhangs the road by far more than the road is tall, and is
      absolutely placed, so the room for them has to be reserved here. Cut for
      the tallest of the three — usagi, ears included — which at this width is
-     about 107px of drawing standing on an 18px road. */
-  margin: 7rem auto 0;
+     about 136px of drawing standing on an 18px road. */
+  margin: 8.8rem auto 0;
 }
 
 /* Nearly opaque, unlike everything else laid over this screen: it is a path
@@ -1195,7 +1141,11 @@ html, body {
 .start-note:empty { display: none; }
 
 .start-go {
-  margin-top: 1.4rem;
+  /* Deep, because this gap is what lifts the road. The button is pinned to the
+     bottom by the sheet's padding so that it lands in the gap between the three
+     of them; everything above it is therefore pushed up from here, and the road
+     rides as high as this margin is tall. */
+  margin-top: 4.5rem;
   font-family: inherit;
   font-size: 1.15rem;
   font-weight: 700;
@@ -1249,11 +1199,10 @@ html, body {
    there is not much sky to sit in the middle of. */
 @media (max-height: 700px) {
   .start-sheet { padding-top: calc(env(safe-area-inset-top) + 1.4rem); gap: 0.6rem; }
-  .start-hints { margin-top: 0.9rem; }
   /* A smaller driver as well as a shorter run-up, or the room reserved for one
      is most of what a short screen has left. */
-  .loadbar { --car-w: 68px; margin-top: 5.9rem; }
-  .start-go { margin-top: 1rem; }
+  .loadbar { --car-w: 86px; margin-top: 7.2rem; }
+  .start-go { margin-top: 3rem; }
 }
 
 /* ------------------------------------------------------- landscape guard */
