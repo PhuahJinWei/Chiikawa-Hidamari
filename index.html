@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#BFE4F5">
+<meta name="description" content="ちいかわと ゆっくり すごす、ちいさな ひだまり。">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ひだまり">
+<title>ちいかわと ひだまり</title>
+
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192" type="image/png">
+<!-- iOS ignores SVG for the home screen, so this one has to be a PNG. -->
+<link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="./css/style.css">
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<div id="bubbles"></div>
+
+<!-- Which way somebody is, when they are not on screen to be seen. Filled from
+     main.js, one chip per character plus the house. Purely a drawing: it takes
+     no touches, so a chip sitting over the pad or the pills changes nothing
+     about pressing them. -->
+<div id="marks" class="marks" aria-hidden="true"></div>
+
+<!-- The dark of a doorway. It is solid for the moment the world on the other
+     side of the door is swapped in, and gone again before you could look for
+     it — see js/door.js. Driven frame by frame from there rather than by a CSS
+     transition, because it has to stay in step with a camera move. -->
+<div id="veil" class="veil" aria-hidden="true"></div>
+
+<div id="stick" class="stick" aria-hidden="true">
+  <div id="stick-knob" class="stick-knob"></div>
+</div>
+
+<!-- The action cluster, on foot only: jump (the same hop a double tap on the
+     ground makes) and sprint, which arms a run and stands down on its own when
+     you stop. Drawn the way game controls are drawn — translucent circles with
+     a glyph, sized and offset for where a right thumb actually arcs — and NOT
+     in the pill stack, because they are a different kind of thing: a verb
+     under the thumb rather than a reading of the world. Both fade out with
+     the ground, since neither means anything in the sky. -->
+<div id="actions" class="actions">
+  <button id="jump-btn" class="act act-jump" type="button">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 17.5V6.5"/>
+      <path d="m7 11.5 5-5 5 5"/>
+      <path d="M6.5 21c3.4-1.7 7.6-1.7 11 0"/>
+    </svg>
+    <span class="sr-only">ジャンプ</span>
+  </button>
+  <button id="sprint-btn" class="act act-sprint" type="button" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6.5 5.5 6.5 6.5-6.5 6.5"/>
+      <path d="m13 5.5 6.5 6.5-6.5 6.5"/>
+    </svg>
+    <span class="sr-only">はしる</span>
+  </button>
+
+  <!-- THE VERB UNDER YOUR THUMB. One button whose word changes with where you
+       are standing and what you are holding: ひろう beside something you could
+       pick up, おく to set it down, なげる to lob it, つりをする by fishable
+       water. It is a pill rather than a circle because it carries a WORD —
+       round is a verb you already know (jump, run), a pill is a thing being
+       told to you — and it sits above the round pair in the same thumb arc.
+
+       Hidden with an empty verb, so it is never a button that does nothing.
+       This is the other half of taps no longer moving you: the tap points, the
+       button acts. -->
+  <button id="act-do" class="act act-do" type="button" hidden></button>
+
+  <!-- しまう, for a carried unique only. The pill above says おく — put it
+       down, here, in the world — and that is the right primary: it is the
+       reversible one, and it is what you picked the bear up in order to do.
+       But a bear can also just go in your bag, and with one control that
+       needed a trip through the pack panel to reach. Small and secondary,
+       beside the pill rather than under it, because it is the rarer of the
+       two endings. -->
+  <button id="act-stow" class="act act-stow" type="button" hidden>しまう</button>
+
+  <!-- The switch, and it gets a button of its own rather than a turn on the
+       pill above. A lamp in your hand is the reason: sharing one control, it
+       would have to choose between offering 「けす」 and 「おく」, and whichever
+       lost you would be carrying a thing you could not do the other with.
+       Round, because it is a verb you already know rather than a word being
+       told to you — the same distinction jump and sprint make against the
+       pill. Filled when the light is on, outlined when it is off, which is
+       this app's word for a state. -->
+  <button id="light-btn" class="act act-light" type="button" hidden
+          aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9.4 16.5h5.2"/>
+      <path d="M10 19.2h4"/>
+      <path d="M12 3.6a5.6 5.6 0 0 0-3.3 10.1c.4.3.7.8.7 1.3h5.2c0-.5.3-1 .7-1.3A5.6 5.6 0 0 0 12 3.6Z"/>
+    </svg>
+    <span id="light-label" class="sr-only">あかりを つける</span>
+  </button>
+</div>
+
+<div id="controls" class="controls">
+  <div class="ctl-stack">
+    <!-- The clock, and the day it opens into. The pill stays in flow so the
+         stack keeps its size; the panel is absolute and grows out of the pill's
+         own bottom-right corner, so opening it moves nothing else. -->
+    <div id="time" class="time">
+      <button id="time-toggle" class="ctl ctl-pill ctl-time" type="button">ひる</button>
+
+      <div id="time-panel" class="time-panel">
+        <button id="time-auto" class="time-auto" type="button">じどう</button>
+        <div class="time-scrub">
+          <div id="time-track" class="time-track" role="slider"
+               aria-label="じかん" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0">
+            <div id="time-knob" class="time-knob"></div>
+          </div>
+          <!-- Filled from PHASES so the labels can never drift from the day. -->
+          <div id="time-marks" class="time-marks"></div>
+        </div>
+      </div>
+    </div>
+
+    <button id="view-toggle" class="ctl ctl-pill" type="button">そらへ</button>
+
+    <!-- The pouch. Same arrangement as the clock above: the pill stays in the
+         stack, the panel is absolute and grows out of its corner, so opening
+         it moves nothing. The pill reads もちもの with an empty hand and しまう
+         with a full one — one button, two verbs, whichever applies. -->
+    <div id="pouch" class="pouch">
+      <button id="pouch-toggle" class="ctl ctl-pill" type="button">もちもの</button>
+      <div id="pouch-panel" class="pouch-panel"></div>
+    </div>
+
+    <!-- The collection, out of the pack and into a room of its own. It shared
+         the pack's panel while both were small, and stopped making sense the
+         moment the pack became slots: one is what you are carrying now, the
+         other is what you have ever caught, and they are not the same question
+         asked twice. -->
+    <div id="zukan" class="pouch">
+      <button id="zukan-toggle" class="ctl ctl-pill" type="button">ずかん</button>
+      <div id="zukan-panel" class="pouch-panel zukan-panel"></div>
+    </div>
+  </div>
+</div>
+
+<!-- The front door. A whole screen rather than a card, because it is the first
+     thing anybody sees, it is on for as long as the art takes to decode, and it
+     is the only place the three gestures are ever explained.
+
+     The meadow behind it is bg-menu.webp, hung from the stylesheet. Nothing on
+     this screen may come out of `IMG`, because this screen is what covers the
+     wait for exactly that — but a file the browser fetches for itself, outside
+     loadArt()'s batch, is free to arrive whenever it arrives. Same arrangement
+     as the car on the road below.
+
+     The layout is blocked around where that drawing is busy: the title sits in
+     the empty sky, the middle third is left alone because that is where the
+     hills, the tree and the little house are, the road crosses the open meadow,
+     and the button drops into the one clean corridor between the three of them
+     at the bottom. Move anything vertically and check it against the art. -->
+<div id="start" class="start">
+
+  <div class="start-sheet">
+
+    <header class="start-head">
+      <p class="start-eyebrow">ちいさな ほし</p>
+      <!-- The space is for whoever is listening rather than looking: without it
+           the accessible name runs the two halves together. It costs nothing on
+           screen, since a trailing space at a forced break is dropped. -->
+      <h1 class="start-title">ちいかわと <br>ひだまり</h1>
+
+      <!-- One line of three, not three lines of one: the drawing behind this is
+           doing the talking now, and a stack of chips across the middle of it
+           would sit right on the hills. The icon carries the gesture and the
+           word carries what it does — which works looking at it, and not at all
+           listening to it, so the gesture is also said in words for whoever is.
+           Kept inside the head block so it stays up in the sky with the title
+           rather than drifting into the scenery. -->
+      <ul class="start-hints">
+        <li class="start-hint">
+          <span class="hint-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12h17M7.5 8.5 4 12l3.5 3.5M16.5 8.5 20 12l-3.5 3.5"/></svg>
+          </span><span class="sr-only">スワイプで </span>みまわす
+        </li>
+        <li class="start-hint">
+          <span class="hint-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
+          </span><span class="sr-only">スティックか タップで </span>あるく
+        </li>
+        <li class="start-hint">
+          <span class="hint-mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14 4.6 19.4M4.6 14.6v4.8h4.8M14 10l5.4-5.4M19.4 9.4V4.6h-4.8"/></svg>
+          </span><span class="sr-only">ピンチで </span>そらへ
+        </li>
+      </ul>
+    </header>
+
+    <div class="start-foot">
+      <!-- How far in we are, as a drive rather than a bar. The car faces left,
+           so it starts at the right-hand kerb and the road it has already
+           covered is the stretch behind it. One number drives all of it: --p,
+           written by main.js as each file lands. -->
+      <div id="loadbar" class="loadbar">
+        <div class="loadbar-road"></div>
+        <div class="loadbar-done"></div>
+        <img id="loadbar-car" class="loadbar-car" alt="" decoding="async">
+      </div>
+
+      <p class="start-status">
+        <!-- Reads as loading until main.js has the art decoded, then it swaps
+             to the invitation and the button below it turns on. Tapping early
+             does nothing, because the listener is registered in the same module
+             that awaits the load. -->
+        <span id="start-sub" class="start-sub">よみこみちゅう…</span>
+        <span id="start-pct" class="start-pct">0%</span>
+      </p>
+
+      <!-- Empty, and therefore not displayed, unless the load fails. -->
+      <p id="start-note" class="start-note"></p>
+
+      <!-- The affordance, not the mechanism: the press is caught on the whole
+           overlay, so anywhere on the screen still works. -->
+      <button id="start-go" class="start-go" type="button">はじめる</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Which of the three is driving today. Here rather than in main.js because
+     main.js is a module: it does not run until three.js and every other import
+     has been fetched and evaluated, and that wait is precisely what this car is
+     on screen to cover. Two lines at parse time get it moving straight away. -->
+<script>
+  document.getElementById('loadbar-car').src =
+    './asset/images/loading-' + (1 + Math.floor(Math.random() * 3)) + '.png';
+</script>
+
+<div class="rotate-hint"><p>たてむきに してね</p></div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

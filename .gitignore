@@ -1,0 +1,27 @@
+# Reference/scratch renders — not used by the site (40+ MB)
+asset/generated test image/
+
+# Claude Code local tooling config
+.claude/
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python (serve.py)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Logs
+*.log
