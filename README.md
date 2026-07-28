@@ -1274,10 +1274,32 @@ save remembers; one left on a hillside starts the next session at home. v1
 saves are converted rather than dropped: the old ledger pours into slots in
 display order, which is why the version field existed.
 
+**A landed fish with a full pack goes back in the water**, and is shown doing
+it rather than announced: the card rises and hangs as always, then drops
+straight back to the surface with a splash. This world has no way of telling
+you anything and does not need one — a fish sliding out of your hands is a
+thing you can read at a glance. The room is checked at the STRIKE rather than
+at the end of the reveal, because the answer changes what the reveal does; a
+full pack used to be discovered only after the flourish had played, so the
+fish was tallied, the animation ran, and then nothing was in your bag and
+nothing said why.
+
+It is still counted in the 図鑑 when it gets away. You landed it and saw what
+it was, which is what that tally records — `tally` and `add` are separate calls
+for exactly this case.
+
 The 図鑑 moved to its own ずかん pill. It shared the pack's drawer while both
 were small and stopped making sense the moment the pack became slots — one is
 what you are carrying now, the other what you have ever caught, and sharing a
 drawer made the slots look like the first two rows of a longer list.
+
+It covers **things you FIND**, in two sections: さかな and きのこ. Grass is not
+in it and should not be — it is everywhere, and a list of things you cannot
+fail to find is a list of nothing. Nor are the uniques: the bear is the
+house's and always has been, so congratulating anybody for discovering it would
+be strange. Fish are tallied by the rod (a fish can be landed and not kept);
+mushrooms are tallied by the pickup, because a mushroom in your pack is a
+mushroom you found.
 
 ## The lights
 

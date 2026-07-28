@@ -137,12 +137,59 @@ const RING_LIFT = 0.004;
 // swelled and pinched like a snake that had eaten. A drawn line varies much less
 // than it feels like it does; what sells the hand is that the variation never
 // repeats, not that it is large.
-function press(th) {
+//
+// `pass` is this drawing's own phase — see the boil note below. The first three
+// harmonics are the pen's character and stay put across the passes; the fourth
+// is how hard this particular pass was leaned on, and it is the smallest of the
+// four because a hand redrawing a line changes where it presses much less than
+// it changes where it goes.
+function press(th, pass) {
   return 1
     + 0.16 * Math.sin(th * 3 + 0.9)
     + 0.11 * Math.sin(th * 5 - 2.1)
-    + 0.07 * Math.sin(th * 8 + 1.7);
+    + 0.07 * Math.sin(th * 8 + 1.7)
+    + 0.06 * Math.sin(th * 6 + pass * 2.7);
 }
+
+// ------------------------------------------------------------ the shore boils
+//
+// The line is DRAWN THREE TIMES and flipped between, the same trick the wave
+// lines use (see paintNami in art.js) and on the same clock, because a cel is
+// redrawn all at once: an animator does not boil the water and leave the shore
+// alone, and two boils out of step would be two hands.
+//
+// WHAT MOVES IS THE INK AND NOTHING ELSE, which is the whole design constraint
+// and worth being blunt about. `lakeRim` is the one shape the mesh, `inLake`,
+// `lakeReach`, the painted bed and every fish all ask — the note at the top of
+// this file makes a promise of that — so a boil that wobbled the RIM would
+// wobble where you can walk, where you can cast, and where a fish is turned
+// back, all of it invisibly and none of it wanted. So the rim is untouched and
+// the pen is offset from it, per pass. The water's own edge never moves; only
+// the line drawn over it does, which is exactly what redrawing an outline is.
+//
+// It also means the boil can never be felt, only seen: `pickGround` raycasts the
+// ground and nothing here, so a wandering line cannot move a tap.
+//
+// How far the pen wanders between passes, in radians on the sphere. SMALL, and
+// bounded by something real rather than by taste: the line has to go on covering
+// the water's own edge at its thinnest, or a pass would open a hairline of bare
+// body along the shore. Half the line at its thinnest is RING_W * 0.65, and this
+// sits comfortably inside that. It works out at about a third of the line's
+// width, which is what a boil actually looks like — you see the line breathing,
+// not the pond changing shape.
+const RING_BOIL = 0.0016;
+
+// How far the pen lifts in a different PLACE each pass, in turns. Small on
+// purpose: a gap that appeared and vanished would flash the line on and off,
+// where one that slides a little reads as the hand hesitating at slightly
+// different moments.
+const GAP_DRIFT = 0.006;
+
+// Where each pass's phase comes from. The golden angle, so that three passes
+// land nowhere near each other on any of the harmonics they drive — stepping by
+// a round number would have two of the three nearly agreeing on the slow term,
+// and the boil would read as a two-frame flicker with a spare.
+const PASS_STEP = 2.39996;
 
 // WHERE THE PEN LIFTS: turns round the rim, and how much of a turn each break
 // spans. Placed rather than random, because three gaps evenly spread reads as a
