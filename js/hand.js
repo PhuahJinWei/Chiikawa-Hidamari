@@ -21,6 +21,7 @@
 // The API is shaped for that (hold swaps CONTENT, the group owns the place).
 
 import * as THREE from 'three';
+import { fitHeld, heldMaterials } from './furniture.js';
 
 // Where the held thing sits in the camera's own space, and how big it is.
 //
@@ -35,6 +36,18 @@ import * as THREE from 'three';
 // x and y run -1 to 1 from the middle. 0.62 / -0.66 puts it well into the
 // bottom-right — clear of the middle where the world is, above the action
 // buttons that own the very corner.
+//
+// These are the DEFAULTS. A built piece may bring its own pose — see
+// HAND_POSE in main.js, which sits beside the hand builders for the same
+// reason CARRY does: how a copy is posed and where it rides are one
+// decision. The sasumata is why the override exists: at the card slot's
+// distance it reads as an exhibit, and a thing that size wants gripping low
+// in the corner instead. The width cap below still binds by default — a pose
+// that says nothing about it cannot push a held thing off a narrow frame —
+// but a pose may widen it on purpose, and the sasumata does: fitHeld sizes
+// by the LONGEST dimension, so for a pole the width cap is the only number
+// that matters, and a pole gripped at your side is supposed to leave the
+// frame at the corner.
 const AT_FRAC = { x: 0.46, y: -0.55 };
 const AT_Z = -0.85;
 // How big the held thing is, against BOTH dimensions, and the smaller wins.
@@ -94,6 +107,8 @@ export class Hand {
     // owns the hour has something to write to without walking the graph.
     this.heldMats = [];
     this._tex = null;
+    // The held piece's own slot pose, when it brought one — see holdMesh.
+    this._pose = null;
     // Where the scale is and where it is going: 0 is an empty hand, 1 is the
     // card up. Airborne squashes the target to zero without forgetting it, so
     // landing brings the same card back out.
@@ -116,8 +131,16 @@ export class Hand {
     const cam = this.camera;
     const halfH = Math.tan((cam.fov * Math.PI / 180) / 2) * Math.abs(AT_Z);
     const halfW = halfH * cam.aspect;
-    AT.set(AT_FRAC.x * halfW, AT_FRAC.y * halfH, AT_Z);
-    HEIGHT = Math.min(HEIGHT_FRAC * halfH * 2, WIDTH_FRAC * halfW * 2);
+    // The held piece's own pose wins where it says anything; the module's
+    // numbers answer for the rest. The width cap is deliberately NOT
+    // per-piece: it is the frame's own protection, not the piece's taste.
+    const p = this._pose || null;
+    const fx = p && p.x !== undefined ? p.x : AT_FRAC.x;
+    const fy = p && p.y !== undefined ? p.y : AT_FRAC.y;
+    const fh = p && p.h !== undefined ? p.h : HEIGHT_FRAC;
+    const fw = p && p.w !== undefined ? p.w : WIDTH_FRAC;
+    AT.set(fx * halfW, fy * halfH, AT_Z);
+    HEIGHT = Math.min(fh * halfH * 2, fw * halfW * 2);
     this.group.position.copy(AT);
   }
 
@@ -125,7 +148,9 @@ export class Hand {
   // the hand has to be re-fitted, or it keeps the last shape's placement.
   resize() {
     this._fit();
-    if (this.meshHolder && this._heldObj) this.holdMesh(this._heldObj);
+    // The pose rides along, or a rotated phone would hand the sasumata back
+    // its card-slot placement.
+    if (this.meshHolder && this._heldObj) this.holdMesh(this._heldObj, this._pose);
     else if (this._canvas) this.hold(this._canvas);
   }
 
@@ -133,6 +158,8 @@ export class Hand {
   // persistent material; the old one is disposed rather than left for the GC,
   // because textures hold GPU memory the GC cannot see the size of.
   hold(canvas) {
+    // A drawing never brings a pose — cards all live at the one slot.
+    this._pose = null;
     this._fit();
     this._canvas = canvas;
     this._heldObj = null;
@@ -154,52 +181,31 @@ export class Hand {
   //
   // The caller keeps ownership of the object: it is the world's own bear, on
   // loan. clear() hands it straight back rather than disposing anything.
-  holdMesh(obj) {
+  holdMesh(obj, pose) {
+    // Before _fit, which reads it: the pose moves the slot itself, not just
+    // the thing in it, so the rise and the bob happen where the piece is.
+    this._pose = pose || null;
     this._fit();
     this._canvas = null;
     this._heldObj = obj;
     this._dropMesh();
     this.card.visible = false;
-    // ITS OWN ROTATION IS LEFT ALONE. The hand is given a COPY built for it,
-    // so whatever pose that copy arrived in is the pose it was built to be
-    // held in — the bear, for one, is stood back up out of the lying-down it
-    // wears on the futon. Resetting the rotation here undid that silently and
-    // handed you a bear carried flat like a tray.
+    // Sized and centred by fitHeld — see furniture.js, which carries the note on
+    // why this must be measured off a parentless copy at scale 1, and why the
+    // copy's own rotation is left exactly as its builder posed it.
     //
-    // MEASURED ALONE AND AT SCALE 1, ALWAYS — the whole of a bug worth
-    // remembering, because it had two halves and fixing one left it broken.
-    //
-    // The copies are built once and kept, so the second time one is picked up
-    // it arrives already wearing the scale and the centring offset the FIRST
-    // pickup gave it. Measuring in that state and scaling again compounds both.
-    // That is the obvious half, and resetting the transform fixes it.
-    //
-    // The half that hides: `_dropMesh` drops the HOLDER, not the object, so the
-    // object is still a child of a discarded group that carries the slot's
-    // three-quarter turn. `setFromObject` reads WORLD matrices, so the box came
-    // back as the bounding box of a ROTATED bear — bigger than the upright one,
-    // by a different amount each time as the offset shifted. Measured over six
-    // pick-ups the fit factor read 0.743, 0.461, 0.596, 0.680, 0.722, 0.742:
-    // not a drift but a slow convergence, which is exactly the shape of a
-    // feedback loop reading its own output.
-    //
-    // So: off any parent, transform cleared, then measured.
-    obj.removeFromParent();
-    obj.position.set(0, 0, 0);
-    obj.scale.setScalar(1);
-    obj.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(obj);
-    const size = box.getSize(new THREE.Vector3());
-    const k = HEIGHT / Math.max(size.x, size.y, size.z, 1e-4);
+    // `_dropMesh` above matters to that: it drops the HOLDER and not the object,
+    // so without the reset fitHeld does, the box would come back as the bounding
+    // box of a bear still wearing the last slot's three-quarter turn.
+    fitHeld(obj, HEIGHT);
     this.meshHolder = new THREE.Group();
-    // Centred about the box's own middle so a piece modelled off-centre spins
-    // about itself rather than about its birthplace.
-    const centre = box.getCenter(new THREE.Vector3());
-    obj.position.copy(centre).multiplyScalar(-k);
-    obj.scale.setScalar(k);
     this.meshHolder.add(obj);
-    this.meshHolder.rotation.y = -0.6;
-    this.meshHolder.rotation.x = 0.15;
+    // The three-quarter view, unless the pose asks for its own turn — the
+    // sasumata does: at -0.6 a pole that long foreshortens into a stub, and
+    // a shallower turn keeps the shaft's whole length on screen.
+    this.meshHolder.rotation.y = pose && pose.turn !== undefined ? pose.turn : -0.6;
+    this.meshHolder.rotation.x = pose && pose.tip !== undefined ? pose.tip : 0.15;
+    this.meshHolder.rotation.z = pose && pose.roll !== undefined ? pose.roll : 0;
     // Unlike the card, the mesh KEEPS its depth test. The card can wear
     // depthTest:false because it is one quad; a built piece is fills and
     // inverted-hull ink whose whole trick is the depth buffer, and switching
@@ -209,18 +215,9 @@ export class Hand {
     this.group.add(this.meshHolder);
     this._want = 1;
 
-    // What in it wears the hour. `baseColor` is the mark of a fill — see
-    // fillMat in furniture.js — and it is exactly the right test, because the
-    // two things it excludes are the two that must be excluded: the shared ink,
-    // which would stop being an outline the moment it dimmed, and the additive
-    // halos, which are light and cannot be darkened by the dark they are
-    // holding off.
-    this.heldMats = [];
-    obj.traverse((o) => {
-      const m = o.material;
-      if (!m || !m.userData || !m.userData.baseColor) return;
-      if (this.heldMats.indexOf(m) < 0) this.heldMats.push(m);
-    });
+    // What in it wears the hour — see heldMaterials in furniture.js for which
+    // materials those are and why the ink and the halos are not among them.
+    this.heldMats = heldMaterials(obj);
   }
 
   _dropMesh() {

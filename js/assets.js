@@ -54,6 +54,9 @@ const WORLD = {
   //   that into a number would buy 13KB and cost the property.
   houseDay: 'house-day-1.png',
   houseNight: 'house-night-1.png',
+  // The supplied portrait is used directly by the small plate beside
+  // Chiikawa's door. art.js only crops it into the existing mounting frame.
+  housePlate: 'chiikawa-house-plate.png',
 };
 
 // Flowers and mushrooms come in numbered variants — `flower-1.png` and upward.
@@ -147,12 +150,14 @@ const ICONS = {
   kinoko2: 'common-mushroom-regular',
   bear: 'unique-bear',
   kettle: 'unique-kettle',
+  chiikawaBook: 'unique-book',
   lamp: 'unique-lamp',
   hachiwareLamp: 'unique-lamp',
   trashBag: 'unique-trashbag',
   trashBagAlt: 'unique-trashbag',
   chiikawaWeapon: 'special-chiikawa-fork',
   hachiwareWeapon: 'special-hachiware-fork',
+  chiikawaHouseKey: 'special-chiikawa-housekey',
 };
 
 // WHICH FAMILY A TILE BELONGS TO — grows / swims / somebody's / the forks — read

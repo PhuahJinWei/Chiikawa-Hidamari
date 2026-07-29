@@ -507,9 +507,145 @@ itself the following dusk.
 
 **What remains intended, for the record:** by day a lamp cannot add to
 daylight (the self-disable property — the daytime room was always the sky's
-doing, not the bulb's), and an UNTOUCHED wired light still follows the
-household at night, dimming as the home empties. A touched one is now yours
-until dawn, full stop.
+doing, not the bulb's).
+
+## Follow-up 2 — the bulbs come off the clock entirely (user-reported)
+
+Reported: the bulb is dimmer on a fresh load than after flicking it off and on
+again. Real, and it was the `night: true` flag doing exactly what it was
+designed to do. An untouched wired light burned at its home's OCCUPANCY, so the
+bulb was dim whenever its owner was out on the grass; the first press set
+`manual` and pinned it to full. Measured untouched at occupancy 1 / 0.6 / 0.25
+/ 0: burn **1.00 / 0.60 / 0.25 / 0.00**, against a flat 1.00 for the same
+switch after a press. One visible switch position, four brightnesses, and the
+brightest only reachable by toggling.
+
+`night: true` is now gone from **both** bulbs (house and cave). A bulb is a
+lamp with a switch, like the lantern beside it: on when the world is built, on
+at every hour, on however empty the house is, and off only because somebody
+turned it off — which is then how it stays. `_burn` returns 1 for anything not
+`night`, and the dusk/dawn handback skips it, so no path is left by which the
+clock can touch it.
+
+Verified — as loaded, burn is 1 at all four hours × occupancy 1/0.5/0; a manual
+off holds through a whole day cycle; switching back on returns exactly 1 (the
+reported inconsistency is gone); a dusk scrub shows no dip.
+
+Isolated against an otherwise identical build (same scene, flag flipped at
+runtime): **every night tile 0.000, every pond tile 0.000.** The day tiles move
+by a handful of pixels at high delta — the bulb's own glass and halo now
+looking lit, which is the point — while the light it CASTS at noon does nothing
+(`cave-lantern/noon` mean 0.000). What the hour still owns is what LEAVES the
+building: `h.lit` gates the window glow on the dusk curve, so a bulb burning at
+noon lights its own room and does not make the cave advertise itself across a
+sunlit planet.
+
+Note for future baselines: comparing against a sheet captured before the
+house's second bulb existed showed 23 tiles moved and was meaningless. When a
+change alters the world's contents, re-capture the "before" from the same build
+and flip only the thing under test.
+
+## Follow-up 3 — calming the fixture's own glow (user-reported)
+
+Reported: the bulb reads too bright at night; make it look as it does at noon.
+
+**Measured first, and the premise did not hold.** In the cave, **0 of 120,000
+pixels** are brighter at night than at noon (119,787 darker, 213 within three
+levels) — the restore is clamped to daylight everywhere, so nothing a lamp
+lights ever exceeds its noon value. The fixture's own glass and halo render
+near-identically at the two hours as well; at the closest framing the night
+bulb is if anything a shade *softer*, because its glass is semi-transparent and
+there is less bright ceiling behind it.
+
+What is real is CONTRAST. A lamp is drawn additively over whatever is behind
+it, and a room at night has much less behind it, so the same halo that reads as
+a warm bulb against a daylit wall reads as a white blob against a dark one.
+
+So `FIXTURE_GLOW` fades a lamp's OWN glow with the brightness of the room it
+stands in: full by day, its floor at the darkest hour, interpolated on the
+room's own tint (linear luminance, which puts midnight at about an eighth of
+daylight). The glass COLOUR is deliberately left on the real burn: pulling that
+toward `off` as well would take a burning bulb back toward the dull glass it
+wears when switched off, which is the one thing a lit fixture must never say.
+
+**Two floors, and the split is what made it controllable.** It began as one
+number applied to halo and glass together, set at 0.55 — and was reported still
+glaring. One number could not be pushed further: taken low enough to kill the
+glare it also made the glass transparent, and a bulb you can see the ceiling
+through reads as one going OUT rather than one in a dark room. They are
+different parts doing different jobs:
+
+- `halo: 0.18` — the glow in the air, drawn additively, and the thing that
+  actually glares. It can go a long way down before anybody misses it, because
+  what it surrounds is still plainly alight.
+- `glass: 0.80` — the fixture itself, which must stay a body of light. Only
+  takes the edge off.
+
+Swept at the reported framing (stood under the cave's bulb looking up at
+midnight) with the glass fixed at 0.80 and the halo walked down: 1.00 / 0.55 /
+0.30 / 0.18 / 0.08. At 0.18 the bulb is a tight warm glow with its filament
+plainly visible; 0.08 starts to look bare.
+
+Isolated in one pose, one session, with the constant flipped by hand:
+**5.66% of pixels affected, every one of them dimmer, and `uLampK` byte-identical
+before and after** — the light the lamp CASTS is untouched, which was the
+requirement.
+
+**Rig caveat found while doing this.** Two "clean" sheets captured from separate
+page loads differed on the house and cave stations by a horizontal SHIFT, not a
+lighting change. Those stations aim at a lamp, and the cave's is a loose piece
+whose framing is less stable than assumed. Determinism within a single load is
+solid (two consecutive captures: no tile moved), so per-tile sheet diffs across
+reloads should be read with that in mind, and a one-pose one-session probe is
+the stronger instrument for a change this small.
+
+## Follow-up 4 — carried pieces take the lamps (user-reported)
+
+Reported: lighting does not apply to items held by characters or the player.
+
+Correct, and it was half-intended. Two CPU paths wrote the hour onto held
+materials and never consulted a lamp: `_syncHeld` for the player's hand and
+`_syncCastHeld` for the cast. Both justified themselves with *"these materials
+are made fresh by the carry builders, so there is no stable material to patch"*
+— which is true of neither: `carriedPiece` in main.js caches one mesh per item
+and hands the same one out forever. Measured in a fully lamplit room, a carried
+teapot rendered `#47525D` against a base of `#C9D8E0` — a piece inside a
+lantern's circle at the darkness of an unlit corner, **7.7× below** what the
+same material renders now.
+
+`_syncCastHeld` now patches each carried material with `_wearHour` on first
+sight and drives it, so a carried piece is lit exactly like the loose bear it
+was built as. **The hand keeps the CPU path deliberately**: what you hold is
+nine centimetres from the eye, in front of whatever you are looking at, and
+restoring it would be lighting something that is not really in the world. The
+two use different caches — `handMeshes` by art, `carryMeshes` by item — so
+neither can reach the other's materials.
+
+Two things this turned up that were not the reported bug:
+
+1. **The uniforms have to belong to the PIECE, not the carrier.** A `dark`
+   handed to `_wearHour` is baked into the compiled shader and cannot be
+   re-pointed afterwards, so binding a character's own would leave a lent
+   sasumata lit by whoever picked it up first, forever. Each piece gets its own
+   pair on first sight and whoever holds it writes them; only one holder is
+   possible at a time. `_wearHour` now records the side ref on
+   `userData.hourSide` so a lazy patcher can keep writing to it.
+2. **One material in every carried piece is not its own** — measured across the
+   teapot, the bear and the lantern, each shares exactly one with the room: the
+   near-black ink at `#2E2422`, a module-level singleton every stick of
+   furniture is drawn with, already patched and already wearing `darkIn`. The
+   old CPU loop wrote `m.color = base × tint` over it, and a patched material
+   must keep its colour AT the base or the hour goes in twice — so **the room
+   quietly darkened its own woodwork whenever a character picked anything up.**
+   Skipping what this method does not own (`userData.hourCarried`) fixes that as
+   a side effect. Verified: the shared ink reads `#2E2422` before and after a
+   pickup.
+
+Verified: an unlit carried piece renders exactly what it rendered before
+(`#47525D`, unchanged), a lit one 7.7× brighter; the object keeps the OBJECT
+tint rather than its carrier's `CAST_LIFT`-raised one (`#5C626B` vs `#CFD0D2`);
+no carrier means no writes at all; determinism holds; 26 programs, zero
+failures; app clean.
 
 ## Risks and mitigations
 

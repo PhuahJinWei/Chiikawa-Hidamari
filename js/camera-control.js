@@ -137,6 +137,26 @@ function isWet(dir, margin) {
 // a shore, which is also somewhere you can stand — but a shore is where the
 // props are thickest, so clearing water last lets it have the final say over a
 // prop rather than the other way round.
+// Whether a spot is under a roof at all — wall band, doorway or open floor.
+//
+// NOT what `inBuilding` answers, and the difference is the whole reason this
+// exists. That one reports which building's WALL a spot is in, and deliberately
+// returns null once you are past the inner arc — "indoors, and free" — which is
+// precisely where somebody standing in a room is. Asked "are you inside?" about
+// the middle of Chiikawa's house it says no, which is right for the collision it
+// was written for and exactly backwards for framing. Measured: closeIn's indoor
+// exemption never once fired, and a conversation in the house retreated through
+// the front wall and out onto the grass.
+//
+// The outer radius is the roof's own edge, so this is one dot product per
+// building against a list of two.
+function underRoof(dir) {
+  for (const b of buildings()) {
+    if (dir.dot(b.dir) > Math.cos(b.r)) return true;
+  }
+  return false;
+}
+
 function keepClear(spot) {
   keepOutside(spot, CONFIG.player.wallKeep);
   keepOffSolids(spot, CONFIG.player.wallKeep);
@@ -832,6 +852,68 @@ export class PlanetCamera {
   // being dropped in from nowhere.
   teleportTo(ch) {
     this.goStand(ch.object3D.position.clone().normalize(), CONFIG.camera.standoff);
+    this.focus = ch;
+  }
+
+  // Square up for a conversation. What the people-verbs call when you press one
+  // — see talkToMate in main.js — so that starting a conversation from a button
+  // gives the same shot as walking over to somebody does.
+  //
+  // It was the button path that needed this rather than the tap path. A tap
+  // already lands you at the tuned distance facing them; a BUTTON is pressed
+  // from wherever you happened to stop, which the facing cone allows to be most
+  // of a right angle off-axis and a metre or two too far. So the same
+  // conversation was beautifully framed or half off-screen depending only on
+  // which control you reached for.
+  //
+  // A BAND RATHER THAN A DISTANCE, and the band has two edges for two different
+  // reasons.
+  //
+  // This was "step in, never back off" at first, on the reasoning that the pill
+  // only exists at conversational range and you are often nearer than ideal on
+  // purpose — stood right up against somebody, hand on the lamp — so framing
+  // must never become the game walking you AWAY from a friend you deliberately
+  // crowded. That defends a real case and covered one it should not have: nose
+  // to nose there is no shot to protect. The measured table at MEET_ARC is where
+  // the line is — the widest of the cast is 87% of the screen at 4.0, 90% at
+  // 3.8, and by 3.6 a character does not fit across it at all — so inside
+  // `closeArc` you are not close, you are past the frame, and pressing a verb
+  // there earned a conversation with a wall of fur. It also disagreed with the
+  // tap, which has always stood you at the standoff from wherever you were, and
+  // two ways into the same conversation framing it differently is the exact
+  // inconsistency this method exists to remove.
+  //
+  // So: further off than the standoff, come in. Nearer than they can be drawn,
+  // back out. Between the two — a little close, still whole — keep your ground
+  // and only turn, because a backwards nudge over half a metre is drift rather
+  // than framing.
+  //
+  // ...EXCEPT INDOORS, where the back-off is switched off entirely. A room is
+  // about 2.25 units of walkable radius, so "retreat to 4.0" is a retreat into a
+  // wall: keepClear would stop you going through it and leave you flattened
+  // against it instead, which is a worse shot than the close one it was
+  // correcting. Nothing is wrong with standing near somebody in a small room —
+  // it is the only way to stand in one.
+  //
+  // Every branch writes TARGETS — frameT, lookPitchT — which the update loop
+  // eases toward at smoothMs, so a correction arrives as a settling rather than
+  // a cut. Nothing here jumps.
+  closeIn(ch) {
+    const to = ch.object3D.position.clone().normalize();
+    const gap = this.anchor.angleTo(to) * CONFIG.globe.radius;
+    const tooFar = gap > CONFIG.camera.standoff;
+    const tooClose = gap < CONFIG.wander.closeArc && !underRoof(this.anchor);
+    if (tooFar || tooClose) {
+      this.teleportTo(ch);
+      return;
+    }
+    this._aimAt(to);
+    // The gaze that goes with being stood in front of somebody. Not the
+    // altitude, and not the spot: turning to face a friend is not a reason to
+    // change how tall you are or where you put your feet.
+    this.lookPitchT = CONFIG.camera.faceLookPitch;
+    // Whoever you are talking to stops wandering off mid-sentence — see
+    // `attentive` in updateCast, which reads exactly this.
     this.focus = ch;
   }
 

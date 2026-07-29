@@ -73,6 +73,8 @@ export const ITEMS = {
   // somewhere, or lent to a friend on a timer.
   bear: { kind: 'unique', art: 'plushie', name: 'くまさん' },
   kettle: { kind: 'unique', art: 'teapot', name: 'やかん' },
+  chiikawaBook: { kind: 'unique', art: 'openbook', name: 'ほん' },
+  chiikawaHouseKey: { kind: 'unique', art: 'housekey', name: 'おうちのかぎ' },
   // The floor lantern. It was deliberately left out of this group for a while,
   // on the reasoning that walking off with the room's only lamp is a different
   // feature — and it is, but it is this one: a light you can carry is the whole

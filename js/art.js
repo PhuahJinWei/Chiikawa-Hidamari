@@ -1801,6 +1801,58 @@ export function paintWalkMarker() {
   return c;
 }
 
+// The focus mark: a small paper arrow floating over whatever the buttons are
+// about — a friend the people-verbs will reach, a piece 「ひろう」 will take.
+// It replaced the ground ring for focus duty, and the reason is in the two
+// kinds of target: a ring under a bear was half-covered by the bear, and a
+// ring under a FRIEND read as a lock-on, which is a grammar this world does
+// not have. Above the head is where attention already lives here — it is
+// where the speech bubbles go — so the mark borrows the same spot and the
+// same materials: paper fill, the one pen, rounded like everything else.
+//
+// Drawn pointing DOWN, at the thing it is about. Like the walk ring it is not
+// a picture of anything — it is the app saying "your buttons mean this one" —
+// and it is tinted with the world rather than left bright, so at night it
+// dims to lamplight along with whoever it is floating over.
+export function paintFocusMark() {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+
+  // A rounded triangle, wider than tall — the squat proportion reads as a
+  // marker where an equilateral one reads as a warning sign. arcTo rounds
+  // each corner without the path having to know where the tangent points
+  // land; the first moveTo is the midpoint of the top edge, which is on
+  // every version of the outline whatever the corner radius does.
+  const w = S * 0.66;
+  const h = S * 0.54;
+  const cx = S / 2;
+  const top = (S - h) / 2;
+  const r = S * 0.10;
+  const pts = [
+    [cx + w / 2, top],       // top-right
+    [cx, top + h],           // the point, at the bottom
+    [cx - w / 2, top],       // top-left
+  ];
+  g.beginPath();
+  g.moveTo(cx, top);
+  for (let i = 0; i <= pts.length; i++) {
+    const p = pts[i % pts.length];
+    const q = pts[(i + 1) % pts.length];
+    g.arcTo(p[0], p[1], q[0], q[1], r);
+  }
+  g.closePath();
+
+  g.fillStyle = 'rgba(255,253,247,0.96)';
+  g.fill();
+  g.strokeStyle = PAL.line;
+  g.lineWidth = S * 0.055;
+  g.lineJoin = 'round';
+  g.stroke();
+
+  return c;
+}
+
 // Where the light is coming from in a lit drawing, and how big it is, so that
 // the glow put over it can be placed by the art rather than by numbers typed
 // into scene.js. Move the house's door to the other side, or give it a second
@@ -2741,10 +2793,9 @@ export function paintHouseWindowFrame() {
   return c;
 }
 
-// The small blank mounting block beside Chiikawa's door. It is a separate
-// curved surface patch rather than paint baked into the wall, so the portrait
-// plate can replace or sit over this canvas later without redrawing the house
-// skin. For now its empty outlined face matches the anime reference.
+// Chiikawa's portrait plate beside the door. The supplied image is drawn
+// directly into the existing mounting frame — no tracing or redrawing — and
+// clipped to the frame's slightly irregular inner edge.
 export function paintHousePlateBlock() {
   const S = 128;
   const c = makeCanvas(S, S);
@@ -2752,6 +2803,30 @@ export function paintHousePlateBlock() {
   const m = 18;
 
   g.fillStyle = PAL.houseWall;
+  g.beginPath();
+  g.moveTo(m + 2, m);
+  g.lineTo(S - m - 1, m + 2);
+  g.lineTo(S - m, S - m - 2);
+  g.lineTo(m, S - m);
+  g.closePath();
+  g.fill();
+
+  // Fill the complete inner square with the unchanged source bitmap. Drawing
+  // beneath the frame lets its own pale background replace the blank block
+  // while the final heavy stroke hides the cropped image edge.
+  const inset = m + 4;
+  g.save();
+  g.beginPath();
+  g.moveTo(inset, inset);
+  g.lineTo(S - inset, inset + 1);
+  g.lineTo(S - inset, S - inset - 1);
+  g.lineTo(inset, S - inset);
+  g.closePath();
+  g.clip();
+  g.drawImage(IMG.housePlate, inset, inset, S - inset * 2, S - inset * 2);
+  g.restore();
+
+  // Restore the house's strong outer frame over the image.
   g.strokeStyle = PAL.houseInk;
   g.lineWidth = 8;
   g.lineJoin = 'round';
@@ -2762,7 +2837,6 @@ export function paintHousePlateBlock() {
   g.lineTo(S - m, S - m - 2);
   g.lineTo(m, S - m);
   g.closePath();
-  g.fill();
   g.stroke();
   return c;
 }
@@ -3054,38 +3128,6 @@ export function paintTableTop() {
       S * 0.006, S * 0.0042, rand() * TAU, 0, TAU);
     g.fill();
   }
-  return c;
-}
-
-// Somewhere to sit that is not the floor. Squat and round, because everything
-// living here is, and because a cushion is the one piece of furniture whose
-// whole job is to look soft.
-export function paintCushion() {
-  const W = 260;
-  const H = 190;
-  const c = makeCanvas(W, H);
-  const g = c.getContext('2d');
-  const rand = makeRandom(ROOM_SEED + 4);
-
-  inked(g, W, 1.1);
-  g.fillStyle = PAL.furnitureCushion;
-  wobbleOval(g, W / 2, H * 0.56, W * 0.44, H * 0.33, rand, 0.06);
-  g.fill();
-  g.stroke();
-
-  // The dent somebody left in it, and the seam round the edge. Both are what
-  // separate a cushion from a stone.
-  g.lineWidth = W * 0.014;
-  g.beginPath();
-  g.moveTo(W * 0.30, H * 0.46);
-  g.quadraticCurveTo(W / 2, H * 0.58, W * 0.70, H * 0.46);
-  g.stroke();
-  g.globalAlpha = 0.5;
-  g.beginPath();
-  g.moveTo(W * 0.20, H * 0.68);
-  g.quadraticCurveTo(W / 2, H * 0.80, W * 0.80, H * 0.68);
-  g.stroke();
-  g.globalAlpha = 1;
   return c;
 }
 

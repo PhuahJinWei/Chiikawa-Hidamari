@@ -83,33 +83,53 @@ function lake(lat, lon, r, shape = 0) {
 // arrived yet — startAt leaves Usagi 5.645 off, all of 0.14 further than the tap
 // that was supposed to take you over there.
 //
-// So: MEASURED IN THE RENDERER, not derived. At 4.4, on a 375x812 portrait,
-// projecting each character's own card and averaged over a dozen bob phases —
+// So: MEASURED IN THE RENDERER, not derived. On a 375x812 portrait, projecting
+// each character's own card — at 4.4, and again at the 4.0 this now holds —
 //
-//   Chiikawa   72% of the screen's width, head 46% down from the top
-//   Hachiware  80%                        head 41%
-//   Usagi      78%                        head 35%
+//                4.4                       4.0
+//   Chiikawa     73% of the width          79%, head 37% down from the top
+//   Hachiware    79%                       87%, head 32%
+//   Usagi        74%                       80%, head 26%
 //
-// All three carry their heads clear of the midline rather than under it, and
-// even the shortest drawing in the cast clears the 70% that was always the
-// target. Put this back up and they sink into the bottom half of the frame
-// under an empty sky.
+// All three carry their heads well clear of the midline rather than under it,
+// at either distance, and even the shortest drawing in the cast clears the 70%
+// that was always the target. Put this back up and they sink into the bottom
+// half of the frame under an empty sky.
 //
 // Hachiware is what stops it going lower. At scale 1 and 80% of the width that
 // is the widest anybody gets, and the margin goes quickly from here: 83% at
 // 4.2, 86% at 4.0, 90% at 3.8. By 3.6 — where their own personal space lets
-// them stop — a character does not FIT across the screen at all. Read 4.4 as
-// the floor rather than the middle of a range.
+// them stop — a character does not FIT across the screen at all.
+//
+// IT IS 4.0 NOW, and the reason is that the shot stopped being an accident.
+// While a conversation was wherever a tap happened to drop you, 4.4 was read as
+// the floor: it had to survive being the frame you got by luck, and the cast
+// vary enough in width that the widest of them wanted the room. Now every verb
+// that starts a conversation frames it deliberately — see closeIn in
+// camera-control.js — so the question changed from "what is safe by accident" to
+// "what is the shot", and the answer is a little closer. 86% of the width for
+// the widest of them is a friend filling the frame while still standing in a
+// world; it reads as leaning in.
+//
+// 4.0 IS THE NEW FLOOR, for the old reason rather than in spite of it. 3.8 puts
+// Hachiware at 90% and 3.6 does not fit at all, and neither is a near miss —
+// going under this is not a smaller number, it is a decision to CROP a
+// character, which would be a new framing convention for an app that has never
+// deliberately cut one off. Worth doing on purpose one day, as a conversation
+// shot with a pitch and a bubble anchor of its own. Not worth arriving at by
+// turning this down.
 //
 // What this number CANNOT buy is ground between you and them. The horizon is
 // 4.81 units off at eye height, and everything from 3.8 units out to infinity
 // compresses into about a degree of view: their feet land at 80% of the screen's
 // height whatever this says. Chasing that with faceLookPitch only trades sky for
-// foreshortened grass.
+// foreshortened grass. What moving from 4.4 to 4.0 buys is therefore almost
+// purely a bigger friend against the same scenery, which is exactly the trade
+// wanted here.
 //
 // Turn it and everything with an opinion about the distance moves together. The
 // numbers derived from it below keep their gaps rather than their values.
-const MEET_ARC = 4.4;
+const MEET_ARC = 4.0;
 
 export const PAL = {
   line: '#5B4C44',
@@ -347,11 +367,6 @@ export const PAL = {
   furniturePink: '#F3B9C0',
   furnitureGreen: '#A8CC96',
   furnitureBlue: '#C9D8E0',
-  // The cushions sit ON the rug, which is the only reason this is not another
-  // cream. At #EBD3C4 against the rug's #F6EBDF they were a step and a half
-  // apart and vanished into it — present, lit, correctly sorted, and invisible.
-  // A dustier rose reads clearly against the cream while still being the pink
-  // table's sibling rather than a second loud colour.
   // The house from outside: a warm off-white shell under a heavy line. The ink
   // is nearly black and darker than the furniture's, because this is read from
   // across a field rather than from two paces, and a softer line simply
@@ -415,7 +430,6 @@ export const PAL = {
   cliffGrass: '#B7DC8D',
   cliffGrassEdge: '#8FBF66',
 
-  furnitureCushion: '#E3B4A8',
   furniturePaper: '#FFFDF8',
   // The futon, and PURE white — not a placed white.
   //
@@ -451,6 +465,11 @@ export const PAL = {
   // a milky highlight so its rounded shaft stays legible in the dim cave.
   weaponBlue: '#78AACA',
   weaponBlueHighlight: '#ACD2E4',
+
+  // Chiikawa's house key: a bright toy-like yellow that stays distinct from
+  // the cream paper and brass lantern, with the shared furniture ink supplying
+  // the dark outline around its silhouette and square hole.
+  houseKey: '#F7D23E',
 
   // Chiikawa's bear, and the drawing's own two colours. The fur is the only
   // warm mid-tone anywhere under this roof — everything else in the room is a
@@ -509,6 +528,12 @@ export const PAL = {
   // ...and the pair lying flat beside them, which the reference draws as one
   // colour for both.
   bookStack: '#A25C62',
+  // Chiikawa's open picture book: warm card beneath creamy pages, with a
+  // slightly darker page edge so its thin stack remains readable from the
+  // doorway.
+  openBookCover: '#D5B57E',
+  openBookPaper: '#FFF8E8',
+  openBookEdge: '#D8C39A',
 
   // The flower on the wall shelf, and its stem. The only RED in the room and
   // the only true green — everything else under this roof is a cream, a wood, a
@@ -988,6 +1013,44 @@ export const CONFIG = {
     // How near a loose piece has to be to pick up. A shade over the kusa
     // reach: you crouch for grass, you lean for a bear.
     reach: 2.4,
+    // How near a set-down has to land to the piece's own home spot to mean
+    // "putting it BACK" rather than "putting it down here". Inside this, the
+    // put-down takes the no-spot exit in putDownUnique and the piece returns
+    // to its exact arranged spot.
+    //
+    // A feel number, like the nudges. Bigger than a shove's drift, so a
+    // kicked-about piece set down on the dent it left counts as put back; and
+    // well under the distances that mean somewhere else on purpose — a
+    // lantern carried from its corner to the table has asked to stand at the
+    // table, and must.
+    //
+    // It is no longer what stands a sasumata up — see `leanFrom`, which does
+    // that anywhere along a wall. This is now only about landing on the
+    // authored spot exactly, which for the forks is a detail and for the
+    // lamp and the bear is the whole of it.
+    snap: 0.5,
+    // HOW MUCH OF A ROOM COUNTS AS "AGAINST THE WALL", as a fraction of the
+    // distance at which a leaning piece's head actually touches it. Put a
+    // sasumata down anywhere past this and it stands up against the nearest
+    // bit of wall — at the bearing you chose, pushed out to where the head
+    // reaches. Inside it, the piece lies flat where you put it.
+    //
+    // 0.55 is deliberately generous, and the generosity is the point: what
+    // the player is choosing is WHICH BIT OF WALL, and a catch area that
+    // demanded they also find the one radius where a head meets masonry
+    // would be a precision test nobody asked for. Past halfway out of a room
+    // three strides across, "put it down" almost always means "stand it over
+    // there", so the room takes that reading.
+    //
+    // In Chiikawa's house the wall is 2.06 out, so anything past 1.13 props
+    // — the outer half of the radius, which is three quarters of the floor.
+    // What is left inside it is a real choice and not a dead zone: the
+    // middle of the room still lays it flat, and so does all of outdoors,
+    // where there is no wall to lean on at all.
+    //
+    // The door's own arc is excluded wherever this applies — see propFor in
+    // scene.js. A piece leaning on the opening is leaning on nothing.
+    leanFrom: 0.55,
     // NOTHING IS EVER LOST, and these two numbers are the whole of that rule.
     // A lent piece stays with its new owner for `returnMs` and then walks
     // home; one dropped in the water is fished out after `pondMs`. It is why
@@ -1011,11 +1074,11 @@ export const CONFIG = {
     // Wobble is the telegraph: you get to see that you pushed your luck.
     wobbleMs: 420,
     fallMs: 520,
-    // How far to one side a lent piece walks with its keeper. Clear of the
-    // drawing rather than under it — the whole value of a loan you can see is
-    // being able to see it — and close enough to read as theirs rather than as
-    // something they happen to be near.
-    besideArc: 0.62,
+    // `besideArc` lived here: how far to one side a lent piece walked with its
+    // keeper, clear of the drawing rather than under it, back when a loan was a
+    // bear trailing a stride behind somebody. It is gone because a lent piece is
+    // now HELD — see CARRY in main.js, where where-it-rides is written as a
+    // fraction of the carrier's own height and so cannot be a world distance.
   },
 
   // 草むしり. World units and milliseconds, like everything near it.
@@ -1313,6 +1376,25 @@ export const CONFIG = {
     // than the value, so it follows greetArc.
     greetClearArc: MEET_ARC + 2.6,
     greetCooldown: 22000,
+    // THE BEAT AFTER A POKE, before the same friend will answer another one.
+    //
+    // 「はなす」 made spamming effortless — every press called speak() outright,
+    // which kills whatever is on screen and re-rolls, so a held thumb flickered
+    // the bubble and restarted the line over and over. That reads as a fault
+    // rather than as an eager visitor. Tapping them always could do it too; the
+    // button only made it comfortable.
+    //
+    // Counted from the END of the line they are already saying, not from the
+    // press — so the window is "while they are talking, plus a moment" rather
+    // than a fixed lockout that a long line would outlive. Per FRIEND, because
+    // turning from one to another is a different conversation and should not
+    // have to wait out the first.
+    //
+    // Short. Long enough that a second press inside it was certainly a spam
+    // press; short enough that a genuine "say that again" never has to be
+    // waited for. Nothing greys out and no pill vanishes — see the note in
+    // pokeBack for why this is absorbed silently where a refusal shakes.
+    pokeQuietMs: 900,
     // How long a gift stays special, per friend. Inside this window they still
     // take the gift and still thank you — refusal has no place here — but the
     // thanks is the smaller 「さっきも…」 tier, and the delight is saved for
@@ -1516,16 +1598,12 @@ export const CONFIG = {
     // thing is a kerb; at or above it, it is a wall until you hop.
     //
     // It exists because the alternative is worse in both directions. Too low
-    // and the cushions have to be JUMPED onto, and a room where you hop over
-    // the bedding reads as an assault course. Too high and you drift up the
+    // and low bedding has to be JUMPED onto; too high and you drift up the
     // side of the futon (0.59) without meaning to, which is a floor that has
     // stopped being flat.
     //
     // MEASURED AGAINST WHAT IS ACTUALLY IN THE ROOM, not chosen as a fraction
-    // of anything. It was 0.25, which sounded ankle-high and turned out to
-    // clear nothing at all: the cushions build to 0.28 and 0.30, so every
-    // standable thing in the world needed a hop and the kerb rule was dead
-    // code. The next thing up is the box at 0.38 and the smallest stump at
+    // of anything. The next thing up is the box at 0.38 and the smallest stump at
     // 0.36, so anywhere in 0.31–0.35 separates "step onto the bedding" from
     // "climb onto the furniture". 0.32 sits at the bottom of that window,
     // because the failure on the high side — sliding up the futon by accident
@@ -1737,16 +1815,16 @@ export const CONFIG = {
     // characterful arrangement: a pair reads as architecture, one reads as
     // somebody's house. The list is still a list, so a second can be put back
     // by adding a bearing here and nothing else.
-    windowsAt: [0.82],
+    windowsAt: [1.20],
     // Lowered after moving to the right. The old height and 1.92 patch pushed
     // its top into the silhouette, where the curved patch collapsed into a
     // roof-like wedge. This smaller square sits on the visible wall while
     // retaining the reference's upper-right placement.
     windowHeight: 0.90,
     windowSize: 1.30,
-    // The small mounting block for Chiikawa's portrait plate, tucked between
-    // the door and the window. Like `windowsAt`, its bearing is measured from
-    // the door; unlike a window it is only a surface patch and cuts no hole.
+    // Chiikawa's portrait plate, tucked between the door and the window. Like
+    // `windowsAt`, its bearing is measured from the door; unlike a window it is
+    // only a surface patch and cuts no hole.
     plateAt: 0.55,
     plateHeight: 0.25,
     plateSize: 0.46,
@@ -1795,37 +1873,29 @@ export const CONFIG = {
     //
     // The pieces kept their drawn heights: the dome shrank around them, not
     // them with it. A table you could stand on the rug beside outside a
-    // doll's house would read as one, and 0.72 against a 3.2 apex is the same
-    // table in a smaller room.
+    // doll's house would read as one. This low oval is only 0.46 high against
+    // the room's 3.2 apex, matching the short table in the anime.
     //
     // NOTHING in here is solid. Outside, only the house and the water stop
     // you, on the stated grounds that a bench you could not step over reads
     // as a bug rather than as furniture — and in a room three strides across
-    // that argument is stronger, not weaker. You walk over a cushion the way
-    // you walk over a flowerbed. `spin` is which way a piece faces; left out,
-    // it looks across the room. `clutter` puts somebody's book on the top.
-    // `seat` marks what a guest may sit on.
+    // that argument is stronger, not weaker. Small loose props and bedding do
+    // not block the room. `spin` is which way a piece faces; left out, it looks
+    // across the room.
     furniture: [
-      // Turned a quarter, so the top's long axis now runs the other way across
-      // the room. It was -0.9; a right angle on top of that is 0.67.
-      { art: 'table', at: -1.15, out: 1.30, h: 0.72, clutter: true, spin: 0.67 },
-      // Both cushions turned to face the table rather than across the room.
-      //
-      // MEASURED, not derived. `spin` is a bearing taken at the middle of the
-      // house and then transported to wherever the piece stands, so "point at
-      // that other piece" is not the bearing of the other piece and is not the
-      // angle between them either — working it out by eye put the bear 137
-      // degrees out earlier in this same room. These are the signed angles
-      // between each cushion's own forward and the table, read off the built
-      // scene, and they were checked against the flat-room arithmetic
-      // independently: -2.650 against -2.653, and 0.359 against 0.356.
-      //
-      // They were left facing the room's middle by default (the first) and
-      // turned to 1.1 by hand (the second); both were about a right angle off
-      // the table, which on a piece as round as a cushion is the kind of wrong
-      // that reads as nothing in particular rather than as a mistake.
-      { art: 'cushion', at: -0.58, out: 1.48, h: 0.17, spin: -2.65, seat: true },
-      { art: 'cushion', at: -1.74, out: 1.50, h: 0.16, spin: 0.36, seat: true },
+      // The low table sits below the window, with its long edge following the
+      // curve of the wall and its top left clear.
+      { art: 'table', at: 1.20, out: 1.55, h: 0.46, spin: 1.20 },
+      // Chiikawa's open picture book rests at the centre of the table. It is
+      // its own unique item rather than baked-in clutter, so picking it up
+      // removes this physical copy from the tabletop.
+      { art: 'openbook', at: 1.20, out: 1.55, h: 0.22, spin: 1.20,
+        lift: 0.485, item: 'chiikawaBook' },
+      // The house key lies near the doorway, off the centre walking line and
+      // clear of the table. Chiikawa is 2.01 units tall, so 0.804 makes the
+      // key's longest dimension exactly 40% of that drawn height.
+      { art: 'housekey', at: 0.35, out: 0.80, h: 0.804, spin: 0.35,
+        item: 'chiikawaHouseKey' },
       // The futon, across the room from all of that, and the reason is the
       // gathering rather than the light. Everything above is on the window's
       // side because that is where an arrangement goes; a fourth piece pushed
@@ -1858,12 +1928,97 @@ export const CONFIG = {
       // along the wall — so this is that default plus a half turn, which comes
       // back round to the bearing itself. What actually moves is the PILLOW:
       // the head end is now the other end.
-      { art: 'futon', at: 1.78, out: 1.28, h: 0.60, spin: 1.78 },
-      // Chiikawa's pink sasumata, laid across the futon. The
-      // explicit item id makes this one physical weapon independently
-      // pickup-able, placeable, and returnable to this home position.
-      { art: 'pinkweapon', at: 1.78, out: 1.28, h: 0.52, spin: 1.78,
-        lift: 0.61, item: 'chiikawaWeapon' },
+      { art: 'futon', at: -1.45, out: 1.55, h: 0.60, spin: 1.69 },
+      // Chiikawa's pink sasumata, STOOD UP — leaning against the far wall,
+      // fork end up, which is how the anime keeps it: never flat on the
+      // floor, always propped against a wall. It lay across the futon
+      // before, and that read as bedding's clutter; standing against the
+      // masonry it reads as tomorrow's work waiting, which is the truer
+      // thing for this world.
+      //
+      // THE FAR WALL, a little off the door's own axis — and the offset is
+      // the whole lesson of this spot. It sat at π first, dead across from
+      // the threshold, which is the obvious answer and the wrong one: the
+      // lean tips along the wall's own outward direction, so on the axis it
+      // tips STRAIGHT AWAY from whoever walks in. Photographed from the door
+      // it foreshortened to a vertical pole — a fork balanced on its ball
+      // end, which is the one read this pose exists to avoid. Seven degrees
+      // of lean is not much to spend, and edge-on it buys nothing at all.
+      //
+      // 0.42 off the axis is where the propped angle becomes legible from
+      // the entrance, and it is the same offset the cave's fork carries for
+      // its own separate reason — worth knowing that the two agree, because
+      // it means "far wall, a little off the entry line" is one rule rather
+      // than two coincidences.
+      //
+      // This side rather than the other, and the lamp decides it. The
+      // lantern's corner is at -2.93, which is π + 0.21 the short way round;
+      // turning that way would have crowded it, and turning this way doubles
+      // the gap. See the clearance below, which is still the tightest in the
+      // room.
+      //
+      // `lean` pitches it up off the floor about its facing axis — see the
+      // lean note in scene.js. `spin` is `at` + π/2 EXACTLY, not a taste
+      // call: that turns the shaft into the room's own radial plane, so the
+      // head tips outward onto the masonry and the open fork faces the room
+      // instead of collapsing to a side view. Checked off the built scene:
+      // with the formula both prong balls measure the same distance from the
+      // room's middle to a thousandth, which only the radial plane does.
+      // `lift` is the grip ball's own trigonometry — the lean swings the
+      // butt end under the floor and 0.986 sets its ball back down at 0.042,
+      // the same hair over the boards every flat piece sits its belly at —
+      // so neither of those two is a knob to turn; the knobs are `at`, `out`
+      // and `lean`.
+      //
+      // MEASURED, all three, against the built scene through peek.html —
+      // this room's own lesson about hand-derived bearings, learned again at
+      // the wall. The flat-room guess for `out` buried both prongs 0.30 into
+      // the masonry: the planet's curve drops this floor 0.3 below the
+      // room-middle plane at this radius, and hand arithmetic keeps failing
+      // to carry that. 2.06 is bisected, not derived — it puts the prong
+      // balls 3.097 from the room's middle, their own radius short of the
+      // 3.14 wall face. Touching, not sunk.
+      //
+      // The lean is 1.45 — seven degrees off upright — and it was 1.33
+      // first. Seven degrees is the nearer of the two to how the anime parks
+      // one, and the geometry agrees for its own reason: steeper tucks the
+      // foot in under the contact point, and only steeper does. Measured the
+      // other way, a LAZIER lean walks the foot INWARD here, because the
+      // shaft's longer floor shadow eats more than the lower, wider wall
+      // gives back. At 1.45 the foot stands 1.91 from the middle — inside
+      // the 2.25 walk ring, so it can be reached and taken without pressing
+      // into the wall.
+      //
+      // Measured foot to foot from here: 1.14 to the lantern, 1.54 to the
+      // futon, better than 2.6 to everything else. On the axis the lamp was
+      // 0.42 away — a quarter unit of clear boards once both footprints came
+      // off — so turning away from that corner bought most of a unit back for
+      // free, which is why this side and not the other.
+      //
+      // The futon is the one to watch rather than the lamp, because it is the
+      // only piece here big enough for its middle to be a bad measure of it:
+      // spot to spot says 1.54, and the grip ball actually stands 0.21 off
+      // its bounding box — a sixth of a unit of clear floor, and that box is
+      // an over-estimate of a piece lying at an angle to it. Bedding and a
+      // propped fork side by side is the arrangement; overlapping them is
+      // not.
+      //
+      // This entry is where the fork STARTS, not the only place it leans.
+      // Put it down against any wall in the room and it stands there instead
+      // — see uniques.leanFrom — and this row is doing double duty for that:
+      // its `out` is the measured distance at which a head meets THIS room's
+      // masonry, so it is the wall every propped spot in here is placed
+      // against. Retune it and they all follow.
+      //
+      // A propped piece is not a loose one: nudgeLoose refuses to shove
+      // anything leaning, so it cannot be kicked over, only picked up. Out
+      // on the open floor, or out on the grass where there is no wall, it
+      // lies flat and scoots like everything else. The explicit item id keeps
+      // this one physical weapon independently pickup-able, placeable, and
+      // returnable — to this spot exactly, when a set-down lands near enough
+      // to mean it (uniques.snap).
+      { art: 'pinkweapon', at: 2.72, out: 2.06, h: 0.52, spin: -1.99,
+        lean: 1.45, lift: 0.986, item: 'chiikawaWeapon' },
       // Chiikawa's bear, LYING on the floor at the head end of the futon —
       // dropped where its owner got up, which is where a toy actually is. It
       // stood on the bed first, held there by a `lift` field the scene grew for
@@ -1891,21 +2046,7 @@ export const CONFIG = {
       // position is an accident rather than an arrangement, which is exactly
       // what makes shoving it about harmless. Shove the table and you have
       // rearranged somebody's home; shove the bear and you have shoved a bear.
-      { art: 'plushie', at: 0.75, out: 1.32, h: 0.50, spin: -0.29, item: true },
-      // The teapot, and the second thing in the room you can shove about —
-      // `item` again, which also takes it out of the solids, so it is neither
-      // something you bump into nor something you can stand on. A pot is a
-      // thing that gets kicked under a table, which is exactly what that tier
-      // is for.
-      //
-      // Off the door's own line rather than on it. It would survive being in
-      // the walkway — being shoved is the point of it — but a pot that lives in
-      // the doorway ends up in a different corner every visit, and this one
-      // should read as somebody's, set down near the cushions.
-      // Measured, not chosen: at -0.20/0.95 it stood 0.068 off the nearer
-      // cushion, which on two round things is touching. This clears everything
-      // by better than a sixth of a unit.
-      { art: 'teapot', at: 0.20, out: 0.86, h: 0.26, spin: 0.62, item: true },
+      { art: 'plushie', at: -2.22, out: 1.15, h: 0.50, spin: 0.48, item: true },
       // The lantern — the third ITEM, and the first light source in the app.
       //
       // `item` rather than `nudge`, and the word is the point: these three are
@@ -1941,12 +2082,21 @@ export const CONFIG = {
       // standing in the lamp is the same picture as the lamp standing in
       // somebody.
       { art: 'lantern', at: -2.93, out: 1.75, h: 0.34, item: 'lamp', lit: false },
+      // A second bare bulb for Chiikawa's house, cloned from the cave fixture
+      // but hung for this room's lower ceiling. The cave keeps its own bulb;
+      // these are two independent wired lights in two different homes.
+      //
+      // No extra `hang` offset here: the model's 1.03 drop already puts the
+      // glass just above Chiikawa's head under the 3.2-unit house dome.
+      //
+      // NO `night`, which is what makes it a lamp somebody owns rather than one
+      // the clock owns. See the note on the cave's bulb for what that flag did
+      // and why both of them dropped it.
+      { art: 'bulb', ceiling: true, h: 1.03 },
     ],
 
-    // Sitting — the guests'. The player does not sit in this version of the
-    // house: the seat machinery belonged to the old room's own rig, and porting
-    // it to the planet rig is a job of its own. The cushions still mean
-    // something because whoever is home takes one.
+    // Sitting support remains generic even though neither room currently
+    // contains a seat. The player does not sit in this version of the house.
     //
     // How far a character sinks into a seat while they have no sitting drawing
     // of their own, as a fraction of their drawn height. A standing sheet with
@@ -2062,8 +2212,8 @@ export const CONFIG = {
     // lantern beside it, a flower-and-vase shelf above a cabinet, two tied
     // rubbish bags, worn bedding, and a bulb hanging from the ceiling.
     //
-    // It was furnished — a low table with cups on it, two cushions drawn up to
-    // it, a futon, two crates and a lantern, all read off the anime frames —
+    // It was furnished — a low table with cups on it, a futon, two crates and
+    // a lantern, all read off the anime frames —
     // and it is deliberately not any more. What remains is the space itself:
     // a dome of rock, eight small belongings, light, and stone plates.
     //
@@ -2071,45 +2221,94 @@ export const CONFIG = {
     // here; put a line back and the piece comes back with it. Nothing else in
     // this spec is furniture-dependent.
     //
-    // The room still has no seats:
-    //
-    //   The duplicated lantern is lit independently of Chiikawa's original,
-    //   giving the cave a warm pool of light and a visible glow at night.
-    //
-    //   No seats, so a guest who comes home stands. household.js already falls
-    //   back to `household.spots` when it cannot find a free cushion, which is
-    //   the case this room now always takes.
+    // The duplicated lantern remains independent of Chiikawa's original.
     //
     //   The few floor solids stay around the wall and leave the middle clear.
     furniture: [
-      // The cardboard box sits in front of the cabinet on the cave's right,
-      // close enough to read as one arrangement without blocking its drawers.
-      { art: 'box', at: 0.25, out: 0.88, h: 0.38, spin: 0.25 },
-      // A duplicate of Chiikawa's floor lantern, standing beside the box and
-      // aimed toward the cave mouth.
+      // The cardboard box sits to the right of the horizontal bedding, leaving
+      // a clean gap before the cabinet at the wall.
+      { art: 'box', at: 0.45, out: 1.75, h: 0.44, spin: 1.82 },
+      // A duplicate of Chiikawa's lantern, resting on the centre of the box.
       // It has its own item id, so both lanterns remain independently
       // carryable despite sharing the same art.
       // Unlit to start, like Chiikawa's — see the note there. The cave has no
       // wired bulb at all, so this is the only light in it, and one you light
       // yourself is a better thing to find at the back of a cave than one
       // already burning for nobody.
-      { art: 'lantern', at: 1.05, out: 1.45, h: 0.34, spin: 0,
+      { art: 'lantern', at: 0.45, out: 1.75, h: 0.34, spin: 0, lift: 0.44,
         item: 'hachiwareLamp', lit: false },
       // The flower-and-vase shelf sits low on the right wall above the cabinet.
       { art: 'shelf', at: 1.58, y: 1.10, h: 0.64, wall: true },
-      // The cabinet sits against the right wall; both bags occupy the left.
-      { art: 'nightstand', at: 1.75, out: 2.62, h: 0.62 },
-      { art: 'trashbag', at: -2.23, out: 2.66, h: 0.78, item: 'trashBag' },
-      { art: 'trashbag2', at: -1.72, out: 2.69, h: 0.72, item: 'trashBagAlt' },
-      // Hachiware's worn mat runs front-to-back along the open left floor,
-      // with its folded bedding toward the rear of the cave.
-      { art: 'wornbedding', at: -0.85, out: 1.15, h: 0.58, spin: -1.57 },
-      // Hachiware's blue sasumata lies across the bedding. It is a separate
-      // physical item from Chiikawa's pink one and can be carried independently.
-      { art: 'blueweapon', at: -0.85, out: 1.15, h: 0.52, spin: -1.57,
-        lift: 0.20, item: 'hachiwareWeapon' },
+      // The cabinet sits tight against the right wall. The two bags form one
+      // close pair against the opposite wall instead of reading as scattered
+      // objects with a gap between them.
+      { art: 'nightstand', at: 1.75, out: 3.05, h: 0.62 },
+      { art: 'trashbag', at: -2.15, out: 3.08, h: 0.78, item: 'trashBag' },
+      { art: 'trashbag2', at: -1.78, out: 3.10, h: 0.72, item: 'trashBagAlt' },
+      // Chiikawa's kettle now sits on clear floor near the cave entrance.
+      { art: 'teapot', at: 0.05, out: 1.05, h: 0.26, spin: 0.62,
+        item: 'kettle' },
+      // Hachiware's worn mat lies across the middle of the cave, with its long
+      // edge horizontal when viewed from the entrance.
+      { art: 'wornbedding', at: -0.55, out: 1.95, h: 0.58, spin: 0 },
+      // Hachiware's blue sasumata, standing against the rock at the back of
+      // the hollow, across from the mouth — the same stance as the pink one
+      // on Chiikawa's far wall, for the same reason: the anime parks these
+      // against a wall, and a weapon kept standing is half of what says
+      // somebody LIVES in an otherwise bare hollow. It lay across the bedding
+      // before. Still a separate physical item from Chiikawa's, carried
+      // independently.
+      //
+      // OFF THE AXIS BY 0.42, and that is the one number here hers does not
+      // have. This room has no seats, so a guest who comes home has nowhere
+      // to sit and takes household.spots[0] instead — which is bearing π at
+      // 0.58 of the walk ring, dead on the line from the mouth to the back
+      // wall. Measured from just inside the mouth: on the axis the fork's
+      // prongs land inside a standing figure's silhouette on every axis, so
+      // the one moment the room is meant to read best — somebody home, the
+      // lantern lit — is the moment its most recognisable object disappears
+      // behind them. 0.42 is where the near prong clears the silhouette's
+      // edge; less than that and the fork is a shape growing out of somebody
+      // rather than a thing propped behind them.
+      //
+      // The positive side, which is the open one: the bags hold the back-left
+      // at -2.23 and -1.72, and going the other way there is nothing between
+      // the cabinet at 1.75 and here.
+      //
+      // Everything else differs from hers only where the rooms do. `lean` and
+      // `lift` are the fork's own geometry and match hers exactly; `spin` is
+      // `at` + π/2 for the same radial-plane reason. `out` is further because
+      // the shell is 4.0 against her 3.2 — bisected against the built scene
+      // like hers, to prong balls 3.897 from the middle against a rock face
+      // at 3.94. The foot lands past the 2.75 walk ring, so this one is
+      // reached from inside the ring rather than stood beside; being propped
+      // it cannot be kicked over either way (see nudgeLoose).
+      { art: 'blueweapon', at: 2.72, out: 2.95, h: 0.52, spin: -1.99,
+        lean: 1.45, lift: 0.986, item: 'hachiwareWeapon' },
       // Chiikawa's former bare bulb, wired into the apex of the cave.
-      { art: 'bulb', ceiling: true, hang: 0.62, h: 1.03, night: true },
+      //
+      // `night: true` STOOD HERE and is gone from both bulbs. It meant "the
+      // hour holds this switch until somebody else takes it", which reads well
+      // and had one consequence nobody predicted: an UNTOUCHED wired light
+      // burned at its home's occupancy, so the bulb was dim whenever its owner
+      // was out on the grass — and the moment you flicked it off and on again,
+      // `manual` pinned it to full. Measured, untouched, at occupancy 1 / 0.6 /
+      // 0.25 / 0: burn 1.00 / 0.60 / 0.25 / 0.00, against a flat 1.00 for the
+      // same switch after a press. One visible switch position, four
+      // brightnesses, and the brightest of them only reachable by toggling.
+      //
+      // Without the flag a bulb is simply a lamp with a switch, like the
+      // lantern beside it: on when the world is built, on at every hour, on
+      // however empty the house is, and off only because somebody turned it
+      // off — which is then how it stays. `_burn` returns 1 for anything that
+      // is not `night`, and the dusk/dawn handback skips it, so there is no
+      // path left by which the clock can touch it.
+      //
+      // What the hour still owns is what LEAVES the building: `h.lit` gates the
+      // window glow on the dusk curve, so a bulb burning at noon lights its own
+      // room and does not make the cave advertise itself across a sunlit
+      // planet. And by day the restore is a no-op anyway — see light-model.js.
+      { art: 'bulb', ceiling: true, hang: 0.62, h: 1.03 },
     ],
 
     sitSink: 0.34,

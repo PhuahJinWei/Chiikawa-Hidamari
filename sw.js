@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v65';
+const CACHE = 'hidamari-v70';
 
 const ASSETS = [
   './',
@@ -42,6 +42,7 @@ const ASSETS = [
   // `lake.png` stood here. The ponds are built — see water.js.
   './asset/images/house-day-1.png',
   './asset/images/house-night-1.png',
+  './asset/images/chiikawa-house-plate.png',
   // The three tree sheets and stump.png stood here, 199KB of the install
   // budget. Trees and stumps are built geometry — their cards are never shown —
   // so the drawings are retired to `asset/images/legacy/` and nothing fetches
@@ -125,7 +126,9 @@ const ASSETS = [
   './asset/images/icon/icon-fish-sky-teardrop-fish.webp',
   './asset/images/icon/icon-special-chiikawa-fork.webp',
   './asset/images/icon/icon-special-hachiware-fork.webp',
+  './asset/images/icon/icon-special-chiikawa-housekey.webp',
   './asset/images/icon/icon-unique-bear.webp',
+  './asset/images/icon/icon-unique-book.webp',
   './asset/images/icon/icon-unique-kettle.webp',
   './asset/images/icon/icon-unique-lamp.webp',
   './asset/images/icon/icon-unique-trashbag.webp',

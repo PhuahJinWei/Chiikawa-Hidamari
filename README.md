@@ -1560,8 +1560,8 @@ up silently deleted the instructions for moving it. A drag teaches itself by
 being tried. It also deletes the modal state between lifting and placing, and
 stops two nearly identical presses on the same tile meaning two different
 things — the exact ambiguity the action pill's own notes call out as worth
-removing. The hint line survives as `#sheet-hint`, always on, separate from the
-state line for precisely the reason the old one failed.
+removing. There is no written hint at all now: the gesture is its own
+instruction, and the caption under the grid went back to being purely a state.
 
 Nothing repaints between `pointerdown` and `pointerup`. The source slot is
 marked by hand rather than by rebuilding the grid, because a rebuild replaces

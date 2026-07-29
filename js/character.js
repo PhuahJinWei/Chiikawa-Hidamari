@@ -22,6 +22,7 @@ import {
 import { paintSheet, sheetBounds, paintShadow, EXPRESSIONS } from './art.js';
 import { IMG } from './assets.js';
 import { WATER_STENCIL } from './water.js';
+import { fitHeld, heldMaterials } from './furniture.js';
 
 function clampUnit(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
@@ -80,8 +81,22 @@ const PATH_STEPS = 8;
 // How many renderOrder slots one character reserves. The scene hands out a base
 // per character each frame from a depth sort. One slot, because the card is all
 // there is to order — it was 3 to leave room above for the sleeping Zzz, which
-// no longer exists. Raise it again the moment a character grows a second mesh.
+// no longer exists.
+//
+// A character HAS grown a second mesh since — the piece they are carrying, see
+// `holdGroup` below — and it still needs no slot of its own. That sort exists
+// for things that BLEND, which cannot sort themselves: the card writes no depth,
+// so a painter's order is the only thing that can say which of two overlapping
+// characters is in front. A carried piece is opaque, writes depth like the
+// furniture it was built as, and is therefore sorted by the depth buffer against
+// the card and against everything else in the world. Raise this for the next
+// blended thing a character grows, not for this one.
 export const RENDER_SPAN = 1;
+
+// How quickly a piece is brought up into a character's hands, and lowered
+// again. A time constant on an exponential ease, in milliseconds — short enough
+// to read as being handed something rather than as it growing there.
+const HOLD_EASE_MS = 110;
 
 // The shadow is the same for everybody, so it is painted once.
 const texCache = new Map();
@@ -296,6 +311,20 @@ export class Character {
     );
     this.billboard.add(this.bodyMesh);
 
+    // WHAT THEY ARE CARRYING — see the note at holdPiece. A child of the body
+    // card rather than of the billboard, so it hops and sways with them.
+    this.holdGroup = new THREE.Group();
+    this.holdGroup.visible = false;
+    this.bodyMesh.add(this.holdGroup);
+    // The carried piece's own materials, for whoever owns the hour. Empty until
+    // something is put in their hands; the field exists from construction
+    // because scene.js reads it every frame from the moment they join the cast.
+    this.heldMats = [];
+    this._heldObj = null;
+    this._grip = null;
+    this._holdWant = 0;
+    this._holdScale = 0;
+
     // WHAT THEY LOOK LIKE IN THE WATER. The same card, upside down, hanging
     // from their feet — which for a billboard is not a trick standing in for a
     // reflection, it IS the reflection: mirroring a flat upright card in a
@@ -504,6 +533,9 @@ export class Character {
     this.headTop = p.headTop;
     this.headY = p.headTop + CONFIG.dialogue.bubbleLift;
     this.standoff = p.standoff;
+    // A posture is a different body, so it is a different pair of hands. Every
+    // number the grip is written in is a fraction of THIS pose's height.
+    this._placeHold();
   }
 
   _setPosture(name) {
@@ -514,6 +546,104 @@ export class Character {
   }
 
   setTalking(on) { this.talking = on; }
+
+  // --------------------------------------------------------------- carrying
+  //
+  // A built piece in their hands: the sasumata, the lamp, the bear.
+  //
+  // GEOMETRY RATHER THAN A DRAWING OF IT, which is the same call furniture.js
+  // makes for the same reason. There is already a built copy of everything
+  // carryable, posed for a hand — see HAND_BUILDERS in main.js — so a character
+  // can hold the actual object without anybody drawing anything, and every
+  // character can hold every item on the day it exists. A painted card would be
+  // one drawing per item per character, and a snapshot of the model would be a
+  // photograph of a thing standing right there.
+  //
+  // The cast staying cards while what they carry is real is not a compromise
+  // here; it is the arrangement the whole room already is. They sit on built
+  // stools and lean built lanterns against built walls.
+  //
+  // WHY IT HANGS OFF THE BODY CARD and not off the billboard: the card is what
+  // carries the walk hop and the sway, so a piece parented to it hops and leans
+  // with them instead of hanging beside them at a fixed height. That single
+  // choice is most of what makes it read as carried. The billboard above it
+  // still supplies the turn to camera and the breath, so the piece is seen from
+  // the same side the drawing is, which is what keeps a flat actor and a solid
+  // object looking like one picture.
+  //
+  // Depth sorts it against the card for free, and this is worth stating because
+  // it looks like it ought to need arranging. The card writes no depth and the
+  // piece does, so whichever is nearer the eye wins: the near arm of a sasumata
+  // held across the body covers the body, and the arm of it that falls behind is
+  // covered BY the body. Nothing has to be told which is in front.
+  //
+  // `grip` is the entry from the CARRY table in main.js, and the caller keeps
+  // ownership of `obj` — it is a copy built for carrying, not the world's own
+  // piece, so dropping it hands nothing back.
+  holdPiece(obj, grip) {
+    this._holdWant = 1;
+    if (this._heldObj === obj && this._grip === grip) return;
+    this._heldObj = obj;
+    this._grip = grip;
+    this._placeHold();
+    // What in it wears the hour — see heldMaterials in furniture.js. Read after
+    // the fit, though nothing about a material changes with scale: it is simply
+    // the one place that has certainly seen the whole piece.
+    this.heldMats = heldMaterials(obj);
+  }
+
+  // Empty their hands. The piece stays attached until the shrink has finished,
+  // so a loan ending is a thing you watch rather than a thing that has already
+  // happened — see the ease in _animate, which is what finally removes it.
+  //
+  // ...unless there is nobody to watch it, and that exception is a bug fix
+  // rather than an optimisation. _animate is where the shrink runs and it is
+  // skipped for anyone over the horizon, so a friend whose loan expired while
+  // they were round the back of the planet kept the piece welded to them at full
+  // size — and paid for it on the way back, easing it out of their hands in
+  // front of you a good minute after it had gone home. Nothing has to be eased
+  // out of a pair of hands that cannot be seen: it is let go of on the spot, and
+  // they come back over the horizon empty-handed, which is what they are.
+  dropPiece() {
+    this._holdWant = 0;
+    if (this._heldObj && (!this._onScreen || this.fade <= 0.004)) this._letGo();
+  }
+
+  _letGo() {
+    this.holdGroup.remove(this._heldObj);
+    this.holdGroup.visible = false;
+    this._heldObj = null;
+    this._grip = null;
+    this.heldMats = [];
+    this._holdScale = 0;
+    this.holdGroup.scale.setScalar(0);
+  }
+
+  // Size the piece to this body and put it where the hands are.
+  //
+  // Everything in a grip entry is a FRACTION OF `headTop`, the drawn height of
+  // whoever is carrying it, which is what lets one table serve the whole cast:
+  // the same sasumata is most of Chiikawa's height and rather less of Usagi's,
+  // and neither number is written down anywhere. It also means a posture change
+  // re-fits it, since a seated body is a shorter one.
+  _placeHold() {
+    const obj = this._heldObj;
+    const g = this._grip;
+    if (!obj || !g) return;
+    // fitHeld takes it off whatever it was parented to — see the note there —
+    // so it goes back on afterwards rather than before.
+    fitHeld(obj, g.size * this.headTop);
+    this.holdGroup.add(obj);
+    // The grip's height is measured from the FEET, because that is the only
+    // landmark on a body that means the same thing in every pose. The card's own
+    // origin sits `footOffset` above them, so that is the change of frame.
+    this.holdGroup.position.set(
+      g.x * this.headTop,
+      g.y * this.headTop - this.footOffset,
+      g.z * this.headTop,
+    );
+    this.holdGroup.rotation.set(g.tilt || 0, g.spin || 0, g.roll || 0);
+  }
 
   // Where a ray lands on them, or null. Used for tapping someone to go and see
   // them; the alpha check means a tap on a transparent corner misses.
@@ -1021,5 +1151,24 @@ export class Character {
         += (0 - this.bodyMesh.rotation.z) * (1 - Math.exp(-dtMs / d.swaySettleMs));
     }
 
+    // What they are carrying, brought up or lowered.
+    //
+    // SCALE AND NOT OPACITY, and the fade multiplies into it for the same
+    // reason: a built piece is opaque geometry with nothing to fade, so a body
+    // condensing into view at a threshold would otherwise have a solid sasumata
+    // arrive at full size ahead of it. Scaling is also the gesture the hand slot
+    // already uses for the same moment — it reads as brought up rather than as
+    // faded in.
+    const wantHold = this._holdWant * this.fade;
+    if (this._holdScale !== wantHold) {
+      this._holdScale += (wantHold - this._holdScale) * (1 - Math.exp(-dtMs / HOLD_EASE_MS));
+      if (Math.abs(wantHold - this._holdScale) < 0.004) this._holdScale = wantHold;
+      this.holdGroup.scale.setScalar(this._holdScale);
+      this.holdGroup.visible = this._holdScale > 0.004;
+      // Fully lowered, and nobody has asked for it back: let go of the copy.
+      // Held until now precisely so the shrink had something to shrink — see
+      // dropPiece, which sets the want and leaves the letting go to here.
+      if (!this.holdGroup.visible && this._holdWant === 0 && this._heldObj) this._letGo();
+    }
   }
 }

@@ -56,6 +56,18 @@ export class Dialogue {
     return this.line.t.length * CONFIG.dialogue.charMs + holdFor(this.line.t);
   }
 
+  // Whether this bank has anything to say on a subject. `say` already fails
+  // quietly on a bucket that is not there, which is the right behaviour for a
+  // line nobody would miss — but a bucket attached to a BUTTON is different: a
+  // press that produces silence reads as a broken button. Asking first lets the
+  // caller fall back to a bucket every bank has, so a character with no words
+  // for the moment still answers with ordinary ones. Same half-drawn courtesy
+  // the sheets get.
+  has(bucketKey) {
+    const bucket = this.bank[bucketKey];
+    return !!(bucket && bucket.length);
+  }
+
   say(bucketKey, now) {
     const bucket = this.bank[bucketKey];
     if (!bucket || !bucket.length) return;

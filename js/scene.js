@@ -8,7 +8,7 @@ import { CONFIG, PAL } from './config.js';
 import { CAST } from './cast.js';
 import {
   paintSky, paintGlobe, paintHorizon,
-  paintShadow, SHADOW_ROOM, paintLampGlow, litSpot, paintWalkMarker,
+  paintShadow, SHADOW_ROOM, paintLampGlow, litSpot, paintWalkMarker, paintFocusMark,
   paintBench, paintSheet, sheetBounds, makeRandom, SKY_DESIGN,
   starStamp, STAR_SEED,
   paintHouseSkin, paintHouseWindowFrame, paintHousePlateBlock,
@@ -538,6 +538,47 @@ function caveLiftTufts(geo, dirs, doorDir, guard) {
 // is what light out of a window does.
 const LAMP_POOL = { reach: 2.15, spill: 0.56 };
 
+// HOW MUCH OF A FIXTURE'S OWN GLOW SURVIVES ONCE THE ROOM HAS GONE DARK.
+//
+// This is about the LAMP, not about the light it casts, and the two had always
+// been the same number until it was asked for separately. What a lamp throws is
+// `uLampK` and is unaffected by anything here; this is only how hot its own
+// glass and the halo of air around it are drawn.
+//
+// It exists because of a real difference between what the model does and what
+// the eye reports. Measured in the cave, nothing a lamp lights ever exceeds its
+// noon value — 0 of 120,000 pixels brighter at night, 119,787 darker — so by
+// the arithmetic the fixture at midnight is already no brighter than the
+// fixture at noon. It does not read that way. A lamp is drawn ADDITIVELY over
+// whatever is behind it, and a room at night has a great deal less behind it,
+// so the same halo that reads as a warm bulb against a daylit wall reads as a
+// white blob against a dark one. Contrast, not brightness.
+//
+// So the glow is faded with the room it is standing in: full by day, `floor` at
+// the darkest hour, interpolated on the room's own tint. The lamp stays
+// unmistakably lit — its glass keeps its lit colour and the light it casts does
+// not move — it simply stops being the brightest thing on screen by a distance.
+//
+// TWO floors, and the split is the whole of what makes this controllable.
+//
+// It was one number, applied to the halo and the glass together, and that
+// number could not be pushed far enough: taken low enough to kill the glare it
+// also made the glass transparent, and a bulb you can see the ceiling through
+// reads as a bulb going OUT rather than a bulb in a dark room. The two are
+// different parts doing different jobs.
+//
+//   `halo` is the glow in the air around the fitting, drawn additively. It is
+//   what actually glares — additive light over a dark room is the white blob —
+//   and it can be taken a long way down before anybody misses it, because the
+//   thing it surrounds is still plainly alight.
+//
+//   `glass` is the fixture itself. It has to stay a body of light: this one
+//   stays high, and only takes the edge off.
+//
+// Swept against the shot it is for, stood under the cave's bulb looking up at
+// midnight. The glass floor was fixed at 0.80 and the halo walked down.
+const FIXTURE_GLOW = { halo: 0.18, glass: 0.80 };
+
 // ...and the light that comes the OTHER way through the same hole.
 //
 // `reach` is a multiple of the room's own radius, so the patch is a share of
@@ -743,7 +784,76 @@ const CAST_LIFT = { in: 0.58, out: 0.34 };
 // `lift` was 0.045 while this was a flat quad, most of which was covering the
 // rim's climb away from the surface rather than buying clearance. It is a cap
 // now and holds its gap the whole way out, so it sits as low as the shadows do.
-const WALK_MARK = { r: 0.58, lift: SHADOW_LIFT, fadeMs: 190, breathe: 0.055, breatheMs: 1500 };
+//
+// `r` is the fallback radius only — the size this was drawn at while its one
+// caller was a walk, where the thing being marked is a patch of ground and has
+// no size of its own. A FOCUS does: see markRadius, which is what the ring is
+// cut to now.
+// The floating focus mark — the paper arrow that says which thing, or which
+// FRIEND, the action buttons are currently about. Two of them exist, because
+// the two facings in main.js are independent and can both be live: one over
+// the person the people-verbs would reach, one over the piece 「ひろう」 would
+// take. See paintFocusMark for why it floats where the bubbles do, and
+// updateMark in main.js for who decides what gets marked.
+const FOCUS_MARK = {
+  // World units across. At conversation distance this projects to about
+  // seventy pixels on a portrait phone — a marker, not a signpost.
+  w: 0.38,
+  // The idle float: a slow rise and fall, small enough to read as hovering
+  // attention rather than as bouncing.
+  bobAmp: 0.045,
+  bobMs: 1500,
+  // Scale in and out, the hand slot's gesture at the hand slot's pace.
+  easeMs: 120,
+  // Air between the mark and the thing it is over. A person gets a little
+  // less on top of headWorld, since that anchor already carries the bubble's
+  // own clearance.
+  gap: 0.20,
+  personGap: 0.06,
+};
+
+const WALK_MARK = {
+  r: 0.58,
+  lift: SHADOW_LIFT,
+  fadeMs: 190,
+  breathe: 0.055,
+  breatheMs: 1500,
+  // How far outside the piece's own shade the ring is drawn. A quarter again,
+  // which is a gap you can see at a lantern's size and still a ring that plainly
+  // belongs to the thing rather than to the floor around it.
+  grow: 1.25,
+  // ...and the ends of that.
+  //
+  // The floor is legibility. A lantern's foot is a tenth of a unit and its shade
+  // barely more; a ring cut honestly to that is a smudge under the piece rather
+  // than a mark around it, and the one thing this has to do is be findable at a
+  // glance. The ceiling keeps the bigger pieces from wearing a crop circle.
+  rMin: 0.20,
+  rMax: 0.78,
+};
+
+// HOW BIG A PIECE READS ON THE FLOOR, as the two half-extents its ground shade
+// is cut to. Named because there are two readers now and they have to agree: a
+// focused piece wears a shadow and a ring, and a ring that did not know what the
+// shadow was would cross it at some sizes and vanish inside it at others.
+const PROP_SHADOW = { x: 2.3, z: 2.6 };
+
+// The ring a focused piece gets.
+//
+// ONE radius, not two, because the mark is a circle: the wider of the piece's
+// two spreads is what has to be cleared, and the narrow way round simply gets a
+// little more room than it needed.
+//
+// `lean` shortens the piece along its own shaft, exactly as the ground shadow is
+// shortened for a propped one — a sasumata stood against a wall covers a foot of
+// floor, not the two and a half it covers lying down, and a ring cut to its
+// lying-down length is a hoop around half the room.
+export function markRadius(rx, rz, lean = 0) {
+  const half = Math.max(
+    rx * Math.cos(lean) * PROP_SHADOW.x, rz * PROP_SHADOW.z,
+  ) * 0.5;
+  return Math.min(WALK_MARK.rMax, Math.max(WALK_MARK.rMin, half * WALK_MARK.grow));
+}
 
 // Where in the dusk-to-dark fade the lamps come up. Below this they are off
 // entirely, which is what keeps the lit sheet from ghosting through the whole
@@ -834,6 +944,12 @@ const BLACK = new THREE.Color(0x000000);
 // exactly when the shared ones are least safe to assume anything about.
 const _snapV = new THREE.Vector3();
 const _snapC = new THREE.Color();
+
+// The focus marks' scratch — a box and sphere for measuring a piece on the way
+// into focus, a vector for standing the mark over its target every frame.
+const _fmBox = new THREE.Box3();
+const _fmSphere = new THREE.Sphere();
+const _fmPos = new THREE.Vector3();
 
 // Where a pixel of the sky texture actually sits, as a direction in the sky's
 // own frame — which `_aimSky` then turns to stand over wherever you are.
@@ -2494,6 +2610,42 @@ export class Globe {
     this.tintables.push(this._markMesh.material);
     this._markOn = 0;
     this._markClock = 0;
+    // What the geometry above is currently cut to, so a focus that wants the
+    // same size as the last one costs nothing. See _markSize.
+    this._markR = WALK_MARK.r;
+
+    // The two floating focus marks — see FOCUS_MARK. One texture painted once;
+    // a material each, because both join `tintables` and a shared material
+    // would be tinted twice per frame for no saving worth having.
+    //
+    // Children of `world` like the ring, so every position written into them
+    // is in the same frame the characters' own roots and the loose anchors
+    // are — which is what lets _syncFocusMarks copy those positions straight
+    // across without a change of basis.
+    //
+    // renderOrder 500: above the whole cast (they climb from 10) and below the
+    // hand at 9000, because the mark is ABOUT the world rather than of it —
+    // it must never be cut in half by the head it floats over — but a thing in
+    // your hand is nearer than any annotation. Depth test stays on, so walls
+    // and trees still hide a mark whose target has gone behind them.
+    const focusTex = texFrom(paintFocusMark());
+    const mkFocusMark = () => {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(FOCUS_MARK.w, FOCUS_MARK.w),
+        sceneryMaterial(focusTex),
+      );
+      mesh.renderOrder = 500;
+      mesh.visible = false;
+      mesh.material.opacity = 0.96;
+      this.world.add(mesh);
+      this.tintables.push(mesh.material);
+      // `clock` staggered so two marks on screen never bob in step — moving
+      // as one drilled unit is the tell that they are widgets.
+      return { mesh, target: null, lift: 0, on: 0, clock: Math.random() * 1400 };
+    };
+    this._markPerson = mkFocusMark();
+    this._markThing = mkFocusMark();
+    this._fmAt = 0;
 
     this.sprites = [];
     // Which of these an arrival has to pick its way around — see setScenery.
@@ -3495,9 +3647,9 @@ export class Globe {
       face(art.doorInner(), 0, doorW, {
         grounded: true, proud: -0.10, side: THREE.BackSide, sink: 'interior',
       });
-      // A blank mounting block for Chiikawa's portrait plate. It follows the
-      // shell just like an opening frame but does not punch the wall; keeping
-      // its returned group gives a future image plate an exact façade anchor.
+      // Chiikawa's portrait plate. It follows the shell just like an opening
+      // frame but does not punch the wall, so its drawing stays square to the
+      // curved façade while remaining slightly proud of the plaster.
       if (art.plate && Number.isFinite(spec.plateAt)) {
         const plateBlock = face(art.plate(), spec.plateAt, spec.plateSize, {
           y: spec.plateHeight, proud: 0.045, outdoorTint: true,
@@ -3562,19 +3714,83 @@ export class Globe {
         return N.clone().multiplyScalar(Math.cos(arc))
           .addScaledVector(tangentAt(a), Math.sin(arc)).normalize();
       };
-      // Stand a thing on the sphere facing a bearing: up is the surface normal
-      // under its own feet, forward is the facing's tangent flattened against
-      // that up — the identical basis the camera rig builds, so a piece of
-      // furniture and the player agree about what "facing the window" means.
-      const standAt = (obj, dir, faceBearing) => {
+      // ...and the way back: a spot on the planet read as this room's own
+      // (bearing, distance) pair. The inverse of spotDir, and it exists for
+      // one reader — a piece PUT DOWN somewhere has a world direction and
+      // needs to know where that is in the room's terms before it can be
+      // stood against the wall there. See propFor below.
+      //
+      // The frame is the shell's own, taken the way everything else here
+      // takes it, because a bearing is only meaningful in the room's frame:
+      // tangentAt(0) is the door's line and tangentAt(π/2) is a right angle
+      // round from it, so a tangent resolved against those two IS a bearing.
+      const _bTan = new THREE.Vector3();
+      const bearingAt0 = tangentAt(0);
+      const bearingAt90 = tangentAt(Math.PI / 2);
+      const bearingOf = (d) => {
+        _bTan.copy(d).addScaledVector(N, -d.dot(N));
+        if (_bTan.lengthSq() < 1e-12) return 0;
+        return Math.atan2(_bTan.dot(bearingAt90), _bTan.dot(bearingAt0));
+      };
+      // How far out from the middle of the room a spot is, in world units —
+      // the same measure `out` is written in.
+      const outOf = (d) => Math.acos(clampUnit(d.dot(N))) * R;
+      // Half the doorway, as a spread of BEARING at the wall, plus a little.
+      // A piece propped inside this arc would be leaning on the opening
+      // rather than on masonry — its head out in the gap with nothing behind
+      // it — which is the one place round the room where the wall is not
+      // there to do the leaning. The margin keeps it off the frame's drawn
+      // ink legs as well, the same thought `gapInset` has about walking
+      // through a painted line.
+      const doorArc = Math.asin(clampUnit((spec.doorWidth / 2) / rad)) + 0.18;
+      // Stand a thing on the sphere facing a DIRECTION: up is the surface
+      // normal under its own feet, forward is the given tangent flattened
+      // against that up — the identical basis the camera rig builds, so a
+      // piece of furniture and the player agree about what "facing the
+      // window" means. Split out of standAt because a facing arrives in one
+      // of two currencies now: the furniture tables speak bearings, and a
+      // set-down speaks the direction the player was actually stood in —
+      // see faceDir on the loose records.
+      const standToward = (obj, dir, fwdDir) => {
         obj.position.copy(dir).multiplyScalar(R);
-        const fwd = tangentAt(faceBearing);
-        fwd.addScaledVector(dir, -fwd.dot(dir)).normalize();
+        const fwd = fwdDir.clone().addScaledVector(dir, -fwdDir.dot(dir)).normalize();
         const right = new THREE.Vector3().crossVectors(dir, fwd);
         obj.quaternion.setFromRotationMatrix(
           new THREE.Matrix4().makeBasis(right, dir.clone(), fwd),
         );
       };
+      // ...and the bearing-speaking face of it, which is all this ever was.
+      const standAt = (obj, dir, faceBearing) => {
+        standToward(obj, dir, tangentAt(faceBearing));
+      };
+
+      // WHAT THIS ROOM OFFERS TO LEAN THINGS ON, published for anybody who
+      // walks in carrying one. Everything above is scoped to this building —
+      // its frame, its wall, its doorway — and a piece is born knowing only
+      // the room it was authored in, which is exactly the wrong thing to
+      // know: Chiikawa's fork carried into the cave should stand against the
+      // cave's rock, not fail to find a house that is twenty units away.
+      // So the ROOM publishes and the piece asks. See propSpotFor.
+      //
+      // `out` is the distance at which a leaning head meets this room's wall,
+      // and it is read off whichever piece was authored leaning in here
+      // rather than written down again — that entry's `out` was measured
+      // against this masonry, which is the whole reason it was worth
+      // measuring. One number, one place, no drift.
+      //
+      // It is a property of the ROOM and the PIECE together, strictly: a
+      // shorter fork would touch a given wall further in. It serves as a room
+      // constant because the two sasumata are one model at one length, which
+      // is also why either may stand in either house. A leaning prop of some
+      // other size would need its own.
+      {
+        const leaner = spec.furniture.find((piece) => piece.lean);
+        if (leaner) {
+          rec.lean = {
+            out: leaner.out, spotDir, bearingOf, outOf, standAt, doorArc,
+          };
+        }
+      }
 
       // The floor: one cap of the planet's own sphere, lifted a hair, wearing
       // the room's floor with the rug drawn into it — one canvas, one draw
@@ -3699,6 +3915,26 @@ export class Globe {
             new THREE.Matrix4().makeBasis(right, N.clone(), fwd));
         } else {
           standAt(anchor, dir, f.spin !== undefined ? f.spin : f.at + Math.PI);
+          // LEANING — a pose, not a place. `lean` pitches the BODY about the
+          // anchor's forward axis, in radians up off the floor: 0 is the
+          // builder's own lie-flat, π/2 is stood square on its local +X end.
+          // Positive tips the -X end up, which for the sasumata is the fork.
+          //
+          // On the body rather than the anchor, and the difference is a bug
+          // that never shipped: the anchor carries the ground shadow too, and
+          // a tilted anchor stands the shadow up on edge with the piece.
+          //
+          // For an `item` this is a HOME pose, exactly as `lift` below is a
+          // home height — see the place() closure further down, where both
+          // are re-applied at home and dropped everywhere else. Leaning is
+          // something a WALL does for a piece, not something the piece knows
+          // how to do on its own, so a fork set down in the middle of a
+          // meadow lies flat like anything else you put down.
+          //
+          // A leaning piece is also the one loose thing your shins cannot
+          // move — see the guard in nudgeLoose. Propped is a state somebody
+          // put it in, and only picking it up takes it out of that.
+          if (f.lean) built.group.rotation.z = -f.lean;
           // An item may begin on top of another piece of furniture. The lift
           // is measured along the floor normal, exactly as putDownUnique lifts
           // a piece onto a surface later.
@@ -3758,7 +3994,8 @@ export class Globe {
           // any one piece of furniture is slight, but the floor keeps curving
           // away across the whole width of the room, and a flat disc could only
           // ever touch it at one point — which is what left these hanging.
-          groundCap(R, built.rx * 2.3, built.rz * 2.6, FLOOR_LIFT + SHADOW_LIFT),
+          groundCap(R, built.rx * PROP_SHADOW.x, built.rz * PROP_SHADOW.z,
+            FLOOR_LIFT + SHADOW_LIFT),
           new THREE.MeshBasicMaterial({
             map: shadowTex, transparent: true, depthWrite: false, opacity: 0.42,
           }),
@@ -3767,6 +4004,20 @@ export class Globe {
           shadow.material.polygonOffset = true;
           shadow.material.polygonOffsetFactor = -4;
           shadow.material.polygonOffsetUnits = -8;
+          // The shadow of a LEANING piece is the pool at its foot, not the
+          // outline of it lying down. Two corrections, both undone by place()
+          // the moment the piece leaves home and lies flat again somewhere
+          // else. Dropped by the piece's own `lift`: the cap rides the anchor,
+          // and a leaning piece's anchor is lifted to plant its butt — with
+          // nothing underneath, the flat pose's oval would hang in the air at
+          // lift height. And shortened along the shaft by cos(lean), which is
+          // what a leaned-over length projects onto the floor; across the
+          // shaft it stays as wide as it ever was, because the fork's spread
+          // never left the ground plane.
+          if (f.lean) {
+            shadow.position.y = -(f.lift || 0);
+            shadow.scale.x = Math.cos(f.lean);
+          }
           anchor.add(shadow);
           // Wears the room's hour, like the floor it is lying on. It was in no
           // tint list at all before, so at dusk it stayed at its daylight value
@@ -4013,7 +4264,47 @@ export class Globe {
             // boolean item entries continue to resolve by art as before.
             item: typeof f.item === 'string' ? f.item : null,
             home: dir.clone(),
+            // HOW BIG IT IS ON THE FLOOR, carried on the record because the
+            // built group is the only thing that knows and the focus ring is
+            // asked for from main.js, a file away. The same two half-extents the
+            // ground shadow above is cut from — one footprint, two marks, and
+            // no second measurement to keep in step with the first.
+            rx: built.rx,
+            rz: built.rz,
             homeLift: f.lift || 0,
+            // The STANCE — the sasumata lean. It began as a home-only pose,
+            // the way homeLift is a home-only height, and it is not one any
+            // more: a thing that leans on walls leans on THE wall, not on one
+            // authored spot of it. `propAt` below is where it is standing
+            // now, and this is only the angle it stands at.
+            homeLean: f.lean || 0,
+            // WHERE IT IS LEANING, as a bearing and the room that bearing
+            // belongs to — or null and null for lying flat. A bearing means
+            // nothing without the room it is measured in, so these two travel
+            // together and are written together, and that pair is what lets a
+            // fork stand against a wall that is not its own.
+            //
+            // It starts propped at the authored spot in the room it was built
+            // in, because the arrangement is a prop.
+            propAt: f.lean ? f.at : null,
+            propHome: f.lean ? rec : null,
+            // Its own spot, for going home to. `homeBearing` rather than
+            // `homeAt` so it cannot be misread as the globe's homeAt(dir),
+            // which answers a different question about a different thing.
+            homeBearing: f.at,
+            bornHome: rec,
+            // WHICH WAY IT WAS SET DOWN — a world tangent toward whoever put
+            // it there, or null for the authored facing. Written by
+            // placeLoose at a real set-down and cleared by going home,
+            // because a placement has a placer and an arrangement does not.
+            // This is what stops every placed teapot pointing its spout at
+            // the same compass mark: the piece faces YOU, from wherever you
+            // happened to stand, which is both the convention and what a
+            // hand setting a thing down actually does.
+            faceDir: null,
+            // ...and the ground shadow, which place() has to re-shape when the
+            // stance changes — see the lean note where it was built.
+            shadow,
             atHome: true,
             anchor,
             // The piece's own BODY, kept apart from the anchor it hangs on —
@@ -4031,9 +4322,63 @@ export class Globe {
           };
           const facing = f.spin !== undefined ? f.spin : f.at + Math.PI;
           loose.place = () => {
-            standAt(anchor, loose.dir, facing);
-            if (loose.atHome && loose.homeLift) {
+            // PROPPED or lying down, and that is the whole of the branch.
+            // The stance used to be a question about being at home; it is a
+            // question about whether it is leaning on something, which home
+            // is only the first answer to. See propFor above and placeLoose,
+            // which is the one thing that decides it.
+            //
+            // The facing follows the bearing rather than the authored spin,
+            // and it has to: `spin` is at + π/2 in every entry that leans —
+            // the rule that turns the shaft into the room's radial plane so
+            // the head tips onto the masonry — so a piece propped at a NEW
+            // bearing needs that same right angle taken from the new one.
+            // At home the two agree by construction, which is what lets this
+            // one line serve both.
+            //
+            // ...and it is taken in the frame of WHATEVER ROOM it is leaning
+            // in, which need not be this one. `standAt` here is the closure
+            // built for the room this piece was authored in, and a bearing
+            // handed to the wrong room's frame is a piece facing a direction
+            // nobody chose — the same trap the lantern's own note in config
+            // records. So a propped piece is stood by its host's standAt and
+            // only a flat one falls back to its birthplace's.
+            const propped = loose.homeLean && loose.propAt !== null;
+            const host = propped && loose.propHome && loose.propHome.lean
+              ? loose.propHome.lean : null;
+            // Three facings, in the order of who has the strongest claim:
+            // a wall it is leaning on dictates outright; then the direction
+            // it was set down in, facing its placer; then the authored spin,
+            // which is all a piece at home or fresh from the build has.
+            if (host) host.standAt(anchor, loose.dir, loose.propAt + Math.PI / 2);
+            else if (loose.faceDir) standToward(anchor, loose.dir, loose.faceDir);
+            else standAt(anchor, loose.dir, facing);
+            if (propped) {
+              // Its butt is under the floor until the lift plants it — see
+              // the `lean` note where this was built.
               anchor.position.addScaledVector(loose.dir, loose.homeLift);
+              loose.body.rotation.z = -loose.homeLean;
+              if (loose.shadow) {
+                loose.shadow.position.y = -loose.homeLift;
+                loose.shadow.scale.x = Math.cos(loose.homeLean);
+              }
+            } else {
+              // A perched item's authored home lift still belongs only to
+              // its home spot — that is a different field doing a different
+              // job, and the piece it was written for does not lean.
+              if (loose.atHome && loose.homeLift) {
+                anchor.position.addScaledVector(loose.dir, loose.homeLift);
+              }
+              // Flat, and the shadow is its whole outline again. Written
+              // unconditionally so standing up does not have to remember
+              // what lying down changed.
+              if (loose.homeLean) {
+                loose.body.rotation.z = 0;
+                if (loose.shadow) {
+                  loose.shadow.position.y = 0;
+                  loose.shadow.scale.x = 1;
+                }
+              }
             }
           };
           this.loose.push(loose);
@@ -4488,6 +4833,11 @@ export class Globe {
 
     // So the CPU loops know to leave it alone, and so the guard above works.
     m.userData.hourDark = dark;
+    // ...and the side switch beside it, for the callers that patch a material
+    // lazily and have to go on writing to it afterwards without having kept
+    // the reference themselves — see _syncCastHeld, where the thing being lit
+    // outlives whoever is currently carrying it.
+    if (side) m.userData.hourSide = side;
   }
 
   // `pickHouse` and `nearestHome` stood here, and they are gone rather than
@@ -4517,10 +4867,23 @@ export class Globe {
   // the curve within a second or two, so for most of the walk there is no
   // evidence on screen that a trip is happening. That is exactly when somebody
   // decides the tap missed and taps again somewhere else.
-  setWalkMarker(dir, dtMs) {
+  //
+  // `lift` is how far above the planet's surface the thing being marked stands,
+  // and it is the whole of what was wrong with this while it was a walk marker
+  // wearing a second hat. A destination is a spot on the ground and a `dir` says
+  // everything about it; a FOCUS is an object, and an object can be on a table.
+  // Left at the surface, a lantern set down on the low table wore its ring on
+  // the floor underneath — pointing, from a foot below, at the thing the buttons
+  // were about. Nobody reads that as "this one"; they read it as a mark on the
+  // floor, which is what it looked like.
+  //
+  // `r` is the ring's radius. See markRadius, which is where it comes from.
+  setWalkMarker(dir, dtMs, lift = 0, r = WALK_MARK.r) {
     if (dir) {
-      this.walkMark.position.copy(dir).multiplyScalar(CONFIG.globe.radius);
+      this.walkMark.position.copy(dir)
+        .multiplyScalar(CONFIG.globe.radius + lift);
       this.walkMark.quaternion.setFromUnitVectors(UP, dir);
+      this._markSize(r);
     }
     const k = 1 - Math.exp(-dtMs / WALK_MARK.fadeMs);
     this._markOn += ((dir ? 1 : 0) - this._markOn) * k;
@@ -4540,6 +4903,101 @@ export class Globe {
     // rotated flat, it is built lying down, so the two axes it spreads along are
     // the two in the ground.
     this._markMesh.scale.set(b, 1, b);
+  }
+
+  // CUT AGAIN RATHER THAN SCALED, and that is not fussiness — a scale is wrong
+  // here in a way you can see. The mark is a cap, so its vertices already follow
+  // the sphere: every one of them sits WALK_MARK.lift above the surface, rim
+  // included, which is the whole reason it stopped tearing into the hillside.
+  // Squash that cap in x and z and the sag stays cut for the radius it was built
+  // at while the surface under it has stopped curving away as fast — at half
+  // size the rim keeps three thousandths of its two centimetres of clearance,
+  // and the ring goes back to banding against the ground it is drawn on.
+  //
+  // The cost is a geometry, and it is charged only when the size actually
+  // changes — which is when the focus moves from one piece to another, at
+  // walking pace. Eighty-one vertices at the speed somebody crosses a room is
+  // not a budget anybody has to think about.
+  _markSize(r) {
+    if (Math.abs(r - this._markR) < 1e-3) return;
+    this._markR = r;
+    this._markMesh.geometry.dispose();
+    this._markMesh.geometry = groundCap(
+      CONFIG.globe.radius, r * 2, r * 2, WALK_MARK.lift,
+    );
+  }
+
+  // ------------------------------------------------------ the focus marks
+  //
+  // Who decides what is marked is main.js's updateMark — the same owner the
+  // ring had — because the conditions are all things only it knows: which
+  // facing settled, whether 「ひろう」 is actually on offer, whether the friend
+  // is mid-sentence. These two setters only remember the target; everything
+  // that has to happen every frame happens in _syncFocusMarks.
+
+  // Mark a friend, or nobody. `ch` is a Character; its headWorld is the same
+  // anchor the speech bubble hangs from, which is the point — the mark stands
+  // exactly where the bubble will, and main.js swaps one for the other.
+  setMateMark(ch) {
+    this._markPerson.target = ch;
+  }
+
+  // Mark a loose piece, or nothing. Its height is measured on the way in
+  // rather than per frame: a bounding sphere is shape-agnostic — a tall
+  // lantern and a sasumata lying flat both come back with the reach of their
+  // biggest half — and a piece's size does not change while it is focused.
+  // The radius is a SIZE, not a position, so measuring through world matrices
+  // is safe here where copying a world-space centre would not be: the marks
+  // live inside the floating `world` group like everything they annotate.
+  setGrabMark(loose) {
+    const M = this._markThing;
+    if (M.target === loose) return;
+    M.target = loose;
+    if (!loose) return;
+    _fmBox.setFromObject(loose.body || loose.anchor);
+    _fmBox.getBoundingSphere(_fmSphere);
+    M.lift = _fmSphere.radius + FOCUS_MARK.gap;
+  }
+
+  // The per-frame half: position over the target, face the camera, bob, and
+  // ease the scale toward present or gone. Squarely the hand slot's arrival
+  // gesture — scale rather than opacity — because the mark is paper and ink,
+  // and half-transparent ink stops reading as a line.
+  //
+  // The person mark re-reads its target every frame where the thing mark was
+  // measured once, and that split is deliberate: a character WALKS — the mark
+  // has to follow them through a stroll and a hop — where a focused piece
+  // stands still for as long as it is the focus.
+  _syncFocusMarks(now) {
+    const dtMs = Math.min(100, this._fmAt ? now - this._fmAt : 16);
+    this._fmAt = now;
+    const k = 1 - Math.exp(-dtMs / FOCUS_MARK.easeMs);
+    for (const M of [this._markPerson, this._markThing]) {
+      M.on += ((M.target ? 1 : 0) - M.on) * k;
+      const shown = M.on > 0.004;
+      if (shown !== M.mesh.visible) M.mesh.visible = shown;
+      if (!shown) continue;
+      M.clock += dtMs;
+      const bob = Math.sin((M.clock / FOCUS_MARK.bobMs) * Math.PI * 2)
+        * FOCUS_MARK.bobAmp;
+      if (M.target) {
+        if (M === this._markPerson) {
+          const ch = M.target;
+          ch.headWorld(_fmPos);
+          M.mesh.position.copy(_fmPos)
+            .addScaledVector(ch.normal, FOCUS_MARK.personGap + bob);
+        } else {
+          const l = M.target;
+          M.mesh.position.copy(l.anchor.position)
+            .addScaledVector(l.dir, M.lift + bob);
+        }
+      }
+      // Screen-aligned, not aimed: copying the camera's quaternion keeps the
+      // mark square to the view wherever it stands, with none of lookAt's
+      // shear at the frame's edge.
+      M.mesh.quaternion.copy(this.camera.quaternion);
+      M.mesh.scale.setScalar(M.on);
+    }
   }
 
   // The window view and the door glimpse both stood here — the planet rendered
@@ -5303,8 +5761,32 @@ export class Globe {
 
     // What a lamp has to say for ITSELF: how bright its own glass looks, and
     // the halo of air around it. Both are emitters, and emitters still add.
+    //
+    // ...and both are calmed by how dark the room around them is — see
+    // FIXTURE_GLOW. `_tintInBase` rather than `tintIn` because the second is
+    // written by _syncInterior at the END of this method, so reading it here
+    // would be reading the previous frame's hour. They are the same value; only
+    // the timing differs.
+    //
+    // The luminance is of the LINEAR values three stores, which is why the
+    // room's midnight comes out around an eighth rather than the four tenths
+    // its hex would suggest. That is the honest measure of how much light is in
+    // the room, and the floor below is fitted against it.
+    const room = this._tintInBase;
+    const roomLit = room
+      ? Math.min(1, 0.299 * room.r + 0.587 * room.g + 0.114 * room.b)
+      : 1;
+    const fade = (floor) => floor + (1 - floor) * roomLit;
+    const calmHalo = fade(FIXTURE_GLOW.halo);
+    const calmGlass = fade(FIXTURE_GLOW.glass);
+
     for (const { L, burn } of s.item) {
-      for (const hh of L.haloes) hh.mesh.material.opacity = burn * hh.alpha;
+      // The halo is the glare, and it takes the deep end of the calming.
+      for (const hh of L.haloes) hh.mesh.material.opacity = burn * calmHalo * hh.alpha;
+      // The COLOUR is left on the real burn, deliberately. A lit lamp has to go
+      // on looking lit: pulling this toward `off` as well would take a burning
+      // bulb back toward the dull glass it wears when switched off, which is
+      // the one thing the fixture must never say while it is alight.
       _cA.copy(L.off).lerp(L.on, burn);
       // The baseColor is written and not only the visible colour, because the
       // hour multiplies baseColor into everything indoors — writing only the
@@ -5323,7 +5805,13 @@ export class Globe {
       // you see the room through; one alight is a body of light. Held at one
       // opacity it read as a solid ball every morning, which is the one hour a
       // bulb has nothing else to say for itself.
-      if (L.dim !== undefined) L.glass.opacity = L.dim + (L.bright - L.dim) * burn;
+      //
+      // Calmed too, but only barely — this is the shallow end. The glass is the
+      // fixture itself, and taking it far enough down to matter is what makes a
+      // lit bulb read as one going out. It is the halo above that does the work.
+      if (L.dim !== undefined) {
+        L.glass.opacity = L.dim + (L.bright - L.dim) * burn * calmGlass;
+      }
     }
 
     // How completely each one covers what it reaches. Read by every surface in
@@ -5728,6 +6216,83 @@ export class Globe {
     }
   }
 
+  // ...and the same for what one of the CAST is carrying — a lent sasumata, the
+  // lamp somebody walked off with, and your own body's copy once you are high
+  // enough to see it.
+  //
+  // IT TAKES THE LAMPS, and for a while it did not. This was written as a plain
+  // CPU tint alongside the one for the piece in your hand, on the stated
+  // reasoning that the carry builders make their materials fresh so there is no
+  // stable material to patch. That is true of nothing here: `carriedPiece` in
+  // main.js caches one mesh per item and hands the same one out forever. So the
+  // materials were stable all along, and the cost of believing otherwise was a
+  // lit character carrying an unlit object — measured in a fully lamplit room
+  // at #4B4331 against a base of #D5B57E, which is to say a lantern in its own
+  // circle of light rendering at the darkness of an unlit corner.
+  //
+  // The hand keeps the CPU path deliberately. What you hold is nine centimetres
+  // from the eye, in front of whatever you are looking at, and restoring it
+  // would be lighting something that is not really in the world; a piece a
+  // character is carrying is out there in the room with everything else. The
+  // two use different caches — `handMeshes` by art, `carryMeshes` by item — so
+  // neither can reach the other's materials.
+  //
+  // THE UNIFORMS BELONG TO THE PIECE, NOT TO THE CARRIER, and that is the whole
+  // subtlety of doing this lazily. A `dark` handed over at patch time is baked
+  // into the compiled shader and cannot be re-pointed afterwards — so binding a
+  // character's own would leave the sasumata lit by whoever happened to pick it
+  // up first, forever. Each piece gets its own pair on first sight and whoever
+  // is holding it writes them; only one holder is possible at a time.
+  //
+  // THE OBJECT TINT AND NOT THE CAST'S, which survives the rewrite unchanged. A
+  // character is a drawing and gets a lift so their face stays readable after
+  // dark — see CAST_LIFT — and a sasumata is not a face. Given its carrier's
+  // colour it would be the brightest thing on a midnight hillside, held by
+  // somebody who is not.
+  //
+  // Skipped outright for the empty-handed, which is nearly everybody nearly
+  // always: `heldMats` is an empty array until something is put in their hands.
+  // ONE MATERIAL IN EVERY CARRIED PIECE IS NOT ITS OWN, and it has to be left
+  // strictly alone. `carriedPiece` does not clone: measured across the teapot,
+  // the bear and the lantern, each has exactly one material shared with the
+  // room — the near-black ink at #2E2422, a module-level singleton every stick
+  // of furniture in the house is drawn with, already patched and already
+  // wearing `darkIn`. Writing its colour or its uniform from here repaints the
+  // dark trim on every table and shelf in the building for as long as somebody
+  // is carrying something.
+  //
+  // Which is exactly what the CPU version of this method was doing. It wrote
+  // `m.color = base × tint` over every held material including that one, and a
+  // patched material must keep its colour AT the base or the shader multiplies
+  // the hour in twice. So the room quietly darkened its own woodwork whenever a
+  // character picked anything up. Skipping what this method does not own fixes
+  // that as a side effect of doing the main thing correctly.
+  //
+  // The shared ink keeps the room's dark wherever the piece goes, which is a
+  // shrug: it is #2E2422, and the difference between one darkness and another
+  // on a colour that near black is not a thing anybody can see.
+  _syncCastHeld() {
+    for (const ch of this.cast) {
+      if (!ch.heldMats.length) continue;
+      const amt = this.insideAmount(ch.dir);
+      for (const m of ch.heldMats) {
+        if (!m.userData.hourDark) {
+          this._wearHour(m, {
+            dark: { value: new THREE.Color(0xffffff) },
+            mask: 'side',
+            side: { value: amt },
+            tag: 'carried',
+          });
+          // Ours, and the only ones this method may write to afterwards.
+          m.userData.hourCarried = true;
+        }
+        if (!m.userData.hourCarried) continue;
+        m.userData.hourDark.value.copy(this.tint).lerp(this.tintIn, amt);
+        m.userData.hourSide.value = amt;
+      }
+    }
+  }
+
   // Which set of lamps one of the cast is standing among: the house's, seen
   // from the grass, or the room's, seen from the rug. Written to the switch
   // _wearHour left on the character, which exists from the moment they join
@@ -6026,6 +6591,24 @@ export class Globe {
       // anchor so its light can follow you. What you may kick is what you can
       // see, which is the honest reading of this test and always was.
       if (!n.anchor.visible || (n.body && !n.body.visible)) continue;
+      // ...and not while it is standing where it was PROPPED — at home or at
+      // any other bit of wall somebody stood it against. A propped piece is
+      // not lying about in the way, it is leaning on something, and a shin
+      // does not knock a sasumata off a wall, it brushes past it. This is the
+      // one loose piece that is furniture until you deliberately pick it up.
+      //
+      // The alternative was tried in the head and rejected: letting a kick
+      // topple it makes the room's tidiest object its most fragile, and the
+      // reset for that (walk it back, set it down on its spot) is a chore
+      // rather than a gag. The bear IS the gag — a thing on the floor that
+      // scoots when you shuffle into it — and the difference between the two
+      // is exactly the difference this flag names.
+      //
+      // Only the stance is protected, never the piece: set one down out on
+      // the floor, or out on the grass where there is no wall to lean on,
+      // and it is as kickable as anything else lying there. Standing it
+      // against a wall again is what makes it furniture again.
+      if (n.propAt !== null && n.homeLean) continue;
       const gap = at.angleTo(n.dir) * R;
       if (gap < n.reach) {
         // A perched item's authored home lift belongs only to its home spot.
@@ -6391,9 +6974,84 @@ export class Globe {
   // `place()` is the closure built where the piece was born, so a bear set
   // down on the meadow is stood up by the exact code that stood it on the
   // room's floor.
-  placeLoose(loose, spot) {
+  // WHERE A LEANING THING WOULD STAND if it were put down at `spot` — the
+  // room, the bearing, and the spot on that room's wall — or null when there
+  // is no wall to lean on there.
+  //
+  // Asked of every room rather than of the piece's own, which is the whole of
+  // what lets a fork be left standing in somebody else's house. The rooms are
+  // the same shape and the two sasumata are the same model, so the only thing
+  // that differs between leaning here and leaning there is the distance at
+  // which a head meets the wall — 2.06 under Chiikawa's roof against 2.95 in
+  // the cave, because the shells are 3.2 and 4.0. That number belongs to the
+  // ROOM and is published by it; the piece brings only its angle.
+  //
+  // Three ways to answer null, and each is a place the wall is not: too far
+  // in (you are putting it down on the floor, not against anything), not in
+  // this room at all (which is also what keeps a piece toppling off a stump
+  // on the far side of the planet from reading as a spot indoors), and across
+  // the open doorway, where a leaning thing would be leaning on the gap.
+  //
+  // The radial SNAP is the affordance and is deliberate: a head only touches
+  // the wall at one distance, so a spot that means "lean it there" cannot
+  // also mean "at exactly this radius". What the player chooses by tapping is
+  // a BEARING — which bit of wall — and the room supplies the rest. That is
+  // why the catch area can be as generous as it is without ever being
+  // ambiguous.
+  propSpotFor(spot) {
+    for (const home of this.homes) {
+      const L = home.lean;
+      if (!L || !L.out) continue;
+      const outArc = L.outOf(spot);
+      if (outArc < L.out * CONFIG.uniques.leanFrom) continue;
+      if (outArc > L.out + 0.8) continue;
+      const at = L.bearingOf(spot);
+      // Wrapped to ±π before it is compared with the doorway's half-arc, or
+      // a bearing that came back just under a full turn would read as miles
+      // from a door it is standing in.
+      if (Math.abs(Math.atan2(Math.sin(at), Math.cos(at))) < L.doorArc) continue;
+      return { home, at, dir: L.spotDir(at, L.out) };
+    }
+    return null;
+  }
+
+  placeLoose(loose, spot, face) {
     loose.atHome = !spot;
     loose.dir.copy(spot || loose.home).normalize();
+    // WHICH WAY IT FACES, remembered STICKILY and on purpose. `face` only
+    // arrives from a genuine set-down (putDownUnique, which knows where the
+    // placer stood); everything else that re-places a piece — the per-frame
+    // call that keeps a carried lamp's light over your feet, the topple
+    // walking a bear off a stump rim in little steps — passes nothing, and
+    // must inherit the facing the set-down chose rather than erase it. A
+    // topple that forgot would land the bear facing the authored compass
+    // mark it was born with, which is precisely the stamped look this field
+    // exists to end. Going home clears it: an arrangement has no placer.
+    if (!spot) loose.faceDir = null;
+    else if (face) loose.faceDir = face.clone();
+    // STAND IT UP IF THERE IS A WALL TO STAND IT AGAINST. The one place the
+    // stance is decided, so every way of putting a thing down — the tap, the
+    // おく verb, a drag out of the pack, the walk home — agrees about it
+    // without any of them knowing the rule.
+    //
+    // Going home always props (that is what the arrangement is); anywhere
+    // else asks the room, which answers with a spot on the wall or with
+    // nothing. Written every time rather than only when it changes, so a
+    // piece that was leaning and is now on the grass has no stance left over.
+    if (loose.homeLean) {
+      if (!spot) {
+        loose.propAt = loose.homeBearing;
+        loose.propHome = loose.bornHome;
+      } else {
+        const prop = this.propSpotFor(loose.dir);
+        loose.propAt = prop ? prop.at : null;
+        loose.propHome = prop ? prop.home : null;
+        // Out to where the head actually reaches the wall. The tap chose
+        // which bit of wall; the room knows how far off it a leaning thing
+        // has to stand.
+        if (prop) loose.dir.copy(prop.dir);
+      }
+    }
     loose.vel.set(0, 0, 0);
     loose.place();
     loose.anchor.visible = true;
@@ -6769,6 +7427,14 @@ export class Globe {
     // ...and what that thing WEARS, which is the same question again and was
     // being answered for only half of what the hand can hold. See _syncHeld.
     this._syncHeld(anchor);
+    // The same question for whatever the cast are carrying, which is asked of
+    // where THEY stand rather than of where you do — a friend who walked your
+    // lamp indoors is holding it in the room, not on your lawn.
+    this._syncCastHeld();
+    // The floating focus marks, after the cast have stood themselves for the
+    // frame — the person mark reads a character's live anchor, and moving it
+    // before they do would trail it a frame behind a walking friend.
+    this._syncFocusMarks(t);
 
     // Before the billboarding below: those cards hang inside the sky, so their
     // lookAt has to resolve against a parent that has already been turned. It

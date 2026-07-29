@@ -164,48 +164,256 @@ function ovalTop(group, rx, rz, thick, y, mat) {
 
 export function buildTable(h) {
   const g = new THREE.Group();
-  const mat = fillMat(PAL.furniturePink);
-  const rx = h * 0.78;
-  const rz = h * 0.50;
-  const thick = h * 0.085;
-  const legLen = h - thick;
+  const topPink = fillMat(PAL.furniturePink);
+  const rimPink = fillMat(
+    new THREE.Color(PAL.furniturePink).multiplyScalar(0.82),
+  );
+  const white = fillMat(PAL.furniturePaper);
+  const rx = h * 1.22;
+  const rz = h * 0.78;
+  const rimH = h * 0.14;
+  const legTop = h - rimH;
 
-  // Attached near the RIM and splayed well out, so the feet land outside the
-  // top's own silhouette. Both numbers were much smaller first time and the
-  // table read as a floating disc: from standing height a tabletop hides
-  // everything directly beneath it, so legs tucked under it are legs nobody
-  // ever sees. Splaying them past the edge is not a stylistic flourish in the
-  // reference drawing — it is the only reason the thing has visible legs.
-  for (const a of [0.72, 2.42, 3.86, 5.56]) {
-    leg(g, Math.sin(a) * rx * 0.90, Math.cos(a) * rz * 0.90,
-      legLen, h * 0.034, h * 0.026, 0.28, mat);
+  // Four thin white wire legs. Each is one continuous tube: it drops almost
+  // straight from the underside, bends outward along the floor, then curls
+  // upward at the tip. Separate cylinders cannot make the little J-shaped
+  // feet that distinguish this table in the anime.
+  const legR = h * 0.030;
+  for (const [sx, sz] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+    const x = sx * rx * 0.61;
+    const z = sz * rz * 0.57;
+    const outward = new THREE.Vector2(x, z).normalize();
+    const hook = h * 0.12;
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, legTop + h * 0.010, z),
+      new THREE.Vector3(
+        x + outward.x * h * 0.012, h * 0.27,
+        z + outward.y * h * 0.012,
+      ),
+      new THREE.Vector3(
+        x + outward.x * h * 0.030, h * 0.075,
+        z + outward.y * h * 0.030,
+      ),
+      new THREE.Vector3(
+        x + outward.x * hook * 0.55, h * 0.025,
+        z + outward.y * hook * 0.55,
+      ),
+      new THREE.Vector3(
+        x + outward.x * hook, h * 0.055,
+        z + outward.y * hook,
+      ),
+      new THREE.Vector3(
+        x + outward.x * hook * 1.10, h * 0.125,
+        z + outward.y * hook * 1.10,
+      ),
+    ]);
+    part(g, (pad) => new THREE.TubeGeometry(
+      curve, 28, legR + pad, 9, false,
+    ), white, null, INK_SMALL);
   }
-  const slab = ovalTop(g, rx, rz, thick, legLen, mat);
 
-  // Scuffed on the FACE of the top and nowhere else. The legs are painted in the
-  // pen, so a mark on one would be a mark the colour of the leg, and the rim is
-  // a sixteenth of the height — a cluster of three strokes has nowhere to stand.
-  //
-  // `minUp` says that outright rather than leaving it to luck. Left at -0.1, to
-  // mean "anything but the underside", the rim came out with none anyway: this
-  // slab is a TAPERED cylinder, 1.0 over 0.97, which tips its side's normal 26
-  // degrees below the horizon and under the threshold on its own. Right answer,
-  // wrong reason, and it would have quietly become the wrong answer the day
-  // somebody straightened the taper.
-  const scuff = markMat(new THREE.Color(PAL.furniturePink));
-  const marks = scuffs(slab.geometry, {
-    count: 8, len: h * 0.05, weight: h * 0.009, minUp: 0.30, seed: 11,
+  // The darker oval is the visible edge band. A shallow, slightly smaller
+  // ellipsoid rises through it to make the pale top gently padded instead of
+  // looking like a flat cylinder.
+  ovalTop(g, rx, rz, rimH, legTop, rimPink);
+  const capRise = h * 0.050;
+  part(g, (pad) => {
+    const s = new THREE.SphereGeometry(1, 34, 18);
+    s.scale(rx * 0.965 + pad, capRise + pad, rz * 0.965 + pad);
+    return s;
+  }, topPink, (m) => {
+    m.position.y = h - capRise * 0.20;
   });
-  if (marks) {
-    const m = new THREE.Mesh(marks, scuff);
-    m.position.y = legLen + thick / 2;
-    g.add(m);
-  }
 
   // The leg material is shared across every piece, so it is registered once by
   // whoever is built first — handing it back from each of them would have the
   // room tint it three times over on every hour change.
-  return { group: g, fills: [mat, legMat(), scuff], top: legLen + thick, rx, rz };
+  return {
+    group: g,
+    fills: [topPink, rimPink, white, legMat()],
+    top: h + capRise * 0.80,
+    rx,
+    rz,
+  };
+}
+
+// ----------------------------------------------------------- the open book
+//
+// A book left OPEN rather than a closed box with a line painted down it. Each
+// cover and page half is its own curved slab: the gutter sits low, the paper
+// rises gently through the middle, and the outer corners pull inward. The ink
+// drawings are real tubes laid over that surface, so they remain visible after
+// the book is picked up and viewed from another angle.
+export function buildOpenBook(h) {
+  const g = new THREE.Group();
+  const cover = fillMat(PAL.openBookCover);
+  const paper = fillMat(PAL.openBookPaper);
+  const edge = fillMat(PAL.openBookEdge);
+  const dark = legMat();
+
+  const halfW = h * 1.18;
+  const halfD = h * 0.79;
+  const gutter = h * 0.025;
+  const coverThick = h * 0.040;
+  const pageThick = h * 0.070;
+  const pageBase = h * 0.045;
+
+  const arch = (u, zNorm, pages) => {
+    const crown = Math.sin(Math.min(1, u) * Math.PI * 0.95);
+    const edgeCurl = zNorm * zNorm;
+    if (pages) {
+      return h * (0.016 + crown * 0.090 + u * 0.016 + edgeCurl * 0.010);
+    }
+    return h * (crown * 0.050 + u * 0.012 + edgeCurl * 0.006);
+  };
+
+  const halfGeometry = (side, pages, pad) => {
+    const outer = halfW * (pages ? 0.965 : 1.02) + pad;
+    const inner = Math.max(0.001, gutter - pad);
+    const depth = halfD * (pages ? 0.965 : 1.03) + pad;
+    const thick = (pages ? pageThick : coverThick) + pad * 2;
+    const base = pages ? pageBase : 0;
+    const width = outer - inner;
+    const centre = side * (inner + width / 2);
+    const geo = new THREE.BoxGeometry(width, thick, depth * 2, 12, 1, 10);
+    geo.translate(centre, base + (pages ? pageThick : coverThick) / 2, 0);
+
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      const z = p.getZ(i);
+      const u = Math.max(0, Math.min(1, (Math.abs(x) - inner) / width));
+      const zNorm = Math.max(-1, Math.min(1, z / depth));
+      // Pull only the outer corners inward, leaving the gutter straight.
+      const cornerT = Math.max(0, (Math.abs(zNorm) - 0.72) / 0.28);
+      const corner = h * 0.060 * cornerT * cornerT * u * u * u;
+      p.setX(i, x - side * corner);
+      p.setY(i, p.getY(i) + arch(u, zNorm, pages));
+    }
+    geo.computeVertexNormals();
+    return geo;
+  };
+
+  for (const side of [-1, 1]) {
+    part(g, (pad) => halfGeometry(side, false, pad), cover, null, INK_SMALL);
+    part(g, (pad) => halfGeometry(side, true, pad), paper, null, INK_SMALL);
+  }
+
+  const pageTop = (x, z) => {
+    const u = Math.max(0, Math.min(
+      1, (Math.abs(x) - gutter) / (halfW * 0.965 - gutter),
+    ));
+    return pageBase + pageThick
+      + arch(u, z / (halfD * 0.965), true)
+      + h * 0.004;
+  };
+
+  const stroke = (pairs, material = dark, radius = h * 0.011) => {
+    const points = pairs.map(([x, z]) => (
+      new THREE.Vector3(x, pageTop(x, z), z)
+    ));
+    const curve = new THREE.CatmullRomCurve3(points);
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(curve, Math.max(5, pairs.length * 3), radius, 6, false),
+      material,
+    ));
+  };
+
+  // A jointed pen stroke for pointed diagrams. Catmull-Rom is right for
+  // handwriting, but it rounds the three weed tips into soft leaves; straight
+  // segments keep those tips crisp while the tube itself keeps the ink round.
+  const polyStroke = (pairs, radius = h * 0.011) => {
+    const points = pairs.map(([x, z]) => (
+      new THREE.Vector3(x, pageTop(x, z), z)
+    ));
+    const path = new THREE.CurvePath();
+    for (let i = 1; i < points.length; i++) {
+      path.add(new THREE.LineCurve3(points[i - 1], points[i]));
+    }
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(path, Math.max(8, pairs.length * 3), radius, 7, false),
+      dark,
+    ));
+  };
+
+  // The warm stack lines along the front edges: enough to say "many pages"
+  // without striping the whole book.
+  for (const side of [-1, 1]) {
+    for (const inset of [0.00, 0.025]) {
+      const pairs = [];
+      for (let i = 0; i <= 7; i++) {
+        const u = i / 7;
+        const x = side * (gutter + u * (halfW * 0.94 - gutter));
+        const z = -halfD * (0.925 - inset);
+        pairs.push([x, z]);
+      }
+      stroke(pairs, edge, h * 0.007);
+    }
+  }
+
+  // Centre crease.
+  stroke([
+    [-h * 0.004, -halfD * 0.76],
+    [0, 0],
+    [h * 0.004, halfD * 0.76],
+  ], edge, h * 0.008);
+
+  // Wavy writing lines, deliberately abstract: the drawings are the page's
+  // subject and these only need to read as notes beside them.
+  const writing = (cx, cz, width) => stroke([
+    [cx - width / 2, cz - h * 0.006],
+    [cx - width * 0.18, cz + h * 0.005],
+    [cx + width * 0.12, cz - h * 0.004],
+    [cx + width / 2, cz + h * 0.004],
+  ], dark, h * 0.0085);
+
+  writing(-halfW * 0.36, -halfD * 0.55, halfW * 0.34);
+  writing(-halfW * 0.34, -halfD * 0.34, halfW * 0.29);
+  writing(-halfW * 0.66, halfD * 0.15, halfW * 0.30);
+  writing(-halfW * 0.35, halfD * 0.58, halfW * 0.34);
+  writing(halfW * 0.67, -halfD * 0.50, halfW * 0.31);
+  writing(halfW * 0.68, -halfD * 0.27, halfW * 0.27);
+  writing(halfW * 0.34, halfD * 0.10, halfW * 0.29);
+  writing(halfW * 0.62, halfD * 0.58, halfW * 0.32);
+
+  // The reference's defining symbol: a rounded weed base with three separate
+  // triangular tips. It is a closed outline, not three stems, so it still
+  // reads as the same icon at the book's small in-room scale.
+  const weed = (cx, cz, width, depth) => {
+    const p = [
+      [-0.34, 0.32], [-0.52, 0.10], [-0.50, -0.40],
+      [-0.18, -0.07], [0.00, -0.56], [0.16, -0.06],
+      [0.50, -0.38], [0.47, 0.12], [0.30, 0.37],
+      [0.00, 0.48], [-0.30, 0.38], [-0.34, 0.32],
+    ];
+    polyStroke(p.map(([x, z]) => [cx + x * width, cz + z * depth]), h * 0.011);
+  };
+
+  weed(-halfW * 0.72, -halfD * 0.46, h * 0.30, h * 0.28);
+  weed(-halfW * 0.39, halfD * 0.26, h * 0.34, h * 0.32);
+  weed(halfW * 0.39, -halfD * 0.38, h * 0.37, h * 0.35);
+  weed(halfW * 0.70, halfD * 0.32, h * 0.30, h * 0.28);
+
+  // Small bent arrows pointing back toward two specimens.
+  polyStroke([
+    [-halfW * 0.67, halfD * 0.42],
+    [-halfW * 0.58, halfD * 0.34],
+    [-halfW * 0.66, halfD * 0.30],
+  ], h * 0.009);
+  polyStroke([
+    [halfW * 0.65, -halfD * 0.58],
+    [halfW * 0.54, -halfD * 0.48],
+    [halfW * 0.63, -halfD * 0.44],
+  ], h * 0.009);
+
+  return {
+    group: g,
+    // `dark` is the shared furniture pen and the table already registers it.
+    fills: [cover, paper, edge],
+    top: pageTop(halfW * 0.54, 0),
+    rx: halfW * 1.02,
+    rz: halfD * 1.03,
+  };
 }
 
 export function buildStool(h) {
@@ -221,26 +429,6 @@ export function buildStool(h) {
   }
   ovalTop(g, r, r * 0.92, thick, legLen, mat);
   return { group: g, fills: [mat], top: legLen + thick, rx: r, rz: r * 0.92 };
-}
-
-// A squashed ball, sitting on the floor. The only piece with no legs and no
-// hard edges, which is the whole of what makes it read as soft next to three
-// things made of sticks.
-export function buildCushion(h) {
-  const g = new THREE.Group();
-  const mat = fillMat(PAL.furnitureCushion);
-  // Wide against its height, and sitting a little INTO the floor. Both are what
-  // separate a cushion from a ball: at anything under about two to one it reads
-  // as a boulder somebody has left indoors, and a sphere resting exactly on the
-  // ground reads as hard. Sunk a fifth of its height, it looks like it is taking
-  // somebody's weight.
-  const rx = h * 2.2;
-  part(g, (pad) => {
-    const s = new THREE.SphereGeometry(1, 20, 12);
-    s.scale(rx + pad, h + pad, rx * 0.86 + pad);
-    return s;
-  }, mat, (m) => { m.position.y = h * 0.78; });
-  return { group: g, fills: [mat], top: h * 1.78, rx, rz: rx * 0.86 };
 }
 
 // ----------------------------------------------------------------- fluff
@@ -1171,6 +1359,123 @@ export function buildBlueWeapon(h) {
   return buildSasumata(h, PAL.weaponBlue, PAL.weaponBlueHighlight);
 }
 
+// ---------------------------------------------------------- Chiikawa's key
+//
+// A broad, friendly house key rather than a realistic pin key: rounded square
+// head, square opening, short shaft, and two blocky teeth. It is modelled flat
+// in the XZ plane so it can lie on the floor; the held copy turns that face
+// toward the player in main.js.
+export function buildHouseKey(size) {
+  const g = new THREE.Group();
+  const gold = fillMat(PAL.houseKey);
+
+  // `size` is the finished longest dimension. The outline and bevel grow just
+  // outside the authored silhouette, so the yellow core is slightly shorter.
+  const L = size * 0.965;
+  const thick = size * 0.065;
+  const line = size * 0.018;
+
+  const keyShape = (outerScale = 1, holeScale = 1) => {
+    const s = outerScale;
+    const x = (n) => n * L * s;
+    const z = (n) => n * L * s;
+    const shape = new THREE.Shape();
+
+    // Start at the flat end of the shaft and trace the lower edge into the
+    // rounded head, then return along the toothed edge.
+    shape.moveTo(x(-0.52), z(-0.090));
+    shape.lineTo(x(0.025), z(-0.090));
+    shape.quadraticCurveTo(x(0.060), z(-0.090), x(0.078), z(-0.125));
+    shape.lineTo(x(0.105), z(-0.185));
+    shape.quadraticCurveTo(x(0.125), z(-0.235), x(0.190), z(-0.245));
+    shape.lineTo(x(0.350), z(-0.245));
+    shape.quadraticCurveTo(x(0.475), z(-0.245), x(0.485), z(-0.120));
+    shape.lineTo(x(0.485), z(0.120));
+    shape.quadraticCurveTo(x(0.475), z(0.245), x(0.350), z(0.245));
+    shape.lineTo(x(0.190), z(0.245));
+    shape.quadraticCurveTo(x(0.125), z(0.235), x(0.105), z(0.185));
+    shape.lineTo(x(0.078), z(0.125));
+    shape.quadraticCurveTo(x(0.060), z(0.090), x(0.025), z(0.090));
+    shape.lineTo(x(-0.070), z(0.090));
+    shape.lineTo(x(-0.070), z(0.165));
+    shape.quadraticCurveTo(x(-0.070), z(0.180), x(-0.090), z(0.180));
+    shape.lineTo(x(-0.205), z(0.180));
+    shape.quadraticCurveTo(x(-0.225), z(0.180), x(-0.225), z(0.160));
+    shape.lineTo(x(-0.225), z(0.105));
+    shape.lineTo(x(-0.300), z(0.105));
+    shape.lineTo(x(-0.300), z(0.160));
+    shape.quadraticCurveTo(x(-0.300), z(0.180), x(-0.320), z(0.180));
+    shape.lineTo(x(-0.435), z(0.180));
+    shape.quadraticCurveTo(x(-0.455), z(0.180), x(-0.455), z(0.160));
+    shape.lineTo(x(-0.455), z(0.090));
+    shape.lineTo(x(-0.52), z(0.090));
+    shape.quadraticCurveTo(x(-0.535), z(0.090), x(-0.535), z(0.070));
+    shape.lineTo(x(-0.535), z(-0.070));
+    shape.quadraticCurveTo(x(-0.535), z(-0.090), x(-0.52), z(-0.090));
+    shape.closePath();
+
+    // Clockwise rounded square cut-out. The ink copy uses a slightly smaller
+    // hole, leaving the same dark line around the opening as around the edge.
+    const hole = new THREE.Path();
+    const cx = x(0.295);
+    const hw = L * 0.067 * holeScale;
+    const hh = L * 0.060 * holeScale;
+    const r = L * 0.012 * holeScale;
+    hole.moveTo(cx - hw + r, hh);
+    hole.lineTo(cx + hw - r, hh);
+    hole.quadraticCurveTo(cx + hw, hh, cx + hw, hh - r);
+    hole.lineTo(cx + hw, -hh + r);
+    hole.quadraticCurveTo(cx + hw, -hh, cx + hw - r, -hh);
+    hole.lineTo(cx - hw + r, -hh);
+    hole.quadraticCurveTo(cx - hw, -hh, cx - hw, -hh + r);
+    hole.lineTo(cx - hw, hh - r);
+    hole.quadraticCurveTo(cx - hw, hh, cx - hw + r, hh);
+    hole.closePath();
+    shape.holes.push(hole);
+    return shape;
+  };
+
+  const extruded = (shape, depth, bevel, rise = 0) => {
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      steps: 1,
+      bevelEnabled: true,
+      bevelSegments: 2,
+      bevelSize: bevel,
+      bevelThickness: bevel,
+      curveSegments: 8,
+    });
+    geo.translate(0, 0, rise);
+    geo.rotateX(-Math.PI / 2);
+    geo.computeVertexNormals();
+    return geo;
+  };
+
+  // The ink shell is a real, slightly larger key with a smaller opening. The
+  // yellow copy sits level with its top, exposing a clean outline on the outer
+  // silhouette, inside the square hole, and along the visible sidewall.
+  const inkDepth = thick + line;
+  const outline = new THREE.Mesh(
+    extruded(keyShape(1.025, 0.76), inkDepth, line * 0.44),
+    ink(),
+  );
+  const fill = new THREE.Mesh(
+    extruded(keyShape(), thick, line * 0.30, line),
+    gold,
+  );
+  g.add(outline, fill);
+
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  return {
+    group: g,
+    fills: [gold],
+    top: box.max.y,
+    rx: Math.max(box.max.x, -box.min.x),
+    rz: Math.max(box.max.z, -box.min.z),
+  };
+}
+
 // ------------------------------------------------------------- the plushie
 //
 // A small bear: Chiikawa's, and it belongs on the futon.
@@ -1403,10 +1708,10 @@ export function buildPlushie(h) {
 
 export function buildBox(h) {
   const g = new THREE.Group();
-  // `h` is the height, as it is for the table and the stool. Twice as long as
-  // it is tall and a little over half as deep: a parcel rather than a crate.
-  const L = h * 2.00;
-  const D = h * 1.24;
+  // `h` is the height, as it is for the table and the stool. Low and broad,
+  // with enough depth for both sealed lid flaps to read from the doorway.
+  const L = h * 2.10;
+  const D = h * 1.30;
 
   const card = new THREE.Color(PAL.boxCard);
   const face = (k) => fillMat(new THREE.Color().copy(card).multiplyScalar(k));
@@ -1423,11 +1728,11 @@ export function buildBox(h) {
   const shell = part(g, (pad) => new THREE.BoxGeometry(L + pad * 2, h + pad * 2, D + pad * 2),
     skin, (m) => { m.position.y = h / 2; });
 
-  // Scuffed. Cardboard is the most scuffed thing in the room by some way, so
-  // this carries the most of them; `minUp` excludes only the underside.
+  // Sparse little wear strokes like the paired pencil ticks in the reference;
+  // `minUp` excludes only the underside.
   const scuff = markMat(new THREE.Color().copy(card).multiplyScalar(0.99));
   const marks = scuffs(shell.geometry, {
-    count: 18, len: h * 0.075, weight: h * 0.013, minUp: -0.1, seed: 3,
+    count: 10, len: h * 0.055, weight: h * 0.010, minUp: -0.1, seed: 3,
   });
   if (marks) {
     const m = new THREE.Mesh(marks, scuff);
@@ -1435,7 +1740,7 @@ export function buildBox(h) {
     g.add(m);
   }
 
-  // The seam where the two flaps meet, running the length of the lid.
+  // The seam where the two flaps meet, running front-to-back along the lid.
   //
   // Real geometry rather than a line, because there is no line to be had: see
   // above. A dark sliver standing a few thousandths proud of the lid, at about
@@ -1446,11 +1751,12 @@ export function buildBox(h) {
   // own side and its own end caps: from across the room it came out as two
   // dark dashes with rounded ends rather than one line.
   const seam = new THREE.Mesh(
-    new THREE.BoxGeometry(L * 0.99, h * 0.02, INK * 0.80), legMat());
+    new THREE.BoxGeometry(INK * 0.78, h * 0.02, D * 0.98), legMat());
   seam.position.set(0, h - h * 0.02 / 2 + 0.0006, 0);
   g.add(seam);
 
-  // The torn tape holding it shut.
+  // The torn tape holding it shut. It is one strip BENT OVER THE FRONT EDGE:
+  // a short section on the lid continues down the front face.
   //
   // Two flat prisms, dark under pale, and the sliver of dark left showing round
   // the edge IS its outline — the same trick the bear's mouth uses and for the
@@ -1460,39 +1766,80 @@ export function buildBox(h) {
   // every run and can be judged against the drawing. Torn tape is spiky on the
   // ends it was pulled from and straighter along its sides, which is what the
   // alternating reach below is doing.
-  // The tape runs ACROSS the seam, so its length is the box's depth and its
-  // width is along the lid — and the two ends it was torn from are the ends
-  // that are ragged. Its long sides are the roll's own cut edges and stay
+  // The tape runs along the seam, so its length is the box's depth and its
+  // width crosses the two flaps. Its free ends are ragged while its long sides
+  // are the roll's own cut edges and stay
   // straight. Jagging the whole way round was the first attempt and produced a
   // seven-pointed star: a sparkle stuck to a parcel.
   // `inset` is a WORLD distance taken off both axes, not a scale factor. Scaled
   // down by a fraction, the pale piece leaves a ring proportional to the axis it
   // is on — and this patch is nearly twice as long as it is wide, so the torn
   // ends got a fat outline and the sides got almost none.
-  const patch = (inset, depth, mat, y) => {
-    const W = L * 0.070 - inset;
-    const H = D * 0.185 - inset;
-    const T = 4;
-    const xAt = (i) => -W + (2 * W) * (i / T);
-    const bite = (i, st) => (i % 2 ? 0.70 : 1.0) * (0.92 + 0.08 * wob(i, st));
-    const pts = [];
-    for (let i = 0; i <= T; i++) pts.push(new THREE.Vector2(xAt(i), -H * bite(i, 5)));
-    for (let i = T; i >= 0; i--) pts.push(new THREE.Vector2(xAt(i), H * bite(i, 7)));
-    const geo = new THREE.ExtrudeGeometry(new THREE.Shape(pts),
-      { depth, bevelEnabled: false, curveSegments: 1 });
-    // Extrusion runs along the shape's own +z; tip it so that is up.
+  const tape = fillMat(PAL.boxTape);
+  const tapeX = -L * 0.045;
+  const tapeDepth = h * 0.006;
+  const outlineInset = h * 0.022;
+  const tearX = [-1, -0.65, -0.30, 0.02, 0.34, 0.68, 1];
+  const tearReach = [0.05, 0.60, 0.18, 0.78, 0.12, 0.52, 0.04];
+
+  // The top part starts at the front edge and ends in a torn line over the lid.
+  const topTape = (inset, depth, mat, y) => {
+    const halfW = L * 0.078 - inset;
+    const front = D * 0.505 - inset * 0.25;
+    const back = D * 0.08 + inset;
+    const jag = Math.max(h * 0.018, h * 0.075 - inset * 1.25);
+    const pts = [
+      new THREE.Vector2(tapeX - halfW, -front),
+      new THREE.Vector2(tapeX + halfW, -front),
+    ];
+    for (let i = tearX.length - 1; i >= 0; i--) {
+      pts.push(new THREE.Vector2(
+        tapeX + tearX[i] * halfW,
+        -(back + tearReach[i] * jag),
+      ));
+    }
+    const geo = new THREE.ExtrudeGeometry(new THREE.Shape(pts), {
+      depth, bevelEnabled: false, curveSegments: 1,
+    });
+    // Shape Y becomes world -Z; extrusion becomes world +Y.
     geo.rotateX(-Math.PI / 2);
     const m = new THREE.Mesh(geo, mat);
-    m.position.set(-L * 0.04, y, 0);
+    m.position.y = y;
     g.add(m);
-    return m;
   };
-  // Thin. Tape IS thin, and anything laid on the lid pokes up through the top
-  // of the silhouette when you look at the box from the front — at a
-  // fortieth of the height it came out as a visible lump on the skyline.
-  const tape = fillMat(PAL.boxTape);
-  patch(0, h * 0.006, legMat(), h - h * 0.001);
-  patch(h * 0.028, h * 0.006, tape, h + h * 0.001);
+
+  // The front part continues from that same fold and tears off halfway down.
+  const frontTape = (inset, depth, mat, z) => {
+    const halfW = L * 0.078 - inset;
+    const topY = h - inset * 0.25;
+    const bottomY = h * 0.53 + inset;
+    const jag = Math.max(h * 0.018, h * 0.075 - inset * 1.25);
+    const pts = [
+      new THREE.Vector2(tapeX - halfW, topY),
+      new THREE.Vector2(tapeX + halfW, topY),
+      new THREE.Vector2(tapeX + halfW, bottomY),
+    ];
+    for (let i = tearX.length - 2; i > 0; i--) {
+      pts.push(new THREE.Vector2(
+        tapeX + tearX[i] * halfW,
+        bottomY - tearReach[i] * jag,
+      ));
+    }
+    pts.push(new THREE.Vector2(tapeX - halfW, bottomY));
+    const geo = new THREE.ExtrudeGeometry(new THREE.Shape(pts), {
+      depth, bevelEnabled: false, curveSegments: 1,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.z = z;
+    g.add(m);
+  };
+
+  // Dark backing plus a slightly inset pale face makes the same drawn outline
+  // on both planes. Together these two planes are one strip bent over the edge.
+  topTape(0, tapeDepth, legMat(), h - tapeDepth * 0.55);
+  topTape(outlineInset, tapeDepth * 0.72, tape, h + tapeDepth * 0.20);
+  frontTape(0, tapeDepth, legMat(), D / 2 - tapeDepth * 0.45);
+  frontTape(outlineInset, tapeDepth * 0.72, tape, D / 2 + tapeDepth * 0.20);
 
   return {
     group: g,
@@ -2407,6 +2754,20 @@ export function buildLantern(h) {
       // SHOULD light a small circle in a field.
       reach: lampReach,
       lit: glass,
+      // The additive shell built above is DELIBERATELY not handed over.
+      //
+      // It was, briefly. Named to the glow record, it joined the machinery that
+      // dims a lamp's own glow with its switch and with the dark — so a
+      // switched-off lantern went properly dead, and a lit one at night calmed
+      // from 0.55 to 0.15 along with every other fixture. Reverted on request:
+      // the soft glow the shell keeps around the glass at all hours is part of
+      // what the lantern IS in this art, and a lantern that went fully inert
+      // when off lost more than the off-state gained.
+      //
+      // So the shell burns at its built 0.55 whatever the switch says, and the
+      // faint light on an off lantern's glass is a known, chosen thing. If it
+      // is ever wanted switch-driven WITHOUT the night calming, hand it over as
+      // `halo` here and exempt it from FIXTURE_GLOW rather than re-plumbing.
       colour: PAL.lampGlow,
       // A flame, so the warmest thing in the world restores to the warmest
       // white in it — and still a white. See PAL.lampRestore for why this end
@@ -2770,14 +3131,89 @@ export function buildBulb(h) {
   };
 }
 
+// --------------------------------------------------------------- being held
+//
+// A built piece can be picked up, and there are two places that show one: the
+// slot at the edge of your own sight (hand.js) and a character's own hands
+// (character.js). Both have to do the same two things to a freshly built copy —
+// size it, and find out what in it wears the hour — so both do them from here.
+//
+// It lives in this file rather than in either holder because it is a fact about
+// the PIECES, not about the holding: what a copy needs before it can be carried
+// is the same answer whoever is carrying it.
+
+const _fitBox = new THREE.Box3();
+const _fitSize = new THREE.Vector3();
+const _fitCentre = new THREE.Vector3();
+
+// Size a copy so its longest dimension is `height`, centred about its own
+// middle — so a piece modelled off-centre spins about itself rather than about
+// its birthplace. Returns the scale used.
+//
+// MEASURED ALONE AND AT SCALE 1, ALWAYS — the whole of a bug worth remembering,
+// because it had two halves and fixing one left it broken.
+//
+// The copies are built once and kept, so the second time one is picked up it
+// arrives already wearing the scale and the centring offset the FIRST pickup
+// gave it. Measuring in that state and scaling again compounds both. That is
+// the obvious half, and resetting the transform fixes it.
+//
+// The half that hides: a holder that drops the HOLDER rather than the object
+// leaves the object a child of a discarded group carrying that slot's
+// three-quarter turn. `setFromObject` reads WORLD matrices, so the box came
+// back as the bounding box of a ROTATED bear — bigger than the upright one, by
+// a different amount each time as the offset shifted. Measured over six
+// pick-ups the fit factor read 0.743, 0.461, 0.596, 0.680, 0.722, 0.742: not a
+// drift but a slow convergence, which is exactly the shape of a feedback loop
+// reading its own output.
+//
+// So: off any parent, transform cleared, then measured.
+//
+// ITS OWN ROTATION IS LEFT ALONE, because a copy is built for the slot it is
+// going into and arrives in the pose that slot wants — the bear stood back up
+// out of the lying-down it wears on the futon, the sasumata turned so its fork
+// faces out. Resetting the rotation here undid that silently and handed you a
+// bear carried flat like a tray.
+export function fitHeld(obj, height) {
+  obj.removeFromParent();
+  obj.position.set(0, 0, 0);
+  obj.scale.setScalar(1);
+  obj.updateMatrixWorld(true);
+  _fitBox.setFromObject(obj);
+  const size = _fitBox.getSize(_fitSize);
+  const k = height / Math.max(size.x, size.y, size.z, 1e-4);
+  const centre = _fitBox.getCenter(_fitCentre);
+  obj.position.copy(centre).multiplyScalar(-k);
+  obj.scale.setScalar(k);
+  return k;
+}
+
+// What in a copy wears the hour, as a list with no duplicates.
+//
+// `baseColor` is the mark of a fill — see fillMat above — and it is exactly the
+// right test, because the two things it excludes are the two that must be
+// excluded: the shared ink, which would stop being an outline the moment it
+// dimmed, and the additive halos, which are light and cannot be darkened by the
+// dark they are holding off.
+export function heldMaterials(obj) {
+  const out = [];
+  obj.traverse((o) => {
+    const m = o.material;
+    if (!m || !m.userData || !m.userData.baseColor) return;
+    if (out.indexOf(m) < 0) out.push(m);
+  });
+  return out;
+}
+
 export const BUILD = {
   table: buildTable,
+  openbook: buildOpenBook,
   stool: buildStool,
-  cushion: buildCushion,
   futon: buildFuton,
   wornbedding: buildWornBedding,
   pinkweapon: buildPinkWeapon,
   blueweapon: buildBlueWeapon,
+  housekey: buildHouseKey,
   plushie: buildPlushie,
   box: buildBox,
   teapot: buildTeapot,

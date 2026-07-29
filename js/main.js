@@ -21,7 +21,7 @@ import { ITEMS, Inventory, itemIcon, SLOTS } from './items.js';
 import { Fishing } from './fishing.js';
 import {
   buildPlushie, buildTeapot, buildLantern, buildTrashBag, buildTrashBagAlt,
-  buildPinkWeapon, buildBlueWeapon,
+  buildPinkWeapon, buildBlueWeapon, buildOpenBook, buildHouseKey,
 } from './furniture.js';
 
 const stage = document.getElementById('stage');
@@ -134,6 +134,9 @@ const bots = CAST.map((spec) => {
 });
 
 const byChar = new Map(bots.map((b) => [b.ch, b]));
+// ...and the same index by the key a save writes down, which is how a loan finds
+// the friend it was made to — see carryLent, which asks this every frame.
+const botByKey = new Map(bots.map((b) => [b.spec.key, b]));
 
 // --- you
 //
@@ -500,6 +503,33 @@ function speakAmbient(bot, now) {
   scheduleNext(now + bot.dlg.durationMs);
 }
 
+// Being spoken TO — the poke, the greeting — with a beat after it before the
+// same friend will answer again. See social.pokeQuietMs.
+//
+// Every way of addressing somebody comes through here rather than through
+// `speak` directly, which is the whole point: the guard belongs to the ACT of
+// poking and not to the button that happens to be the newest way of doing it.
+// Tapping a friend spams exactly as well as pressing 「はなす」 does, and a rule
+// that only covered the pill would have fixed the symptom I noticed and left the
+// one I did not.
+//
+// AN ABSORBED PRESS IS SILENT, and that is a deliberate exception to the rule
+// `refuse` states — that a button answering a press with silence reads as
+// broken. It is not silence: they are mid-sentence, the bubble is on screen, and
+// the answer to "say something" is the thing they are already saying. What would
+// read as broken is the alternative, which is what this replaced — cutting a
+// friend off mid-word to start them again.
+//
+// The window is measured from the END of the line, so it is asked AFTER the
+// line has been picked: `durationMs` is a property of the line, and there is no
+// line to ask about until `speak` has chosen one.
+function pokeBack(bot, bucket, now) {
+  if (now < (bot.quietUntil || 0)) return false;
+  speak(bot, bucket, now);
+  bot.quietUntil = now + bot.dlg.durationMs + CONFIG.social.pokeQuietMs;
+  return true;
+}
+
 // --- the pouch
 //
 // One Inventory for the visit, loaded from the save before anything below can
@@ -591,14 +621,31 @@ const HAND_BUILDERS = {
   },
   // The teapot is modelled standing and stays standing; nothing to undo.
   teapot: () => buildTeapot(0.26).group,
+  // The book is displayed face-on in the hand and pack so both open pages and
+  // their drawings remain readable instead of collapsing to a thin edge.
+  openbook: () => {
+    const g = buildOpenBook(0.22).group;
+    g.rotation.x = Math.PI / 2;
+    return g;
+  },
+  // The room copy lies flat. Held, its broad face turns toward the player and
+  // its shaft points downward like a key dangling from a small paw.
+  housekey: () => {
+    const g = buildHouseKey(0.804).group;
+    g.rotation.x = Math.PI / 2;
+    return g;
+  },
   // The lantern likewise. Its heights are the furniture entry's own, so a
   // resized lamp in the room is a resized lamp in your hand.
   lantern: () => buildLantern(0.34).group,
   // Each rubbish bag keeps its own body profile and cave scale in the hand.
   trashbag: () => buildTrashBag(0.78).group,
   trashbag2: () => buildTrashBagAlt(0.72).group,
-  // The world copy lies flat. Rotate the hand copy upright so the open fork
-  // and all twelve teeth face the player instead of collapsing to a side view.
+  // The builder models the sasumata lying flat; at home the scene leans it
+  // against the wall on top of that (see `lean` in the furniture tables), and
+  // set down anywhere else it lies flat again. The hand copy is its own pose:
+  // rotate it upright so the open fork and all twelve teeth face the player
+  // instead of collapsing to a side view.
   pinkweapon: () => {
     const g = buildPinkWeapon(0.52).group;
     g.rotation.x = -Math.PI / 2;
@@ -613,6 +660,120 @@ const HAND_BUILDERS = {
   },
 };
 const handMeshes = {};
+
+// WHERE A PIECE SITS IN YOUR OWN VIEW — overrides for the hand slot, passed to
+// holdMesh, absent for every art content with the defaults. Beside the
+// builders for CARRY's reason below: the pose a copy was built in and the spot
+// it is shown at are one decision.
+//
+// `x`/`y` are fractions of the frame from its middle and `h` a fraction of its
+// height, exactly as hand.js writes its own defaults; `turn`/`tip` replace the
+// slot's three-quarter view. Only the sasumata is here, and each number is the
+// difference between exhibiting a thing and carrying it:
+//
+//   x/y   further into the corner — a card is held up to be READ, but a tool
+//         is kept down at your side, half out of frame the way a held pole
+//         actually hangs at the edge of your sight. Not the WHOLE way into
+//         it: the sprint and jump buttons own the corner itself (their tops
+//         sit near y -0.72 on a portrait phone), so the slot's centre stops
+//         at -0.62 and only the thin end of the shaft runs on behind them,
+//         which reads as the pole leaving the frame rather than as the UI
+//         losing an argument.
+//   h     bigger. At the card slot's size the fork is a specimen in a case;
+//         close and large is what says it is in your grip, and the anime's
+//         own framing of Chiikawa lugging it is exactly this — low, near,
+//         crossing the corner of the shot.
+//   turn  shallower than the slot's -0.6: a pole that long foreshortens into
+//         a stub at the full three-quarter, and the silhouette IS the fork.
+//   w     the width cap, widened on purpose. fitHeld sizes a copy by its
+//         LONGEST dimension, and the fork is nothing but longest dimension —
+//         under the default cap, raising `h` bought almost no size at all,
+//         because the cap was the binding number on every aspect worth
+//         tuning for. A pole gripped at your side is supposed to leave the
+//         frame at the corner; this is the one piece for which running off
+//         the edge is the honest read, which is why the cap is a default
+//         and not a law (see _fit in hand.js).
+const HAND_POSE = {
+  pinkweapon: { x: 0.58, y: -0.62, h: 0.46, w: 0.72, turn: -0.30, tip: 0.10 },
+  blueweapon: { x: 0.58, y: -0.62, h: 0.46, w: 0.72, turn: -0.30, tip: 0.10 },
+  openbook: { x: 0.54, y: -0.48, h: 0.32, w: 0.52, turn: -0.18, tip: 0.05 },
+  housekey: {
+    x: 0.52, y: -0.50, h: 0.30, w: 0.40,
+    turn: -0.20, tip: 0.05, roll: Math.PI / 2,
+  },
+};
+
+// WHERE A PIECE SITS IN SOMEBODY'S HANDS — the cast's, and your own body's when
+// you can see it. See Character.holdPiece for how it is hung and why.
+//
+// Beside HAND_BUILDERS rather than in config.js because the two are one
+// decision: the builders above pose each copy for being LOOKED AT down the
+// camera's axis, and a character's card faces the camera too, so those poses are
+// already the right way round here. What is left for this table is where on the
+// body the piece rides, how big it is, and how far it is turned out of flat.
+// Split across two files, the pair would drift the first time a builder's pose
+// changed.
+//
+// Every distance is a FRACTION OF THE CARRIER'S DRAWN HEIGHT, so one row serves
+// the whole cast and your avatar. `x` is to their screen-right, `y` is up from
+// the feet, `z` is toward the camera — a little, so a piece rides in front of
+// the drawing rather than sliced down its middle by it. `size` is the piece's
+// longest dimension.
+//
+// `spin` and `tilt` turn it out of flat-on. Small on purpose: enough to say the
+// thing has a back, not so much that it stops reading as the drawn prop it is
+// standing in for. Straight-on it looks pasted; at the hand slot's own -0.6 it
+// starts to look like a rendered object visiting from another game.
+// `roll` turns the piece in the plane of the drawing, and the sasumata is the
+// reason it exists. The hand builders stand each copy up for a slot you look
+// STRAIGHT DOWN at, and for the sasumata that means turning its open fork and
+// all twelve teeth to face you — which leaves the shaft lying horizontal,
+// because face-on is the only thing that pose was ever asked for. Carried, it
+// has to be a pole: a quarter turn on top of the builder's own 0.42 lean stands
+// it up with the fork above the shoulder, leaning out the way somebody small
+// carries something long.
+const GRIP = { x: 0.30, y: 0.42, z: 0.10, size: 0.55, spin: -0.32, tilt: 0.10, roll: 0 };
+const CARRY = {
+  // Fork up, butt down by the paw. Sized close to the whole body because that is
+  // what a sasumata IS here — the joke of the drawing is a small animal with a
+  // large fork — and `x` is far enough out to clear the face, which is the one
+  // measurement that had to be tuned by looking rather than reasoned about: at
+  // 0.24 the fork sat squarely over Chiikawa's right eye.
+  pinkweapon: { ...GRIP, x: 0.37, y: 0.45, size: 0.92, roll: -1.72 },
+  blueweapon: { ...GRIP, x: 0.37, y: 0.45, size: 0.92, roll: -1.72 },
+  // The lamp hangs at the side, low, the way a thing with a handle is carried.
+  lantern: { ...GRIP, x: 0.36, y: 0.30, size: 0.50 },
+  // The bear is HUGGED — in close and high, the only one of these held against
+  // the chest rather than out at arm's length, because that is the one thing
+  // everybody in this world does with it.
+  plushie: { ...GRIP, x: 0.25, y: 0.40, size: 0.46 },
+  teapot: { ...GRIP, x: 0.30, y: 0.38, size: 0.38 },
+  openbook: { ...GRIP, x: 0.30, y: 0.42, size: 0.42, spin: -0.15 },
+  // Its carried length remains the requested 40% of the carrier's drawn height.
+  housekey: {
+    ...GRIP, x: 0.34, y: 0.35, size: 0.40,
+    spin: -0.16, roll: Math.PI / 2,
+  },
+  // The rubbish bags are lugged: heavy, low, and out from the body.
+  trashbag: { ...GRIP, x: 0.36, y: 0.26, size: 0.62 },
+  trashbag2: { ...GRIP, x: 0.36, y: 0.26, size: 0.58 },
+};
+
+// The copy that rides on a BODY, which is never the copy in your hand: the two
+// can be on screen at once — your avatar at altitude with the hand slot still
+// up — and one object cannot be in two places.
+//
+// Keyed by ITEM and not by art, unlike the hand's cache, and that is the whole
+// reason it is a separate table: there are two lanterns, and lending one to
+// Chiikawa while Hachiware keeps the other has to put a lantern in each pair of
+// hands rather than move one between them.
+const carryMeshes = {};
+function carriedPiece(id) {
+  const art = ITEMS[id].art;
+  if (!carryMeshes[id]) carryMeshes[id] = HAND_BUILDERS[art]();
+  return carryMeshes[id];
+}
+
 // Which loose pieces are carryable at all — the table's uniques, by art.
 const UNIQUE_ARTS = Object.values(ITEMS).filter((i) => i.kind === 'unique').map((i) => i.art);
 
@@ -718,6 +879,7 @@ function slotIcon(id) {
 // Set the held unique down at `spot` — or, if the spot is water, watch it go
 // under and start the walk home. With no spot it goes straight home. The one
 // exit every held-unique state shares.
+const _faceBack = new THREE.Vector3();
 function putDownUnique(spot) {
   const id = inventory.heldUnique;
   if (!id) return false;
@@ -729,13 +891,39 @@ function putDownUnique(spot) {
     inventory.setUnique(id, { state: 'given', returnAt: Date.now() + CONFIG.uniques.pondMs });
     return true;
   }
+  // Landing on the piece's own spot — near enough to mean "back where it
+  // goes" — is the no-spot exit by another door: the same tap that would lay
+  // it flat an arm's length further along stands it back into its arranged
+  // stance instead. This is the one way a knocked-over sasumata gets its
+  // wall back, and it is deliberately the same gesture as every other
+  // set-down rather than a verb of its own; see uniques.snap for the radius,
+  // and the same dot-against-cosine the reach gate uses for the test.
+  if (spot && loose.home
+      && spot.dot(loose.home) > Math.cos(CONFIG.uniques.snap / CONFIG.globe.radius)) {
+    spot = null;
+  }
   if (spot) {
     // Anything with a top under this spot — out of doors that is a stump's cut
     // face, and it is the only place a set-down piece can be badly set down.
     const perch = perchUnder(spot, 1e9);
     inventory.setUnique(id, { state: 'placed', dir: [spot.x, spot.y, spot.z] });
-    globe.placeLoose(loose, spot);
-    if (perch) {
+    // FACING ITS PLACER — the direction from the spot back to where you are
+    // stood, as a tangent, decided HERE and only here because this is the one
+    // frame that knows there was a placer at all. placeLoose remembers it for
+    // every re-place that follows (the topple's little steps included), so it
+    // is computed once per set-down, not once per frame. A piece put down at
+    // your own feet has no "toward you" — the projection collapses — and
+    // falls back to its authored facing, which is also what already happens
+    // to everything set down by a timer instead of a hand.
+    _faceBack.copy(rig.anchor).addScaledVector(spot, -rig.anchor.dot(spot));
+    const toward = _faceBack.lengthSq() > 1e-9 ? _faceBack.normalize() : null;
+    globe.placeLoose(loose, spot, toward);
+    // ...unless it went and STOOD ITSELF against a wall, in which case it is
+    // not at the tapped spot any more and what was under that spot is a fact
+    // about somewhere else. Perching a propped piece would lift it off the
+    // floor by the height of a table it is nowhere near, and then measure it
+    // against that table's rim for a topple it cannot have. See propFor.
+    if (perch && loose.propAt === null) {
       loose.anchor.position.addScaledVector(spot, perch.top);
       const arc = Math.acos(Math.max(-1, Math.min(1, spot.dot(perch.dir))));
       const edge = perch.topR !== undefined ? perch.topR : perch.r;
@@ -888,33 +1076,59 @@ function lendUnique(bot, now) {
   return true;
 }
 
-// A lent piece travels with whoever has it. Placed every frame rather than
-// parented to them, because the loose system's own `place()` closure is what
-// stands a piece up correctly on this planet — and a bear parented to a
-// billboard would inherit the billboard's turn toward the camera and spin on
-// the spot as you walked around it.
+// A lent piece is CARRIED by whoever has it — in their hands, on their card,
+// hopping when they hop. See Character.holdPiece for how that is hung.
 //
-// BESIDE them rather than under them: at their own direction the bear stands
-// inside the drawing, and the whole point of a loan you can see is seeing it.
+// It used to stand on the ground beside them and be re-placed every frame,
+// which was the honest thing to do before a character had anywhere to put a
+// thing: `besideArc` off to one side, because at their own direction the bear
+// stood INSIDE the drawing. What that bought was a loan you could see and a bear
+// that walked itself around the planet a stride behind its keeper, never quite
+// belonging to them. Handing it over is the difference between somebody having
+// your bear and somebody holding it.
+//
+// The world's own piece still goes where they are, and that is not left over
+// from the old arrangement — it is the entire reason this is not simply a
+// parenting call. The anchor is what a LAMP's light hangs off, so a lantern lent
+// at dusk has to keep lighting the grass around whoever is carrying it. So:
+// hidden in the world (`carryLoose`), stood at their feet (`placeLoose`), and
+// the copy in their hands is what you actually see. It is the same two-step
+// syncPouch does for your own hands, for the same reason.
 //
 // A piece in the pond has no `to` and is left hidden, which is right — it sank.
-const _lentE = new THREE.Vector3();
-const _lentAt = new THREE.Vector3();
+
+// Who has already been given something to hold this frame. A character has one
+// pair of hands, so a second thing lent to the same friend rides along with the
+// first — its light follows them, its body stays hidden — rather than the two
+// fighting over the same grip. Cleared and refilled rather than rebuilt, because
+// this runs every frame.
+const _handsFull = new Set();
 
 function carryLent() {
-  for (const id of Object.keys(inventory.uniques)) {
-    const rec = inventory.unique(id);
+  _handsFull.clear();
+  // `for...in` rather than Object.keys, which allocated an array of ids on every
+  // frame of every session for a table that is usually empty.
+  for (const id in inventory.uniques) {
+    const rec = inventory.uniques[id];
     if (rec.state !== 'given' || !rec.to) continue;
-    const bot = bots.find((b) => b.spec.key === rec.to);
+    const bot = botByKey.get(rec.to);
     const loose = uniqueByItem(id);
     if (!bot || !loose) continue;
-    _lentE.set(0, 1, 0).cross(bot.ch.dir);
-    if (_lentE.lengthSq() < 1e-8) _lentE.set(1, 0, 0);
-    _lentE.normalize();
-    const a = CONFIG.uniques.besideArc / CONFIG.globe.radius;
-    _lentAt.copy(bot.ch.dir).multiplyScalar(Math.cos(a))
-      .addScaledVector(_lentE, Math.sin(a)).normalize();
-    globe.placeLoose(loose, _lentAt);
+    // Carried FIRST, then moved — placeLoose leaves a carried piece carried, so
+    // this order is what stops the walk over their feet from standing the piece
+    // back up on the ground under them on every frame.
+    globe.carryLoose(loose);
+    globe.placeLoose(loose, bot.ch.dir);
+    if (_handsFull.has(rec.to)) continue;
+    _handsFull.add(rec.to);
+    bot.ch.holdPiece(carriedPiece(id), CARRY[ITEMS[id].art]);
+  }
+  // ...and everybody else is empty-handed. Reconciled from the world every frame
+  // rather than on the event that ends a loan, because there are several of
+  // those — the timer, a reload, a piece fished out of a pond — and a hand left
+  // full by the one that forgot would hold a bear that had gone home.
+  for (const bot of bots) {
+    if (!_handsFull.has(bot.spec.key)) bot.ch.dropPiece();
   }
 }
 
@@ -1229,16 +1443,23 @@ function onUp(e) {
       greetedKey = bot.spec.key;
       greetCooldownUntil = now + CONFIG.social.greetCooldown;
 
-      // A tap with something in your hand is not a visit, it is a delivery —
-      // the item changes what the gesture means, which is the whole reason
-      // holding is a mode. A carried unique is LENT rather than given; a
-      // stackable is given outright; and if the hand and the pouch have
-      // somehow come apart, the tap is an ordinary visit after all.
-      if (inventory.heldUnique) {
-        lendUnique(bot, now);
-      } else if (!(inventory.holding && giveGift(bot, inventory.holding, now))) {
-        speak(bot, wasAlreadyHere ? 'poke' : 'greet', now);
-      }
+      // A TAP IS A VISIT, WHATEVER YOU ARE CARRYING.
+      //
+      // It used to be a delivery instead whenever your hands were full — a
+      // carried unique was lent, a stackable given outright — on the reasoning
+      // that the item changes what the gesture means. It does, and that was
+      // still the wrong place to read it. The same tap is how you WALK OVER to
+      // somebody, so going to see a friend while carrying a fish handed them the
+      // fish: an irreversible act, chosen by nothing you did, on the one gesture
+      // that had no other way to be spelled. And it worked the other way too —
+      // while you carried anything, no tap could simply say hello, because the
+      // delivery always answered first.
+      //
+      // Handing something over is 「わたす」 now, and lending is 「かす」 — see
+      // handToMate. Both are pills, both say what they will do and to whom, and
+      // both are pressed on purpose. The tap goes back to meaning the one thing
+      // it always meant: go and see them.
+      pokeBack(bot, wasAlreadyHere ? 'poke' : 'greet', now);
     } else {
       // THREE THINGS A TAP ON THE WORLD CAN MEAN, and they used to be four: the
       // building took the tap ahead of everything under it and walked you to its
@@ -1346,7 +1567,6 @@ const sheetCard = document.getElementById('sheet-card');
 const sheetTitle = document.getElementById('sheet-title');
 const sheetBody = document.getElementById('sheet-body');
 const sheetCap = document.getElementById('sheet-cap');
-const sheetHint = document.getElementById('sheet-hint');
 const dropBtn = document.getElementById('sheet-drop');
 const countRow = document.getElementById('sheet-count');
 const countN = document.getElementById('count-n');
@@ -1607,6 +1827,9 @@ function showRow() {
   const asking = askN !== null ? inventory.slots[askN] : null;
   const dragged = dragFrom !== null ? inventory.slots[dragFrom] : null;
   sheetCard.classList.toggle('is-moving', !!(asking || dragged));
+  // The pack always keeps the row, empty or not, so the card is the same height
+  // whether or not your hand is full. Only the 図鑑 gives the space back.
+  sheetCap.hidden = false;
 
   if (asking) {
     // Landed on the bin, and there is more than one, so the only thing still
@@ -1625,14 +1848,13 @@ function showRow() {
     dropBtn.textContent = ITEMS[dragged.id].kind === 'unique' ? 'おく' : 'すてる';
     countRow.hidden = true;
   } else {
+    // Resting. What is in your hand if anything, and otherwise nothing at all —
+    // except for an empty pack, which has to say so: sixteen dashed holes and no
+    // words is a panel that looks broken rather than one that looks empty.
     const held = inventory.held === null ? null : inventory.slots[inventory.held];
-    sheetCap.textContent = held ? `${ITEMS[held.id].name} を もっているよ` : '';
+    if (held) sheetCap.textContent = `${ITEMS[held.id].name} を もっているよ`;
+    else sheetCap.textContent = inventory.slots.some(Boolean) ? '' : 'まだ なにも もっていないよ';
   }
-
-  // Always said, whatever the line above is doing. See the note in index.html.
-  sheetHint.textContent = inventory.slots.some(Boolean)
-    ? 'タップで てに とる ・ ドラッグで ならべかえ'
-    : 'まだ なにも もっていないよ';
 }
 
 // --- letting go of things
@@ -1722,7 +1944,7 @@ const ZUKAN = [
 function paintZukan() {
   sheetBody.textContent = '';
   sheetCap.textContent = '';
-  sheetHint.textContent = '';
+  sheetCap.hidden = true;
   sheetCard.classList.remove('is-moving');
   for (const section of ZUKAN) {
     const ids = Object.keys(ITEMS).filter((id) => section.has(ITEMS[id]));
@@ -1758,13 +1980,29 @@ function syncPouch() {
   if (inventory.heldUnique) {
     const art = ITEMS[inventory.heldUnique].art;
     if (!handMeshes[art]) handMeshes[art] = HAND_BUILDERS[art]();
-    globe.hand.holdMesh(handMeshes[art]);
+    globe.hand.holdMesh(handMeshes[art], HAND_POSE[art]);
     const loose = uniqueByItem(inventory.heldUnique);
     if (loose) globe.carryLoose(loose);
+    // AND ON YOUR OWN BODY, for whenever you can see it. The hand slot is what
+    // you have while you are down among the grass; the avatar is what you have
+    // once you have risen far enough to look at yourself, and a visitor who
+    // picked up a sasumata and then flew up to find their body empty-handed
+    // would have watched the thing they are carrying stop existing.
+    //
+    // A second copy rather than the hand's — see carriedPiece. The two are on
+    // screen together through the whole of the climb, since the body fades in
+    // well before the hand is put away.
+    you.holdPiece(carriedPiece(inventory.heldUnique), CARRY[art]);
   } else if (inventory.holding) {
     globe.holdItem(itemIcon(inventory.holding));
+    // A stackable is a CARD, and there is no built copy of a fish to give the
+    // body. Rather than photograph one onto a sprite for a figure that is a
+    // centimetre tall on screen, your avatar simply carries nothing — which is
+    // also what the cast do with the fish you give them.
+    you.dropPiece();
   } else {
     globe.clearHand();
+    you.dropPiece();
   }
   // ANYTHING STILL MARKED AS CARRIED THAT IS NOT IN THE HAND went somewhere
   // this function was not told about, and there is exactly one such somewhere:
@@ -1776,9 +2014,17 @@ function syncPouch() {
   // whereever you last were, and, if it is the lamp, still lighting it. Asked
   // of the world rather than of the item table, so it stays true whatever a
   // future state gets called.
+  //
+  // A LENT PIECE IS CARRIED TOO, and is the one exception. It is in a friend's
+  // hands, which is a somewhere this function is emphatically not told about:
+  // carryLent hides it and stands it at their feet every frame, and stowing it
+  // here would have every loan die on the next thing you picked up. Asked of
+  // the inventory because "whose hands" is a fact the world does not hold.
   for (const l of globe.loose) {
+    if (!globe.isCarried(l)) continue;
     if (l === (inventory.heldUnique && uniqueByItem(inventory.heldUnique))) continue;
-    if (globe.isCarried(l)) globe.stowLoose(l);
+    if (l.item && inventory.unique(l.item).state === 'given') continue;
+    globe.stowLoose(l);
   }
   if (pouchEl.classList.contains('is-open')) paintPack();
   if (zukanEl.classList.contains('is-open')) paintZukan();
@@ -1946,6 +2192,13 @@ const FOCUS = {
   // turn over twice in three frames reads as a fault however good each
   // individual decision was.
   dwellMs: 180,
+  // A PERSON IS FACED FROM FURTHER OFF than a thing is picked up from, because
+  // the two verbs want different distances: you crouch to take a mushroom and
+  // you stand and talk. `meet` is the greeting distance exactly — walk close
+  // enough to be said hello to and you are close enough to answer — so the
+  // button appears on the same line the world already draws around somebody.
+  meet: CONFIG.social.greetArc,
+  meetHold: CONFIG.social.greetArc + 1.1,
 };
 
 // What to call a thing on a button. The uniques bring their names from the item
@@ -1959,7 +2212,9 @@ const _fLook = new THREE.Vector3();
 const fixtureDir = new WeakMap();
 
 let focus = null;
-let focusAt = 0;
+// ...and who you are stood in front of, which is a separate question with a
+// separate answer — see the two facings below.
+let mate = null;
 
 // Where a hung light is, as a spot on the floor. Its anchor sits at (R + rad)
 // along the room's own normal, so normalising it is the place you stand and look
@@ -1974,8 +2229,11 @@ function dirOfFixture(L) {
 // Read live rather than remembered, because a loose piece MOVES — you can shove
 // the bear across the floor with your shins while it is the thing you are
 // facing, and a focus holding a copy of where it used to be would keep the ring
-// on the rug behind it.
-function focusDir(f) { return f.loose ? f.loose.dir : dirOfFixture(f.fixture); }
+// on the rug behind it. A friend moves for a better reason still: they walk.
+function focusDir(f) {
+  if (f.bot) return f.bot.ch.dir;
+  return f.loose ? f.loose.dir : dirOfFixture(f.fixture);
+}
 
 // The angle between the way you are looking and the way something lies, both in
 // the tangent plane you are standing on. Radians, zero dead ahead.
@@ -1997,22 +2255,35 @@ function eachCandidate(fn) {
   for (const l of globe.loose) {
     if (!l.anchor.visible || (l.body && !l.body.visible)) continue;
     if (!UNIQUE_ARTS.includes(l.art)) continue;
-    fn({ art: l.art, loose: l, fixture: null });
+    fn({ art: l.art, loose: l, fixture: null, bot: null });
   }
   for (const L of globe.roomLights) {
     if (!L.ceiling || !L.anchor) continue;
-    fn({ art: L.art, loose: null, fixture: L });
+    fn({ art: L.art, loose: null, fixture: L, bot: null });
+  }
+}
+
+// ...and everybody you could be looking AT, which is a different question and
+// therefore a different list. See the two facings below for why they are not
+// one.
+function eachFriend(fn) {
+  for (const b of bots) {
+    if (!b.ch.isVisible) continue;
+    fn({ art: null, loose: null, fixture: null, bot: b });
   }
 }
 
 function sameFocus(a, b) {
   if (!a || !b) return false;
+  if (a.bot || b.bot) return a.bot === b.bot;
   return a.loose ? a.loose === b.loose : (!b.loose && a.fixture === b.fixture);
 }
 
 // Still a thing you could be looking at: a piece that has since been picked up,
-// stowed or lent is gone from the world and cannot go on being the focus.
+// stowed or lent is gone from the world and cannot go on being the focus, and
+// a friend who has gone over the horizon is gone the same way.
 function focusAlive(f) {
+  if (f.bot) return f.bot.ch.isVisible;
   if (!f.loose) return true;
   return f.loose.anchor.visible && (!f.loose.body || f.loose.body.visible);
 }
@@ -2022,55 +2293,94 @@ function focusAlive(f) {
 // one dead ahead to be worth turning the focus over for.
 function scoreOf(gap, off) { return gap + off * 2; }
 
+// TWO FACINGS, NOT ONE, and the split is the same lesson the action stack was
+// built on. That note says ranking made the single button wrong "not because
+// the loser went unshown, but because the loser went unreachable" — and one
+// focus slot shared between props and people would reintroduce exactly that,
+// one level down. Stand between Chiikawa and a bear and something has to win;
+// whichever it is, the other verb is gone from the stack entirely and no press
+// can reach it. A list has no losers, so neither may the thing that feeds it.
+//
+// They cannot sensibly be ranked against each other anyway: a friend at four
+// metres and a lantern at one are not two answers to one question, they are
+// answers to two. So there is a facing for THINGS and a facing for PEOPLE, each
+// with its own incumbent and its own dwell clock, and both resolved by the one
+// function below so their hysteresis can never drift apart.
+const facingProps = {
+  cur: null, at: 0, each: eachCandidate, reach: FOCUS.reach, hold: FOCUS.hold,
+};
+const facingCast = {
+  cur: null, at: 0, each: eachFriend, reach: FOCUS.meet, hold: FOCUS.meetHold,
+};
+
 // Redecided every frame, but not freely. The hysteresis is what separates "it
 // changed because the world changed" from "it changed because your thumb moved
 // two pixels".
-function updateFocus(now) {
-  if (!rig.isFirstPerson) { focus = null; return; }
-
+function resolveFacing(s, now) {
   // Does the one you already had survive? Generously judged: the wide cone and
   // the longer reach, and nothing else needs to be true of it.
   let keep = null;
-  if (focus && focusAlive(focus)) {
-    const dir = focusDir(focus);
+  if (s.cur && focusAlive(s.cur)) {
+    const dir = focusDir(s.cur);
     const gap = gapTo(dir);
     const off = bearingTo(dir);
-    if (gap <= FOCUS.hold && (off <= FOCUS.keep || gap <= FOCUS.onTop)) {
-      keep = { ...focus, score: scoreOf(gap, off) };
+    if (gap <= s.hold && (off <= FOCUS.keep || gap <= FOCUS.onTop)) {
+      keep = { ...s.cur, score: scoreOf(gap, off) };
     }
   }
 
   // The best thing you are actually looking at. Narrow cone, arm's reach.
   let best = null;
-  eachCandidate((c) => {
+  s.each((c) => {
     const dir = focusDir(c);
     const gap = gapTo(dir);
-    if (gap > FOCUS.reach) return;
+    if (gap > s.reach) return;
     const off = bearingTo(dir);
     if (off > FOCUS.cone && gap > FOCUS.onTop) return;
     const score = scoreOf(gap, off);
     if (!best || score < best.score) best = { ...c, score };
   });
 
-  if (!keep) { setFocus(best, now); return; }
-  if (sameFocus(best, keep)) { focus = keep; return; }
-  if (!best || now - focusAt < FOCUS.dwellMs) { focus = keep; return; }
-  if (best.score > keep.score * FOCUS.beat) { focus = keep; return; }
-  setFocus(best, now);
+  if (!keep) { settleFacing(s, best, now); return; }
+  if (sameFocus(best, keep)) { s.cur = keep; return; }
+  if (!best || now - s.at < FOCUS.dwellMs) { s.cur = keep; return; }
+  if (best.score > keep.score * FOCUS.beat) { s.cur = keep; return; }
+  settleFacing(s, best, now);
 }
 
-function setFocus(f, now) {
+function settleFacing(s, f, now) {
   // Nothing to nothing is not a change. Without this the clock restarts on every
-  // frame spent facing empty meadow, and the dwell below — which exists to stop
+  // frame spent facing empty meadow, and the dwell above — which exists to stop
   // a focus turning over twice in three frames — would be measuring the wrong
   // thing the moment something finally arrived.
-  if (!f && !focus) return;
-  if (sameFocus(f, focus)) { focus = f; return; }
-  focus = f;
-  focusAt = now;
+  if (!f && !s.cur) return;
+  if (sameFocus(f, s.cur)) { s.cur = f; return; }
+  s.cur = f;
+  s.at = now;
 }
 
-function focusName() { return focus ? (ART_NAME[focus.art] || '') : ''; }
+// `focus` and `mate` are read-only mirrors of the two, written here and nowhere
+// else, so everything downstream goes on asking the same short question it
+// always did.
+function updateFocus(now) {
+  if (!rig.isFirstPerson) {
+    facingProps.cur = null;
+    facingCast.cur = null;
+    focus = null;
+    mate = null;
+    return;
+  }
+  resolveFacing(facingProps, now);
+  resolveFacing(facingCast, now);
+  focus = facingProps.cur;
+  mate = facingCast.cur;
+}
+
+// `focusName` stood here — the focused piece by name, for 「ひろう」's pill.
+// Gone with `mateName`, `mateTo` and `lentName` below it: the focus marks name
+// their targets by pointing now, and a helper whose one reader has stopped
+// asking is not machinery worth keeping. ART_NAME stays — 「つける」 still
+// names its light through `of`, and the fixture table is its home.
 
 // --- the interaction stack
 //
@@ -2104,7 +2414,77 @@ const ixEl = document.getElementById('interact');
 // travelling toward one entry, and you mine the ore instead of opening the
 // chest. Here a verb's seat depends only on which kind of verb it is, so it is
 // where you last found it every time, and pressing without reading is safe.
-const IX_ORDER = ['strike', 'reel', 'grab', 'fish', 'put', 'stow', 'light'];
+//
+// THE PEOPLE-VERBS SIT AT THE TOP, and they used to sit at the bottom for a
+// reason that turned out to be the wrong one. The argument was thumb-reach: a
+// person beats a pastime everywhere on this planet, says the tap handler, so
+// give the person the seat nearest the thumb. What that missed is WHERE THE
+// FRIEND IS. They stand in the middle of the screen with the focus mark
+// floating over their head, which is above the stack, not below it — so the
+// verbs about them were as far from them as the column could put them, and the
+// eye had to travel the whole height of the buttons to get from the mark to the
+// word. Up here they are beside what they are about.
+//
+// The trade is real and worth naming: the friend verbs are now the furthest
+// from a resting thumb rather than the nearest. It buys them the shortest
+// distance from the thing they act on, and on a screen where the mark says who
+// and the pill says what, keeping those two near each other is worth more than
+// keeping the pill near the thumb.
+// 「しまう」 IS THE ANCHOR, bottom of everything and wearing the ink whenever it
+// is showing. It is the one verb in the stack that is always available for the
+// same reason and always means the same thing — your hands are full, empty
+// them — so it is the one that can afford to be in the same place every time.
+// A stack whose lowest pill changes with the scenery has no home key; this
+// gives it one, and pressing without reading is safest exactly there.
+//
+// 「おく」 rides down with it rather than being left behind in the middle of the
+// column. The two are a pair — one sets a thing down in the world, the other
+// keeps it — and the whole point of the gaps below is that kin stand together.
+// Splitting them to seat one of them would be spending the grouping to buy the
+// anchor, when both fit.
+const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'give', 'giveBack'];
+
+// WHAT EACH VERB IS ABOUT, which is what the gaps in the column are drawn from.
+//
+// Four pills in a row all wearing the same pill read as one list of four
+// unrelated things, and they are not: 「はなす」「かす」 are about the friend
+// under the mark, 「おく」「しまう」 are about what is in your hand, and nothing
+// in the stack said so. Proximity is the oldest way to say it and the cheapest —
+// a wider gap between families and the eye chunks them without being told.
+//
+// AIR RATHER THAN INK, deliberately. The alternatives all cost this screen
+// something it has: colouring the groups fights a palette that is paper and one
+// pen, and drawing a divider adds furniture to say what a space already says
+// silently. Nothing here is added; some of it is merely further apart.
+//
+// THE FAMILIES MUST STAY CONTIGUOUS IN `IX_ORDER`, and that is the one rule a
+// future verb has to respect. The gap is decided by comparing each showing pill
+// with the one below it, so a verb seated between two members of another family
+// would split that family in two and put a gap in the middle of it. Add a new
+// verb NEXT TO ITS OWN KIND in the table above, never between somebody else's.
+// Listed bottom-to-top, in `IX_ORDER`'s own sequence, so this table can be read
+// down the page as the column reads up the screen.
+const IX_GROUP = {
+  // The rod, which always returns alone — so this family never shows a gap at
+  // all. It is named for completeness rather than for effect.
+  strike: 'rod',
+  reel: 'rod',
+  // What is in your hand, anchored at the bottom — see IX_ORDER.
+  stow: 'hand',
+  put: 'hand',
+  // What you are facing out in the world.
+  grab: 'world',
+  fish: 'world',
+  // The light, which is its own thing: it is neither a person, nor a thing you
+  // are carrying, nor quite a thing you picked — it is a switch on something
+  // that stays where it is.
+  light: 'lamp',
+  // ...and the friend in front of you, topmost, nearest the mark over their
+  // head. See IX_ORDER for why they moved up here.
+  talk: 'friend',
+  give: 'friend',
+  giveBack: 'friend',
+};
 
 // Stroke glyphs in the app's own ink, the same recipe as jump and sprint. Four
 // pills in a column are four similar shapes, and the glyph is what lets you
@@ -2112,6 +2492,20 @@ const IX_ORDER = ['strike', 'reel', 'grab', 'fish', 'put', 'stow', 'light'];
 const IX_GLYPH = {
   strike: '<path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/>',
   reel: '<path d="m7 7 10 10"/><path d="m17 7-10 10"/>',
+  // A speech bubble with its tail down — the one shape in this set that needs no
+  // explaining, and the same rounded box the dialogue itself is drawn in.
+  talk: '<path d="M4.4 5.6h15.2v9.6h-8.4l-4 3.2v-3.2H4.4Z"/>',
+  // The same arrow the other way about — away from you, toward them. The pair
+  // are deliberately mirror images: 「わたす」 and 「かえして」 are one object
+  // making one journey, and which way it is going is the whole of the
+  // difference between them.
+  give: '<path d="M18.6 7.8H9.7a4.4 4.4 0 0 0 0 8.8h3.6"/>'
+      + '<path d="m15.1 4.3 3.5 3.5-3.5 3.5"/>',
+  // An arrow that turns and comes back toward you: the loan's own shape. It is
+  // 「ひろう」's cousin rather than its opposite, because taking something back
+  // IS a pickup — it just starts in somebody's hands.
+  giveBack: '<path d="M5.4 7.8h8.9a4.4 4.4 0 0 1 0 8.8h-3.6"/>'
+          + '<path d="m8.9 4.3-3.5 3.5 3.5 3.5"/>',
   grab: '<path d="M12 3.2v9"/><path d="m8.5 6.7 3.5-3.5 3.5 3.5"/>'
       + '<path d="M5 13.2a7 7 0 0 0 14 0"/>',
   fish: '<path d="M3.2 12c2.4-3 5.3-4.6 7.9-4.6s5.6 1.6 7.2 4.6c-1.6 3-4.6 4.6-7.2 4.6S5.6 15 3.2 12Z"/>'
@@ -2128,10 +2522,33 @@ const IX_GLYPH = {
 const ACTIONS = {
   strike: { word: () => 'あげる!', run: () => fishing.onTap() },
   reel: { word: () => 'やめる', run: () => fishing.onTap() },
-  // Named, which is the entire reason facing was worth its cost: the button now
-  // says WHICH thing it will take. Stood between the bear and the teapot you
-  // used to press this to find out.
-  grab: { word: () => 'ひろう', of: focusName, run: grabFocus },
+  // Talking is a thing you can now DO rather than only a thing that happens to
+  // you. A tap on somebody has always said hello, but a tap is overloaded by
+  // what you are carrying — see the note in onUp, where the item in your hand
+  // decides whether the gesture is a visit, a gift or a loan — so with anything
+  // at all in your hands there was no way left to simply say hi. There is now,
+  // and it is the same word whatever you are holding.
+  // THE PEOPLE-VERBS ARE BARE WORDS, and so is 「ひろう」 — the focus marks
+  // took over the naming. A pill used to say who and what in text
+  // (「かえして ピンクのさすまた ハチワレに」, at 258px the widest thing on the
+  // screen) because text was the only place the answer could live; the paper
+  // arrow now stands ON the friend and ON the piece, which answers "which one"
+  // where the player is already looking and in no language at all. What a mark
+  // cannot say is kept in the word: わたす／かす is the one distinction below
+  // that has no visual — a gift and a loan look identical at the moment of
+  // handing over — so the WORD carries it, the way つける／けす carries the
+  // lamp's.
+  talk: { word: () => 'はなす', run: talkToMate },
+  give: {
+    word: () => (inventory.heldUnique ? 'かす' : 'わたす'),
+    run: handToMate,
+  },
+  // 「かえして」 rather than 「とりかえす」: you ASK, and they hand it over. This
+  // world does not have a verb for taking something out of a friend's arms, and
+  // it should not grow one. What is being asked for needs no naming — it is
+  // visibly in the marked friend's hands.
+  giveBack: { word: () => 'かえして', run: takeBackLoan },
+  grab: { word: () => 'ひろう', run: grabFocus },
   // Casting with a full hand puts the hand away first, which is why this can be
   // offered while you are carrying something rather than having to wait for you
   // to deal with it.
@@ -2143,16 +2560,25 @@ const ACTIONS = {
   // two. 「おく」 sets the thing down IN THE WORLD and gives its slot back;
   // 「しまう」 keeps it and stops holding it. With one word for both, a press
   // meant to tidy your hand would leave the bear in a field.
+  // BARE, like the verbs the focus marks took the naming off. Nothing marks
+  // what is in your hand — but nothing needs to: the hand slot is already
+  // showing it, in the corner, at the size of a held thing. 「おく ランプ」 was
+  // the pill reading out a label for the object the player is looking at while
+  // they read it, and it was the widest thing left in the stack at 137px.
   put: {
     word: () => 'おく',
-    of: heldName,
     run: () => {
       const spot = placeSpot();
       if (!spot) { refuse('put'); return; }
       putDownUnique(spot.clone());
     },
   },
-  stow: { word: () => 'しまう', of: heldName, run: () => inventory.putAway() },
+  // Bare for 「おく」's reason, and it was the last pill naming a thing the hand
+  // slot was already holding up. In practice it rarely showed the name at all —
+  // 「しまう」 is almost always a secondary pill, where the taper hides it — so
+  // this mostly stops the one case where it did: tidying your hand with nobody
+  // and nothing else around.
+  stow: { word: () => 'しまう', run: () => inventory.putAway() },
   // THE WORD CARRIES THE STATE, so this needs no lit styling of its own. As a
   // lone round button it was filled when the light was on and outlined when it
   // was off, because a glyph cannot say which way it is about to go. A pill can:
@@ -2189,21 +2615,44 @@ function actionsNow() {
   if (fishing.active) return ['reel'];
 
   const list = [];
-  // WORLD VERBS NEED YOU TO BE FACING THE THING, because a verb about an object
-  // is unusable without knowing which object, and proximity cannot say. One
-  // hand: nothing may be taken up while a unique is already in it.
+  // PUSHED IN `IX_ORDER`'S OWN SEQUENCE, bottom of the column first. The CSS
+  // seats each pill by that table, but `i === 0` is what wears the filled
+  // treatment, so the pushes and the table have to agree or the pill under your
+  // thumb would not be the one lit. Reorder one and you must reorder the other.
+  //
+  // HAND VERBS FIRST, and they need no facing: what is in your hand is in your
+  // hand whichever way you are pointed, and a rule that made you face something
+  // to put it down would be a rule with no object to attach itself to.
+  //
+  // 「しまう」 leads the whole stack — see IX_ORDER. It used to be 「おく」, on
+  // the grounds that setting a thing down is the reversible one and so the
+  // safer press to sit under a thumb. True, and beaten by a plainer thing:
+  // 「しまう」 is the only verb here that shows for the same reason every time
+  // and always does the same thing, so it is the only one that can be a fixed
+  // home key. 「おく」 is a decision about where a thing lives; that is worth
+  // reading a pill for.
+  if (inventory.holding || inventory.heldUnique) list.push('stow');
+  if (inventory.heldUnique) list.push('put');
+  // WORLD VERBS DO NEED IT, because a verb about an object is unusable without
+  // knowing which object, and proximity cannot say. One hand: nothing may be
+  // taken up while a unique is already in it.
   if (focus && focus.loose && !inventory.heldUnique) list.push('grab');
   if (facingWater()) list.push('fish');
-  // HAND VERBS DO NOT. What is in your hand is in your hand whichever way you
-  // are pointed, and a rule that made you face something to put it down would
-  // be a rule with no object to attach itself to. `put` leads because it is the
-  // reversible one: you can always pick it back up, where stowing is a decision
-  // about where a thing lives.
-  if (inventory.heldUnique) list.push('put');
-  if (inventory.holding || inventory.heldUnique) list.push('stow');
-  // Last, so a lamp you happen to be carrying never pushes the verb you were
-  // reaching for out from under your thumb.
   if (lightNow()) list.push('light');
+  // ...AND THE PEOPLE-VERBS ON TOP, nearest the friend they are about rather
+  // than nearest the thumb — see IX_ORDER, which is where that trade is argued.
+  //
+  // All three come off the people-facing rather than off proximity, for the
+  // reason the world verbs do: standing near two friends, "which one" is a
+  // question only facing can answer.
+  if (mate) list.push('talk');
+  // Something in your hand and somebody in front of you is the whole condition.
+  // It reads the HAND rather than the pouch on purpose: handing over what you
+  // are holding is a gesture, and reaching into your bag mid-conversation to
+  // find something to hand over is a different one that the pouch panel already
+  // covers — pick it up there and this appears.
+  if (mate && (inventory.holding || inventory.heldUnique)) list.push('give');
+  if (loanFrom(mate)) list.push('giveBack');
   return list;
 }
 
@@ -2268,10 +2717,128 @@ function grabFocus() {
   if (id) { inventory.putAway(); inventory.setUnique(id, { state: 'hand' }); }
 }
 
-// What is in your hand, by name, for the pills that act on it.
-function heldName() {
-  const id = inventory.heldUnique || inventory.holding;
-  return (id && ITEMS[id] && ITEMS[id].name) || '';
+// `heldName` stood here — what is in your hand, by name, for the pills that
+// acted on it. It goes the way of the other naming helpers: 「おく」 and
+// 「しまう」 are bare words now, because the hand slot is already holding the
+// answer up in the corner of the screen. `ART_NAME` and the `of` slot itself
+// stay for 「つける」, whose light is the one target this world neither marks
+// nor puts in your hand.
+
+// --- the friend in front of you
+//
+// `mateName` and `mateTo` stood here — the people-facing's pick by name, and
+// the same name wearing a 「に」, for the pills that used to spell out who a
+// verb would reach. The mark over their head says it now; see updateMark.
+
+// The loan they are carrying, if the one you are facing has one of yours. Null
+// is the ordinary answer — most of the time nobody is holding anything of
+// yours, and most of the rest of the time it is not this friend.
+//
+// The VISIBLE one, when somebody has somehow ended up with two: carryLent puts
+// one piece in a pair of hands and rides the rest along invisibly, so taking
+// back the one you cannot see would be a button that appears to do nothing. It
+// scans in the same order carryLent fills hands, which is what makes the two
+// agree.
+function loanFrom(who) {
+  if (!who) return null;
+  const key = who.bot.spec.key;
+  for (const id in inventory.uniques) {
+    const rec = inventory.uniques[id];
+    if (rec.state === 'given' && rec.to === key) return id;
+  }
+  return null;
+}
+
+// (`lentName` is gone with the other pill-naming helpers above — the lent
+// piece is visibly in the marked friend's hands.)
+
+// Say something to whoever you are stood in front of.
+//
+// The 「poke」 bank rather than 「greet」, because by the time this button can be
+// pressed you have been greeted already: it appears at exactly greetArc, which
+// is the line the walk-up hello fires on. Pressing it is the second thing you
+// say to somebody, and that is the bucket for the second thing.
+//
+// It also stamps the greeting clock, for the same reason the tap does — without
+// it, walking the last half-metre after pressing would have them welcome you to
+// a conversation you had just started.
+function talkToMate() {
+  if (!mate) return;
+  const now = performance.now();
+  const bot = mate.bot;
+  // A person beats a pastime everywhere on this planet, the tap handler says,
+  // and it is no less true of a button.
+  if (fishing.active) fishing.cancel();
+  // Frame the conversation — step in if you are back a way, square up either
+  // way. See closeIn, which is careful never to walk you backwards.
+  rig.closeIn(bot.ch);
+  greetedKey = bot.spec.key;
+  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  // Absorbed while they are still answering the last one — see pokeBack. The
+  // framing above happens either way, because squaring up on a friend who is
+  // mid-sentence is exactly right.
+  pokeBack(bot, 'poke', now);
+}
+
+// Hand over what you are holding. The gesture that used to be a tap, made a
+// verb — see the note in onUp for why it could not stay a tap.
+//
+// TWO WORDS FOR TWO DIFFERENT ENDINGS, which is the real prize. A stackable is
+// gone when you give it and a unique comes home on a timer, and until now those
+// two were the same gesture with no way to tell them apart: you handed Chiikawa
+// the lamp exactly as you handed her a fish, and found out ninety seconds later
+// which one it had been. The pill says 「わたす」 or 「かす」 before you press it.
+//
+// 「わたす」 rather than 「あげる」 on purpose, though あげる is the plainer word
+// for a gift: the rod's strike already owns 「あげる!」, and while the two can
+// never share a stack — the rod takes the whole thing — two verbs reading the
+// same is a thing to avoid when a synonym is right there.
+function handToMate() {
+  if (!mate) return;
+  const bot = mate.bot;
+  const now = performance.now();
+  rig.closeIn(bot.ch);
+  greetedKey = bot.spec.key;
+  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  // A unique is LENT and a stackable is GIVEN — the same split the tap used to
+  // make silently, now made by a button that said which it would be.
+  //
+  // No poke buffer on either: both consume something, so they are limited by
+  // what you are carrying rather than by a clock, and the thank-you is the whole
+  // point of the press. Their delight is never absorbed.
+  if (inventory.heldUnique) { lendUnique(bot, now); return; }
+  if (inventory.holding && giveGift(bot, inventory.holding, now)) return;
+  // The hand and the pouch have come apart, which the pill's own condition says
+  // cannot happen. It shakes its head rather than doing nothing.
+  refuse('give');
+}
+
+// Ask for a lent piece back. The warm half of a loan's ending, and the only one
+// you can choose: the timer's version happens wherever they happen to be.
+//
+// ROOM IS CHECKED FIRST, and that is not a nicety. `setUnique` sends a piece
+// HOME when the pack has no slot for it — a sensible answer for a pickup off the
+// grass, and quite the wrong one here, where it would end the loan and teleport
+// the thing across the planet on the one press that was asking to hold it. So
+// the refusal happens before anything is written, and a full pack leaves the
+// piece exactly where it was: in their hands.
+function takeBackLoan() {
+  const id = loanFrom(mate);
+  if (!id) return;
+  if (!inventory.hasRoomFor(id)) { refuse('giveBack'); return; }
+  const bot = mate.bot;
+  const now = performance.now();
+  // Same framing as 「はなす」. Being handed something back is a moment between
+  // two people, and it should not be watched from an angle.
+  rig.closeIn(bot.ch);
+  // One hand — whatever was in it goes back to the pack, exactly as a pickup
+  // off the ground does.
+  inventory.putAway();
+  inventory.setUnique(id, { state: 'hand' });
+  // They hand it over and say so. `handBack` is a bucket a bank may not have,
+  // and the fallback is the same half-drawn courtesy the sheets get: somebody
+  // with no line for this still answers, with an ordinary one.
+  speak(bot, bot.dlg.has('handBack') ? 'handBack' : 'poke', now);
 }
 
 // --- where 「おく」 puts it
@@ -2383,35 +2950,43 @@ function refuse(key) {
   rec.el.classList.add('is-refused');
 }
 
-// --- the ring on the ground
+// --- the focus marks
 //
-// WHAT YOU ARE ABOUT TO PICK UP, and only that.
+// WHAT YOUR BUTTONS ARE ABOUT, drawn on the thing itself: a paper arrow
+// floating over the piece 「ひろう」 would take, and over the friend the
+// people-verbs would reach. Two marks because the two facings are independent
+// and can both be live — a bear at your feet and Chiikawa in front of you are
+// both marked, each by the verb that means it.
 //
-// It is the walk marker, built for tap-to-walk and unused since that went away —
-// kept, the note there says, against the day a verb wanted it. A ring in the
-// same pen as every outline in this world, tinted with the hour, breathing
-// gently so it reads as the app holding on to something. Exactly what was
-// wanted, already drawn, and the alternative was drawing it again.
+// THE ARROW REPLACED THE RING for focus duty, and it earned it twice over.
+// Once for people: the ring was a walk-destination drawing, and a ring under a
+// FRIEND reads as a lock-on — a grammar this world has never had — where a
+// mark above the head sits exactly where attention already lives here, which
+// is where the bubbles go. And once for things: a ring under a bear is half
+// covered by the bear from most angles, and the work of raising it to a
+// perched piece's height and cutting it to a lantern's foot was work spent
+// making a ground drawing serve an OBJECT. The arrow gets both for free: it
+// hangs off the piece's own anchor (so the perch lift comes with it) and
+// stands a measured clearance above the piece's own posed body (so a leaning
+// sasumata is cleared lean and all) — see setGrabMark in scene.js.
 //
-// IT ALSO SHOWED WHERE 「おく」 WOULD LAND, on the reasoning that the two
-// questions — which of these will I pick up, where will this land — are never
-// live at once, so they could share the one ring. They are not both live, and
-// it was still wrong: with the lamp in your hands the ring sat out on the floor
-// a step ahead of you, a hole in the middle of the room the whole time you were
-// carrying anything. A mark that follows you everywhere is scenery, and this
-// world's rule for its own furniture is that a control appears when it has
-// something to say and is otherwise not there.
+// The ring itself goes back to being what its note always said it was:
+// complete, correct machinery for marking a spot ON THE GROUND, dormant until
+// a verb wants one. It marked where 「おく」 would land once, and that story —
+// why a mark that follows you everywhere is scenery — is kept at setWalkMarker.
 //
-// So the ring is only ever the answer to the first question. Where a thing will
-// land is a thing you find out by putting it down, which you can immediately
-// undo, and a preview was never worth a permanent hole in the floor.
-//
-// Gated on 「ひろう」 actually being on offer rather than merely on there being a
-// focus, because with your hands full it is not offered — and ringing something
-// the buttons will not act on is the same lie in a quieter voice.
-function updateMark(dt) {
-  const on = rig.isFirstPerson && focus && focus.loose && !inventory.heldUnique;
-  globe.setWalkMarker(on ? focusDir(focus) : null, dt);
+// Gated on the verb actually being on offer rather than merely on there being
+// a focus: with your hands full 「ひろう」 is withheld, and marking something
+// the buttons will not act on is the same lie in a quieter voice. The person
+// mark's own version of that rule: it steps aside while that friend's bubble
+// is up. The two share an anchor on purpose — the mark says "your words land
+// here" and the bubble IS the words landing — so showing both would be saying
+// it twice, in the same spot, at two sizes.
+function updateMark() {
+  const grabOn = rig.isFirstPerson && focus && focus.loose && !inventory.heldUnique;
+  globe.setGrabMark(grabOn ? focus.loose : null);
+  const mateOn = rig.isFirstPerson && mate && !mate.bot.dlg.isVisible;
+  globe.setMateMark(mateOn ? mate.bot.ch : null);
 }
 
 // --- drawing the stack
@@ -2424,25 +2999,100 @@ function updateMark(dt) {
 // toward the pill below it.
 const ixNodes = new Map();
 
-function buildIx(key) {
+function buildIx(key, announce) {
   const el = document.createElement('button');
   el.type = 'button';
   el.className = `ix ix-${key}`;
+  // The corner going from empty to occupied, which is the one arrival worth
+  // making noticeable — see .ix-fresh in the CSS. Taken off again on the way
+  // out, because `animation` is a single property and the refusal shake wants it
+  // back; a pill that kept this would refuse by bouncing instead of shaking.
+  if (announce) {
+    el.classList.add('is-fresh');
+    el.addEventListener('animationend', () => el.classList.remove('is-fresh'), { once: true });
+  }
   el.style.order = String(IX_ORDER.indexOf(key));
-  // Two words rather than one: the VERB, and the thing it will be done to. The
-  // verb is what you scan for and stays the size it was; the name is smaller and
-  // second, because it is an answer to "which one" rather than to "what".
+  // Two parts: the VERB, and — for the hand and light verbs — the thing it
+  // will be done to. The verb is what you scan for and stays the size it was;
+  // the name is smaller and second, because it answers "which one" rather than
+  // "what".
+  //
+  // A THIRD slot lived here for one afternoon — 「ハチワレに」, who a people-
+  // verb would reach — because two verbs were genuinely ambiguous and text was
+  // the only answer the stack had. The focus mark answers it in the world now
+  // (see updateMark), and the slot went with the names it carried: at its
+  // widest the pill read 「わたす はなびらもようの おさかな ハチワレに」,
+  // 289px of the 375 the screen has.
   el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${IX_GLYPH[key]}</svg>`
     + '<span class="ix-word"></span><span class="ix-of" hidden></span>';
-  // pointerdown rather than click, for the reason jump and sprint use it too:
-  // these are about NOW, and あげる! has under a second to be pressed in.
+  // TAP TO PRESS, DRAG TO LOOK. These pills float in the band where a camera
+  // swipe naturally starts, and a button that acted on pointerdown swallowed
+  // any drag that began on it — you aimed a look and pressed a verb instead.
+  // So the press moved to the RELEASE, gated on the same tapSlop the world's
+  // own taps use, and a press that travels turns into the camera drag it was
+  // always meant to be: the pointer is handed to the look system mid-gesture.
+  // The cost is honest — a verb now fires when the finger lifts rather than
+  // when it lands — and imperceptible for every verb this applies to.
+  //
+  // 「あげる!」 keeps the old reflex. It is the one press in this game with a
+  // deadline, it is always alone, and it is pinned down in the corner while it
+  // exists (see is-low) — out of the drag band and too urgent to wait for a
+  // finger to lift. やめる rides with it: the rod's two verbs should not need
+  // two different kinds of press.
+  let press = null;
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     touched();
+    if (key === 'strike' || key === 'reel') {
+      ACTIONS[key].run();
+      // The world just changed, under the very button that changed it, so the
+      // stack is redrawn before the finger lifts rather than on the next frame.
+      syncInteract();
+      return;
+    }
+    // Captured so the moves keep coming to this handler wherever the finger
+    // wanders; released again the moment the gesture declares itself a drag.
+    capture(el, e.pointerId);
+    press = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, travel: 0 };
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!press || e.pointerId !== press.id) return;
+    press.travel += Math.hypot(e.clientX - press.lastX, e.clientY - press.lastY);
+    press.lastX = e.clientX;
+    press.lastY = e.clientY;
+    if (press.travel <= CONFIG.player.tapSlop) return;
+    // Past slop this is a drag, and the camera should have had it from the
+    // start. Hand it over — unless a look or a pinch is already running on
+    // another finger, in which case the press simply dies: one drag cannot
+    // steer two cameras.
+    if (look.id === null && pinch.a === null) {
+      try { el.releasePointerCapture(press.id); } catch { /* already gone */ }
+      capture(stage, press.id);
+      pointers.set(press.id, { x: e.clientX, y: e.clientY });
+      look.id = press.id;
+      look.mode = 'orbit';
+      look.ch = null;
+      look.lastX = e.clientX;
+      look.lastY = e.clientY;
+      // The distance already travelled comes too, so letting go out there can
+      // never fall under tapSlop and read as a tap on whatever ground the
+      // finger happens to be over when it lifts.
+      look.travel = press.travel;
+    }
+    press = null;
+  });
+  el.addEventListener('pointerup', (e) => {
+    if (!press || e.pointerId !== press.id) return;
+    const tap = press.travel <= CONFIG.player.tapSlop;
+    press = null;
+    if (!tap) return;
     ACTIONS[key].run();
-    // The world just changed, under the very button that changed it, so the
-    // stack is redrawn before the finger lifts rather than on the next frame.
+    // The world just changed under the button that changed it — redrawn now
+    // rather than on the next frame.
     syncInteract();
+  });
+  el.addEventListener('pointercancel', (e) => {
+    if (press && e.pointerId === press.id) press = null;
   });
   return {
     el,
@@ -2459,6 +3109,9 @@ function buildIx(key) {
 // is not, only what actually changed is touched.
 function syncInteract() {
   const want = actionsNow();
+  // Read BEFORE anything is removed, so this is the state the last frame left
+  // rather than the state this one is halfway through building.
+  const wasEmpty = ixNodes.size === 0;
 
   // Gone from the world — you walk away from a stump mid-reach and the word
   // goes with the distance.
@@ -2466,11 +3119,18 @@ function syncInteract() {
     if (!want.includes(key)) { rec.el.remove(); ixNodes.delete(key); }
   }
 
+  // Down into the thumb's arc while the rod is out, back up to eye level
+  // otherwise — see .interact.is-low. Asked of the verb on offer rather than of
+  // the rod directly, because the stack's HEIGHT is a fact about what it is
+  // showing: whichever way a future deadline verb arrives, it belongs low for
+  // the same reason 「あげる!」 does.
+  ixEl.classList.toggle('is-low', want[0] === 'strike' || want[0] === 'reel');
+
   for (let i = 0; i < want.length; i++) {
     const key = want[i];
     let rec = ixNodes.get(key);
     if (!rec) {
-      rec = buildIx(key);
+      rec = buildIx(key, wasEmpty);
       ixNodes.set(key, rec);
       ixEl.appendChild(rec.el);
     }
@@ -2495,6 +3155,17 @@ function syncInteract() {
     // The strike is the one press in this game with a deadline on it. It gets
     // to be bigger, and it is always alone when it is showing.
     rec.el.classList.toggle('is-urgent', key === 'strike');
+    // The air between families — see IX_GROUP. Decided from what is SHOWING
+    // rather than from the table, which is the whole reason it is done here and
+    // per frame: families turn up in pieces (a lone 「しまう」 with no 「おく」
+    // beside it is ordinary), and a gap drawn from the static list would leave
+    // one hanging under a space belonging to verbs that are not there.
+    //
+    // The pill that OPENS a family carries it, and `i > 0` is what keeps the
+    // bottom of the stack flush — there is nothing under the first pill to be
+    // spaced away from.
+    const opensGroup = i > 0 && IX_GROUP[key] !== IX_GROUP[want[i - 1]];
+    rec.el.classList.toggle('is-group', opensGroup);
   }
 }
 
@@ -3302,7 +3973,7 @@ function frame(now) {
     // empties this corner for free.
     updateFocus(now);
     syncInteract();
-    updateMark(dt);
+    updateMark();
 
     // A CARRIED LAMP BRINGS ITS LIGHT WITH IT. The light's position is an empty
     // object parented to the piece's own anchor — see the note where it is
@@ -3521,5 +4192,14 @@ if (IS_LOCAL) {
       };
     },
   };
+
+
+
+
+
+
+
+
+
 
 }

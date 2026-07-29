@@ -131,6 +131,16 @@ const chiikawa = {
     { t: 'く、くさ…! いちばん すきなやつ…!', expr: 'delight' },
     { t: 'これ…! これが よかったの…!', expr: 'delight' },
   ],
+  // Handing a borrowed thing back. NOT the mirror of `gift` — nothing is being
+  // parted with, so there is no gratitude to play and no sadness either. What
+  // it is is the small politeness at the end of a loan: they were looking after
+  // it, they enjoyed it, here it is. A refusal or a sulk would make asking for
+  // your own lamp back feel like a thing you had done TO somebody.
+  handBack: [
+    { t: 'あっ…、はい…! ありがとう…', expr: 'happy' },
+    { t: 'たのしかった…! だいじに もってたよ…', expr: 'happy' },
+    { t: 'うん…、かえすね…', expr: 'normal' },
+  ],
 };
 
 const hachiware = {
@@ -227,6 +237,13 @@ const hachiware = {
     { t: 'おさかな! ぼく これ だいすきなんだ!', expr: 'surprise' },
     { t: 'わあ、いい さかな! よく つれたねぇ!', expr: 'happy' },
   ],
+  // See the note on Chiikawa's. Hachiware hands it back the way Hachiware does
+  // everything — cheerfully, and already looking forward to the next time.
+  handBack: [
+    { t: 'はい、どうぞ! かして くれて ありがとう!', expr: 'happy' },
+    { t: 'たのしかったよ〜! また かしてね!', expr: 'happy' },
+    { t: 'うん、かえすね! だいじに してたよ!', expr: 'happy' },
+  ],
 };
 
 const usagi = {
@@ -316,6 +333,13 @@ const usagi = {
   giftLove: [
     { t: 'ウラ────ッ!!! （きのこ）', expr: 'surprise', w: 2 },
     { t: 'ヤハーッ!! ヤハーッ!!', expr: 'happy' },
+  ],
+  // See the note on Chiikawa's. Usagi hands it back without ceremony and
+  // without a word of actual Japanese, which is the whole of Usagi.
+  handBack: [
+    { t: 'ウラ! （さしだした）', expr: 'happy' },
+    { t: 'ヤ〜ハ! ウラ!', expr: 'happy' },
+    { t: 'プルルル… （そっと おいた）', expr: 'normal' },
   ],
 };
 

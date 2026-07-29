@@ -414,13 +414,31 @@ html, body {
    cannot overlap itself, so the whole class of bug is gone rather than fixed.
 
    Right-aligned with the jump button below it, so a long word grows leftward
-   and the edge a thumb aims at never moves. The bottom clears the sprint
-   button's top edge, since the two would otherwise share a few pixels of
-   column. */
+   and the edge a thumb aims at never moves.
+
+   IT SITS A QUARTER OF THE WAY UP, not down in the thumb's arc where it
+   started, and the reason is where your EYES are rather than where your thumb
+   is. Walk up to somebody and they fill the middle of the screen — the framing
+   note in config.js has their feet landing at about 80% of its height — so a
+   verb pill at 132px was diagonally opposite everything you were looking at.
+   It was reachable and unnoticeable, which for a button that only appears when
+   the world has something to offer is the one failure that matters: the offer
+   went unread.
+
+   A quarter and NOT the third it briefly was, because the base is placed for
+   the one-pill case but the column grows UPWARD, so the number that actually
+   matters when verbs stack is where the TOP ends up. Anchored at a third, a
+   shore-side stack with full hands climbed past two thirds of the screen and
+   walled off the character it was about — anchored here it tops out around the
+   middle, and the taper below does the rest of the slimming.
+
+   `max` rather than a flat vh: a short landscape window would put a quarter of
+   the height below the sprint button, and this is a floor saying "never lower
+   than it used to be" rather than a second opinion about where it goes. */
 .interact {
   position: absolute;
   right: 20px;
-  bottom: calc(132px + env(safe-area-inset-bottom));
+  bottom: max(calc(132px + env(safe-area-inset-bottom)), 26vh);
   display: flex;
   /* Reversed, so the FIRST child is the BOTTOM one. main.js stamps `order` from
      a fixed table and lists the entry nearest the thumb first; reversing here is
@@ -429,6 +447,22 @@ html, body {
   align-items: flex-end;
   gap: 8px;
   pointer-events: none;
+  /* It SLIDES between the two heights rather than jumping, because the move
+     itself says something: dropping to the thumb as the line goes out is the
+     control telling you it is now a thing you will need to hit in a hurry. */
+  transition: bottom 0.2s ease;
+}
+
+/* ...AND BACK DOWN INTO THE THUMB'S ARC WHILE THE ROD IS OUT. 「あげる!」 is the
+   only press in this game with a deadline on it — under a second, see the bite
+   window — and a deadline verb belongs under the resting thumb, not up where the
+   eye is. The rest of the stack is browsed; this one is caught.
+
+   It is a state rather than a reordering, which is what makes it safe: the rod
+   takes the whole stack (see actionsNow), so nothing else is ever up there to be
+   dragged down with it. */
+.interact.is-low {
+  bottom: calc(132px + env(safe-area-inset-bottom));
 }
 
 /* Paper and ink, the same recipe as every other surface here: a glyph to find
@@ -474,6 +508,22 @@ html, body {
 
 .ix:active { transform: scale(0.94); }
 
+/* THE AIR BETWEEN FAMILIES. Which verbs are kin is decided in main.js — see
+   IX_GROUP — and this is the whole of what that decision draws: the pill that
+   opens a family stands a little further off the one below it.
+
+   About double the flex gap, which is the least that reads as a break rather
+   than as a wobble in the spacing, and the most that can be spent before the
+   column starts climbing the screen again. Four pills in two families grow the
+   stack by ten pixels.
+
+   MARGIN-BOTTOM, and the direction is not a typo. The column is laid out
+   `column-reverse`, so its first child is the LOWEST on screen and the stack
+   builds upward — which means the space "before" a pill in reading order is the
+   space under it in physical terms. margin-top here would open a gap above the
+   family instead, splitting it from the one it belongs to. */
+.ix.is-group { margin-bottom: 10px; }
+
 /* WHAT THE VERB WILL BE DONE TO. Smaller and lighter than the verb beside it,
    and second, because the two are answers to different questions: the verb
    answers "what", which is what you scan the stack for, and this answers "which
@@ -487,6 +537,11 @@ html, body {
   font-weight: 500;
   opacity: 0.72;
 }
+
+/* `.ix-to` — WHO a people-verb was done with — lived here for one afternoon.
+   The floating focus mark answers that in the world now, standing over the
+   friend the verbs are about, so the slot and the names it carried are gone
+   from the pills entirely. See updateMark in main.js. */
 
 /* Nowhere to put it — see `refuse` in main.js. It shakes its head rather than
    sitting there doing nothing, because a button that answers a press with
@@ -517,6 +572,36 @@ html, body {
   font-weight: 700;
 }
 
+/* THE STACK TAPERS. Everything above the primary shrinks to glyph + verb: a
+   little shorter, a little quieter, and without the object name — so a full
+   offer reads as one real button with a column of options over it, not five
+   equal slabs of parchment over the world. The names were what made pills
+   wide (「かえして ピンクのさすまた」), and above the primary they were mostly
+   repeating what the world already shows: the ring names the grab target by
+   pointing at it, and a verb you promote by facing its object becomes the
+   primary and gets its name back.
+
+   is-urgent is exempt on principle rather than in practice — the strike is
+   always alone, so it is never a secondary; the guard is here so that stays a
+   fact about the rod rather than a load-bearing assumption of this rule. */
+.ix:not(.is-primary):not(.is-urgent) {
+  height: 40px;
+  min-width: 64px;
+  padding: 0 0.85rem 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+/* The people-verbs were briefly excused from this rule — they can never be
+   primary (「はなす」 always outranks them), so stripping their names stripped
+   them for good, and 「かえして」 sat in the column naming neither thing nor
+   friend. The excuse is gone because the names are: those pills are bare words
+   now, with the floating focus mark doing the naming in the world. What is
+   left for this rule is what it was always for — the hand and light verbs,
+   whose names come back the moment they are the one on offer. */
+.ix:not(.is-primary):not(.is-urgent) .ix-of { display: none; }
+
+.ix:not(.is-primary):not(.is-urgent) svg { width: 17px; height: 17px; }
+
 /* あげる!, and only ever alone — see actionsNow, where a bite returns by itself.
    The one press in this game with a deadline on it gets a bigger target. */
 .ix.is-urgent {
@@ -533,6 +618,29 @@ html, body {
 @keyframes act-pop {
   from { transform: scale(0.6); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
+}
+
+/* THE CORNER LIGHTING UP, which is a different event from a pill arriving.
+   Walking up to something turns this column from nothing into something, and
+   that transition is the one moment the stack has to be seen out of the corner
+   of an eye — you are looking at the character, not at the button. A verb
+   joining a stack that was ALREADY showing needs no such announcement: you have
+   read that corner once already and a second bounce there is noise.
+
+   So main.js hands this class only to pills built into an empty stack, and takes
+   it off again when the animation ends so the refusal shake has the property
+   back. Bigger and slower than act-pop, with one soft settle rather than a
+   spring — the difference between something being offered to you and something
+   demanding to be pressed. */
+.ix.is-fresh {
+  animation: ix-announce 0.42s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+@keyframes ix-announce {
+  0% { transform: scale(0.55); opacity: 0; }
+  55% { transform: scale(1.09); opacity: 1; }
+  78% { transform: scale(0.975); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 /* Off the ground neither verb exists. Opacity rather than display so they can
@@ -885,9 +993,9 @@ html, body {
 .sheet-cap {
   flex: none;
   /* Held whether or not there is anything to SAY, so the card does not change
-     height as the pack's line changes between naming a thing and teaching the
-     long press. The 図鑑 has no line at all, and that is the one case where the
-     room should go rather than be held — see :empty below. */
+     height as this line comes and goes with what is in your hand. The 図鑑 has
+     no line at all, and that is the one case where the room should go rather
+     than be held — see :empty below. */
   min-height: 1.2rem;
   margin: 0.8rem 0.2rem 0.1rem;
   font-size: 0.76rem;
@@ -897,22 +1005,13 @@ html, body {
   opacity: 0.75;
 }
 
-.sheet-cap:empty { display: none; }
-
-/* The gesture line, under whatever the state line is saying. Quieter than it,
-   because it is the same words every time and the eye should be able to stop
-   reading them once they are known. */
-.sheet-hint {
-  flex: none;
-  margin: 0.25rem 0.2rem 0.1rem;
-  font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1.2;
-  text-align: center;
-  opacity: 0.5;
-}
-
-.sheet-hint:empty { display: none; }
+/* Hidden for the 図鑑, which has no line to say — and by an attribute rather
+   than by `:empty`, which is what this was. `:empty` collapsed the row whenever
+   the PACK had nothing to say either, so the card jumped thirty pixels every
+   time you picked something up and shrank again when you put it down. Reserving
+   the space is the whole point of the min-height above; letting it vanish on
+   emptiness quietly undid it. */
+.sheet-cap[hidden] { display: none; }
 
 /* ---- the drop row, which exists only while a slot is lifted */
 
