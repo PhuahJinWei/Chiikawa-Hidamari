@@ -32,6 +32,31 @@ const _lake = new THREE.Vector3();
 const _away = new THREE.Vector3();
 const _dest = new THREE.Vector3();
 const _probe = new THREE.Vector3();
+// The detour's own scratch, kept apart from the rest because _pickTarget writes
+// _east, _north and _dest itself — and the detour calls it in a loop.
+const _dEast = new THREE.Vector3();
+const _dNorth = new THREE.Vector3();
+const _dAim = new THREE.Vector3();
+const _dTry = new THREE.Vector3();
+
+// How far off the straight line to try when an errand's path is refused, in
+// radians of bearing, nearest first and alternating sides.
+//
+// Alternating matters more than the spacing: a character who always tried the
+// left first would file past every obstacle the same way round, which on a
+// planet with one path worn between two houses is a rut you can see. Taking
+// whichever side clears first is what makes two trips past the same tree look
+// like two trips.
+//
+// It stops at 1.4, which is the last offset that still carries you FORWARD:
+// a step taken 1.4 radians off your bearing still closes the gap by cos(1.4),
+// a sixth of its length, while one at 2.2 opens it by a half. That is not a
+// detour, it is walking away — and it showed as exactly that, a guest a unit
+// from the cushion being sent back across the room by his own attempt to reach
+// it. A character who cannot find a way within 80 degrees of where they mean
+// to go is better off waiting a beat and asking again from wherever the world
+// has moved to.
+const DETOUR = [0.45, -0.45, 0.9, -0.9, 1.4, -1.4];
 
 // How many places along a planned walk get checked for water, for latitude, and
 // for the props you cannot walk through.
@@ -520,6 +545,10 @@ export class Character {
     const cfg = CONFIG.wander;
     const R = CONFIG.globe.radius;
 
+    // The prop the destination itself stands in, if any. Exempt from the fence
+    // and from the path check below, for the reason written at each.
+    const goal = aim ? inSolid(aim, 0) : null;
+
     if (aim) {
       this.target.copy(aim).normalize();
     } else {
@@ -590,7 +619,13 @@ export class Character {
     // stopped by the same trunk is the one arrangement worse than nobody being
     // stopped at all, because it says the rule is about you rather than about
     // the world.
-    keepOffSolids(this.target, CONFIG.wander.wallKeep);
+    // ...except the one they were SENT to. A destination handed to somebody is
+    // a destination they are allowed to reach, and the seats in both homes are
+    // cushions — which are props, which this fence would otherwise push them
+    // off. Measured before it did: a guest crept toward a cushion an eighth of
+    // the remaining distance at a time, closing half a unit in forty seconds,
+    // and gave up a unit short every single visit.
+    keepOffSolids(this.target, CONFIG.wander.wallKeep, goal);
 
     // The walk as well as its destination, for both of the rules above.
     //
@@ -653,6 +688,7 @@ export class Character {
       _probe.copy(this.dir).lerp(_dest, i / PATH_STEPS).normalize();
       const prop = inSolid(_probe, wall);
       const propOk = !prop
+        || prop === goal
         || (prop === standing && _probe.angleTo(prop.dir) > prop.r);
       if (!this._inWater(_probe, keep)
         && !inBuilding(_probe, wall)
@@ -661,6 +697,56 @@ export class Character {
       this.target.copy(this.dir).lerp(_dest, (i - 1) / PATH_STEPS).normalize();
       break;
     }
+  }
+
+  // A way AROUND whatever refused the straight line to an errand. True if it
+  // found one, with `target` already set to it.
+  //
+  // It is the same walk-and-trim `_pickTarget` already does, aimed off to one
+  // side instead of at the destination: swing the bearing away from the errand
+  // by a little, offer that as an ordinary trip, and take the first swing that
+  // comes back with somewhere to go. Whatever it accepts has been through every
+  // rule the direct line was — the water, the poles, the walls, the props —
+  // because it is the same function doing the accepting.
+  //
+  // NOT PATHFINDING, and it should not become it. There is no plan here and
+  // nothing is remembered: it gets the character MOVING in roughly the right
+  // direction, and the next pick is made from wherever that left them, by which
+  // time the obstacle is usually no longer in the way. What that buys over a
+  // real route is that it costs nothing when nothing is wrong — this only runs
+  // on a pick that already failed — and it cannot get out of step with the
+  // world, because it never holds an opinion about the world for longer than
+  // one step.
+  //
+  // The step is capped at `roamMax`, so a detour is an ordinary-length stroll
+  // rather than a lunge at something twenty units off. That is what keeps a
+  // character who is going round a tree from setting out across the planet on a
+  // tangent: they sidestep, then re-aim.
+  _detour(aim) {
+    const cfg = CONFIG.wander;
+    const R = CONFIG.globe.radius;
+    // The bearing of the errand from where we are standing.
+    _dAim.copy(aim).addScaledVector(this.dir, -aim.dot(this.dir));
+    if (_dAim.lengthSq() < 1e-12) return false;      // stood on it already
+    _dAim.normalize();
+    localFrame(this.dir, _dEast, _dNorth);
+    const base = Math.atan2(_dAim.dot(_dEast), _dAim.dot(_dNorth));
+    const arc = Math.min(cfg.roamMax, this.dir.angleTo(aim) * R) / R;
+    if (arc < 1e-4) return false;
+    for (const off of DETOUR) {
+      const a = base + off;
+      _dTry.copy(this.dir).multiplyScalar(Math.cos(arc))
+        .addScaledVector(_dNorth, Math.sin(arc) * Math.cos(a))
+        .addScaledVector(_dEast, Math.sin(arc) * Math.sin(a))
+        .normalize();
+      // Offered as an ordinary destination, so it is fenced and trimmed exactly
+      // as the direct line was. `localFrame` above is re-read every iteration
+      // because this overwrites the module's own copy of it.
+      this._pickTarget(_dTry);
+      localFrame(this.dir, _dEast, _dNorth);
+      if (this.dir.angleTo(this.target) > 1e-3) return true;
+    }
+    return false;
   }
 
   // Whether a direction sits in one of the lakes, with a margin.
@@ -702,12 +788,25 @@ export class Character {
     if (!this.walking) {
       if (tMs < this.restUntil) return;
       this._pickTarget(this.errand);
-      // A trip that came back empty was aimed into a lake, or over a pole, and
-      // pulled back to where they already stand — measured at 43% of picks made
-      // from a lake rim, since about half of every direction there is water. Do
-      // not enter the walk cycle for it: try again shortly instead of spending
-      // a full rest stood at the water's edge with nowhere to go.
-      if (this.dir.angleTo(this.target) < 1e-3) {
+      // A trip that came back empty was aimed into a lake, or over a pole, or
+      // straight at a tree, and pulled back to where they already stand —
+      // measured at 43% of picks made from a lake rim, since about half of
+      // every direction there is water. Do not enter the walk cycle for it: try
+      // again shortly instead of spending a full rest stood at the water's edge
+      // with nowhere to go.
+      //
+      // AN ERRAND GETS ONE MORE CHANCE, and it is not a nicety — without it the
+      // whole household was dead. A wander recovers from an empty pick for
+      // free, because the next roll is a different random direction; an errand
+      // cannot, because the target is handed to it and never changes. So one
+      // obstacle anywhere near the first eighth of the route stopped a
+      // character where they stood and kept stopping them until they gave up.
+      // Measured on a walk to the cave: 118 picks, 117 of them empty, 19.6
+      // units of the trip never walked. Nobody in this world had reached a home
+      // they set out for in a hundred simulated minutes — at either house, and
+      // in the build before the cave existed too.
+      if (this.dir.angleTo(this.target) < 1e-3
+        && !(this.errand && this._detour(this.errand))) {
         this.restUntil = tMs + cfg.interruptRest;
         return;
       }

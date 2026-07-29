@@ -19,7 +19,10 @@ import { paintSheet, sheetBounds } from './art.js';
 import { loadArt } from './assets.js';
 import { ITEMS, Inventory, itemIcon, SLOTS } from './items.js';
 import { Fishing } from './fishing.js';
-import { buildPlushie, buildTeapot, buildLantern } from './furniture.js';
+import {
+  buildPlushie, buildTeapot, buildLantern, buildTrashBag, buildTrashBagAlt,
+  buildPinkWeapon, buildBlueWeapon,
+} from './furniture.js';
 
 const stage = document.getElementById('stage');
 const startEl = document.getElementById('start');
@@ -540,6 +543,12 @@ function giveGift(bot, itemId, now) {
 // recordCatch the 図鑑 counts by, and lands IN YOUR HAND when the hand is
 // free, because the natural next thing to do with a fresh fish on this planet
 // is walk it over to somebody.
+//
+// THE ONE ACQUISITION THAT STILL FILLS THE HAND. Everything picked off the
+// ground now goes to the pouch and stops there — see takeItem — because a full
+// hand costs a button on screen for as long as it lasts. A fish is worth the
+// button: you went and caught it, the catch is the point of the trip, and
+// showing it to somebody is what the next minute is for.
 const fishing = new Fishing(globe, {
   // Asked at the strike, before the reveal is animated — see _catch. A full
   // pack means the fish goes back in the water rather than silently failing to
@@ -585,13 +594,30 @@ const HAND_BUILDERS = {
   // The lantern likewise. Its heights are the furniture entry's own, so a
   // resized lamp in the room is a resized lamp in your hand.
   lantern: () => buildLantern(0.34).group,
+  // Each rubbish bag keeps its own body profile and cave scale in the hand.
+  trashbag: () => buildTrashBag(0.78).group,
+  trashbag2: () => buildTrashBagAlt(0.72).group,
+  // The world copy lies flat. Rotate the hand copy upright so the open fork
+  // and all twelve teeth face the player instead of collapsing to a side view.
+  pinkweapon: () => {
+    const g = buildPinkWeapon(0.52).group;
+    g.rotation.x = -Math.PI / 2;
+    g.rotation.z = 0.42;
+    return g;
+  },
+  blueweapon: () => {
+    const g = buildBlueWeapon(0.52).group;
+    g.rotation.x = -Math.PI / 2;
+    g.rotation.z = 0.42;
+    return g;
+  },
 };
 const handMeshes = {};
 // Which loose pieces are carryable at all — the table's uniques, by art.
 const UNIQUE_ARTS = Object.values(ITEMS).filter((i) => i.kind === 'unique').map((i) => i.art);
 
 function uniqueByItem(id) {
-  return globe.looseByArt(ITEMS[id].art);
+  return globe.looseByItem(id, ITEMS[id].art);
 }
 
 // The picture a slot in the pack shows, whatever kind of thing is in it.
@@ -626,6 +652,52 @@ function packIcon(id) {
     uniqueChips[it.art] = globe.snapshot(obj);
   }
   return uniqueChips[it.art];
+}
+
+// EVERY SLOT FILLED TO THE SAME FRACTION, which the drawings do not do on their
+// own.
+//
+// They arrive on canvases of their own shape and their own margins: a fish
+// cropped tight to its pixels by paintFishCard, a mushroom padded for its
+// mipmap by paintSheet, a blade of grass tall and thin on a mostly empty card,
+// a photographed bear framed by whatever scene.js gave it. `object-fit:
+// contain` then fits each CANVAS to its slot rather than each DRAWING — so four
+// slots come out filled to four different fractions, and a full pack reads as
+// untidy however carefully it is arranged. It was the second thing wrong with
+// the old panel and the one with no single place to blame.
+//
+// So the ink gets measured, and redrawn centred on a square at one fixed
+// fraction of it. Nothing about the drawing changes; only how much of its slot
+// it is given, which is precisely the thing that was inconsistent. Keyed off
+// the source canvas, which art.js already caches per item, so this runs once
+// per item per session.
+const SLOT_FILL = 0.76;
+const SLOT_PX = 128;
+const squared = new WeakMap();
+
+function squareIcon(src) {
+  const had = squared.get(src);
+  if (had) return had;
+
+  const b = sheetBounds(src);
+  const w = b.maxX - b.minX + 1;
+  const h = b.maxY - b.minY + 1;
+  const k = (SLOT_PX * SLOT_FILL) / Math.max(w, h);
+
+  const out = document.createElement('canvas');
+  out.width = SLOT_PX;
+  out.height = SLOT_PX;
+  const g = out.getContext('2d');
+  // The sources run several times this size, so this is always a downsample and
+  // the cheap default filter shows on the ink outlines.
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(
+    src, b.minX, b.minY, w, h,
+    (SLOT_PX - w * k) / 2, (SLOT_PX - h * k) / 2, w * k, h * k,
+  );
+
+  squared.set(src, out);
+  return out;
 }
 
 // Set the held unique down at `spot` — or, if the spot is water, watch it go
@@ -742,10 +814,17 @@ function tickTopple(now) {
 //
 // Only while carrying. A perch is a place to put a thing rather than a place to
 // walk, and resolving every tap against tops would have you strolling at stumps.
-// Something picked off the ground goes to the pouch, and into your hand when
-// the hand is free — the same arrival a caught fish gets, for the same reason:
-// the natural next thing to do with a thing you just found is show it to
-// somebody. One function, so every acquisition agrees about that.
+//
+// SOMETHING PICKED OFF THE GROUND GOES TO THE POUCH AND STAYS THERE. It used to
+// land in your hand as well when the hand was free, on the reasoning that the
+// natural next thing to do with a thing you just found is show it to somebody —
+// which is true, and was still the wrong default, because a full hand is a
+// STATE: it puts しまう in the action stack and keeps it there until you press
+// it. Every mushroom you walked past left a button behind. Picking flowers is
+// the commonest thing there is to do here and it should cost nothing on screen;
+// showing somebody a flower is the rarer intention, and it is one tap away in
+// the pouch. The rod keeps the old arrival for its catch — see onCatch — because
+// landing a fish IS the moment worth holding up.
 function takeItem(id) {
   // A FULL PACK REFUSES, and the caller has to hear it: `pickMushroom` and
   // `pluckTuft` have already taken the thing out of the world by the time this
@@ -757,7 +836,6 @@ function takeItem(id) {
   // and still not kept — see onCatch — and a mushroom cannot: if it went in the
   // pack, you found it.
   if (ITEMS[id].cover) inventory.tally(id);
-  if (!inventory.holding && !inventory.heldUnique) inventory.hold(id);
   return true;
 }
 
@@ -855,7 +933,11 @@ function tickUniques(now) {
 // open the app. See _save in items.js.
 for (const id of Object.keys(inventory.uniques)) {
   const loose = uniqueByItem(id);
-  if (loose) loose.anchor.visible = false;
+  // STOWED, not merely hidden. A remembered unique is one in your pack, which
+  // is to say nowhere in the world — and if it happens to be the lamp, a world
+  // that only hid it would go on being lit by it from wherever it was last
+  // stood. See stowLoose.
+  if (loose) globe.stowLoose(loose);
 }
 
 // Turns the current camera finger, plus this new one, into a zoom.
@@ -1035,23 +1117,25 @@ function hopSeen() {
 // --- the house
 //
 // There is no enterHouse and no leaveHouse, because entering and leaving are
-// not operations any more: the doorway is a hole in the wall, and you walk
-// through it the way you walk anywhere. What a tap on the building means now
-// is "take me to it" — set down on the doorstep facing the open door, the
-// same arrival tapping a character gets, with the last two strides through
-// the arch left to you. It works from the sky as well as from the grass, for
-// the same reason tapping somebody does: once the three of them have
-// scattered, the far view IS the map, and the house is the one landmark on it
-// worth going to.
-function goToHouse(houseDir) {
-  // THE doorstep, not a doorstep: the door is in one place now, so the arrival
-  // cannot be goStand's come-from-your-own-side kind — that lands you at
-  // doorstep distance on whatever side you happened to be, nose against a
-  // wall with no door in it.
-  const step = globe.doorstepDir(doorSpot);
-  if (step) rig.glideTo(step, houseDir);
-  else rig.goStand(houseDir, CONFIG.interior.doorstep);
-}
+// not operations: the doorway is a hole in the wall, and you walk through it
+// the way you walk anywhere.
+//
+// AND THERE IS NO goToHouse EITHER, NOW. A tap on a building used to mean "take
+// me to it" — set down on the doorstep facing the open door, the arrival a tap
+// on a character gets. It is gone, with `pickHouse`, `nearestHome` and the rig's
+// `glideTo` along with it, because between them they were the last of it.
+//
+// It was a map gesture on a world that had stopped being read as a map. Walking
+// is the only way anybody moves here now: the stick took over from tap-to-walk,
+// the far view is somewhere you go rather than somewhere you point at, and a
+// teleport that skipped the walk skipped the part of this game that IS the game.
+// It also could not be aimed — a building is a whole dome to a raycast, so the
+// tap target was the entire hillside for the cave, and every attempt to trim
+// that was a threshold picking at a symptom.
+//
+// What is left is what a house on a hillside should be: a thing you can see from
+// a way off and walk to. Taps on it fall through to the ground beneath, which is
+// what taps on any other scenery already did.
 
 // Take a loose piece into the hand.
 //
@@ -1059,7 +1143,7 @@ function goToHouse(houseDir) {
 // a tap out in the world, and a tap on the pad's own corner — which is where
 // anything lying at your feet appears. See the pad's `grab`.
 function takeLoose(loose) {
-  const id = Object.keys(ITEMS).find((k) => ITEMS[k].art === loose.art);
+  const id = loose.item || Object.keys(ITEMS).find((k) => ITEMS[k].art === loose.art);
   if (!id) return;
   // The hand is one hand: a held card goes back in the pouch first.
   inventory.putAway();
@@ -1141,56 +1225,42 @@ function onUp(e) {
         speak(bot, wasAlreadyHere ? 'poke' : 'greet', now);
       }
     } else {
-      // The house takes the tap ahead of the ground it stands on, or the patch
-      // of grass showing between its walls and the horizon would walk you past
-      // the door instead of to it — but only from OUTSIDE. From within, the
-      // building is the walls around you: every tap would be a tap on the
-      // house, and the glide to the doorstep would pass through masonry, which
-      // is exactly the move this house no longer makes. Indoors a tap is a
-      // walk, and walking out the door is how you leave.
+      // THREE THINGS A TAP ON THE WORLD CAN MEAN, and they used to be four: the
+      // building took the tap ahead of everything under it and walked you to its
+      // door. That is gone — see the note where goToHouse was — so a tap on a
+      // wall now means whatever a tap on the ground behind it means, which is
+      // usually nothing, which is the honest answer.
       setNdc(e);
-      // A loose piece under the tap, near enough to reach: pick it up. Tried
-      // BEFORE the house, or a bear set down by the doorstep would send you to
-      // the door — the ray hits both, and the tap meant the bear.
+      // A loose piece under the tap, near enough to reach: pick it up. First,
+      // because it is the most specific thing a tap can be pointing at.
       const grab = (rig.isFirstPerson && !inventory.heldUnique)
         ? globe.pickLoose(raycaster, rig.anchor, UNIQUE_ARTS) : null;
       if (grab) {
         takeLoose(grab);
       } else if (rig.isFirstPerson && inventory.heldUnique
         && putDownWhereTapped(raycaster, e)) {
-        // PUTTING SOMETHING DOWN BEATS THE HOUSE, and for the same reason
-        // picking one up does: the ray hits both, and the tap meant the
-        // surface. Out of doors the stump nearest the doorstep stands right in
-        // front of the building from most angles — measured, the ray through
-        // its cut face hits the shell as well — so with the house first, a bear
-        // could never be set on it. It walked you to the door instead, holding
-        // the bear, which reads as the tap doing nothing.
+        // Putting something down, which only happens while you are carrying one
+        // and only where the spot is genuinely in reach — putDownWhereTapped
+        // says no otherwise and the tap falls through to the ground.
+      } else if (rig.isFirstPerson) {
+        // A tuft or a mushroom under the finger comes up. Nothing else happens:
+        // a tap that lands on bare grass is a tap that pointed at nothing, and
+        // the honest answer to that is nothing.
         //
-        // Only while carrying, and only when the spot is genuinely in reach;
-        // putDownWhereTapped says no otherwise and the house gets its turn back.
-      } else {
-        const house = insideHouse() ? null : globe.pickHouse(raycaster);
-        if (house) goToHouse(house);
-        else if (rig.isFirstPerson) {
-          // A tuft or a mushroom under the finger comes up. Nothing else
-          // happens: a tap that lands on bare grass is a tap that pointed at
-          // nothing, and the honest answer to that is nothing.
-          //
-          // Mushrooms BEFORE tufts, because there is grass everywhere and
-          // twenty mushrooms on the planet — with the tuft first, the blades
-          // growing around a mushroom would answer the tap most of the time
-          // and the mushroom would be nearly unpickable.
-          //
-          // A FULL PACK PUTS IT BACK. Both pickers remove the thing from the
-          // world as they answer, so refusing after the fact has to undo that
-          // — otherwise a full pack would quietly destroy whatever you tapped.
-          const spot = globe.pickGround(raycaster);
-          const picked = spot && globe.pickMushroom(spot, rig.anchor);
-          if (picked) {
-            if (!takeItem(picked)) globe.restoreMushroom();
-          } else if (spot && globe.pluckTuft(spot, rig.anchor)) {
-            if (!takeItem('kusa')) globe.restoreTuft();
-          }
+        // Mushrooms BEFORE tufts, because there is grass everywhere and twenty
+        // mushrooms on the planet — with the tuft first, the blades growing
+        // around a mushroom would answer the tap most of the time and the
+        // mushroom would be nearly unpickable.
+        //
+        // A FULL PACK PUTS IT BACK. Both pickers remove the thing from the
+        // world as they answer, so refusing after the fact has to undo that —
+        // otherwise a full pack would quietly destroy whatever you tapped.
+        const spot = globe.pickGround(raycaster);
+        const picked = spot && globe.pickMushroom(spot, rig.anchor);
+        if (picked) {
+          if (!takeItem(picked)) globe.restoreMushroom();
+        } else if (spot && globe.pluckTuft(spot, rig.anchor)) {
+          if (!takeItem('kusa')) globe.restoreTuft();
         }
       }
     }
@@ -1253,26 +1323,53 @@ function onPress(el, fn) {
 // so there is no state to remember — the button says what pressing it does.
 const pouchEl = document.getElementById('pouch');
 const pouchBtn = document.getElementById('pouch-toggle');
-const pouchPanel = document.getElementById('pouch-panel');
 const zukanEl = document.getElementById('zukan');
 const zukanBtn = document.getElementById('zukan-toggle');
-const zukanPanel = document.getElementById('zukan-panel');
-let pouchCloseAt = 0;
-let zukanCloseAt = 0;
 
+const sheetEl = document.getElementById('sheet');
+const sheetCard = document.getElementById('sheet-card');
+const sheetTitle = document.getElementById('sheet-title');
+const sheetBody = document.getElementById('sheet-body');
+const sheetCap = document.getElementById('sheet-cap');
+
+// 'pack', 'zukan', or null. One card serves both — see index.html for why.
+let sheetMode = null;
+// The slot a long press has picked up, waiting to be told where to go. Declared
+// up here with the rest of the sheet's state because openSheet clears it, and a
+// `let` further down the file would still be in its dead zone when it does.
+let lifted = null;
+
+// NO TIMER, and that is the change. Both of these used to fold themselves away
+// after a stretch of being ignored, borrowed from the clock panel — which is
+// right for a thing you GLANCE at and wrong for the two you go INTO. A bag
+// closes when you say so.
+//
+// `is-open` is still kept on the two wrappers, because the pills' own state and
+// the drawer's hold-open rule both still ask them.
+function openSheet(mode) {
+  sheetMode = mode;
+  sheetEl.classList.toggle('is-open', !!mode);
+  pouchEl.classList.toggle('is-open', mode === 'pack');
+  zukanEl.classList.toggle('is-open', mode === 'zukan');
+  // Nothing stays lifted across an open or a close: the gesture is only
+  // meaningful against the grid you started it on.
+  lifted = null;
+
+  if (mode === 'pack') { sheetTitle.textContent = 'もちもの'; paintPack(); }
+  else if (mode === 'zukan') { sheetTitle.textContent = 'ずかん'; paintZukan(); }
+  else sheetCard.classList.remove('is-moving');
+}
+
+// Kept as they were so every existing caller — the drawer folding, a slot being
+// taken in hand, the world closing things behind you — reads the same as it did.
 function openPouch(open) {
-  pouchEl.classList.toggle('is-open', open);
-  // The clock panel's own arrangement: an open panel quietly folds itself away
-  // after a stretch of being ignored, checked in the frame loop, so a drawer
-  // opened and forgotten cannot squat over the corner of the world forever.
-  pouchCloseAt = open ? performance.now() + CONFIG.daylight.closeMs : 0;
-  if (open) { openZukan(false); paintPack(); }
+  if (open) openSheet('pack');
+  else if (sheetMode === 'pack') openSheet(null);
 }
 
 function openZukan(open) {
-  zukanEl.classList.toggle('is-open', open);
-  zukanCloseAt = open ? performance.now() + CONFIG.daylight.closeMs : 0;
-  if (open) { openPouch(false); paintZukan(); }
+  if (open) openSheet('zukan');
+  else if (sheetMode === 'zukan') openSheet(null);
 }
 
 // THE PACK, drawn as its slots rather than as a list of what you own.
@@ -1283,7 +1380,7 @@ function openZukan(open) {
 // cheaper to think about than diffing them, and a count badge can never go
 // stale if it is never reused.
 function paintPack() {
-  pouchPanel.textContent = '';
+  sheetBody.textContent = '';
   const grid = document.createElement('div');
   grid.className = 'pack-grid';
   for (let i = 0; i < SLOTS; i++) {
@@ -1292,13 +1389,19 @@ function paintPack() {
     slot.type = 'button';
     slot.className = 'pack-slot'
       + (cell ? '' : ' is-empty')
-      + (cell && inventory.held === i ? ' is-held' : '');
+      + (cell && inventory.held === i ? ' is-held' : '')
+      + (lifted === i ? ' is-lifted' : '');
+    // The picture is decoration once the button says what it is: two readings of
+    // the same thing is one too many when the second is 「あかい きのこ あかい きのこ」.
+    slot.setAttribute('aria-label', cell
+      ? ITEMS[cell.id].name + (cell.n > 1 ? ` ${cell.n}こ` : '')
+      : 'あき');
     if (cell) {
       const img = document.createElement('img');
-      img.alt = ITEMS[cell.id].name;
-      img.src = packIcon(cell.id).toDataURL();
+      img.alt = '';
+      img.src = squareIcon(packIcon(cell.id)).toDataURL();
       slot.appendChild(img);
-      // The count only when there is more than one. A ×1 on every chip is
+      // The count only when there is more than one. A ×1 on every slot is
       // noise: the drawing already says "one of these".
       if (cell.n > 1) {
         const n = document.createElement('span');
@@ -1306,19 +1409,130 @@ function paintPack() {
         n.textContent = cell.n;
         slot.appendChild(n);
       }
-      onPress(slot, () => {
-        // Pressing the slot you are already holding puts it away — the same
-        // button meaning take-out and put-back, which is how a pocket works.
-        if (inventory.held === i) inventory.putAway();
-        else inventory.holdSlot(i);
-        openPouch(false);
-      });
-    } else {
-      slot.disabled = true;
     }
+    // Empty slots are wired up too, and are NOT disabled: an empty slot is
+    // exactly where you would want to put down the thing you have just lifted,
+    // and a disabled button is deaf to the press that would do it.
+    armSlot(slot, i);
     grid.appendChild(slot);
   }
-  pouchPanel.appendChild(grid);
+  sheetBody.appendChild(grid);
+  showLift();
+}
+
+// --- taking things out, and moving them about
+//
+// A tap takes a thing in hand. A LONG PRESS lifts it, and the next slot you
+// touch is where it goes — swapping with whatever is there, or pouring in when
+// the two are the same kind. See moveSlot in items.js for the half of that which
+// is about the pack rather than about fingers.
+//
+// Long press rather than drag, because a drag over a grid on a phone means
+// tracking a finger across nodes it did not start on and guessing which one it
+// is over; two taps say the same thing with none of that. It is also why this
+// is pointer events rather than the click `onPress` gives everything else: the
+// press has to be noticed WHILE the finger is down, and a click only arrives
+// once it has gone.
+const LIFT_MS = 360;
+const LIFT_SLIP = 12;
+
+function armSlot(el, i) {
+  let sx = 0;
+  let sy = 0;
+  let moved = false;
+  let fired = false;
+  let timer = 0;
+
+  const stop = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+
+  el.addEventListener('pointerdown', (e) => {
+    sx = e.clientX;
+    sy = e.clientY;
+    moved = false;
+    fired = false;
+    stop();
+    if (!inventory.slots[i]) return;   // nothing here to pick up
+    timer = setTimeout(() => {
+      timer = 0;
+      fired = true;
+      lifted = i;
+      // Marked in place rather than by repainting the grid: the finger is still
+      // down on this very node, and replacing it would throw away the pointerup
+      // that ends the press — leaving the slot stuck looking pressed.
+      for (const s of el.parentElement.children) s.classList.remove('is-lifted');
+      el.classList.add('is-lifted');
+      showLift();
+    }, LIFT_MS);
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (moved) return;
+    if (Math.abs(e.clientX - sx) > LIFT_SLIP || Math.abs(e.clientY - sy) > LIFT_SLIP) {
+      moved = true;
+      stop();
+    }
+  });
+
+  el.addEventListener('pointercancel', stop);
+
+  el.addEventListener('pointerup', () => {
+    stop();
+    // A press that wandered was not a press, and one that already became a lift
+    // has had its meaning: letting go is not also a tap.
+    if (moved || fired) return;
+    tapSlot(i);
+  });
+
+  // A long press on a touchscreen is also the browser's own gesture for "select
+  // this" or "show me a menu". Neither is wanted on a slot.
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function tapSlot(i) {
+  const now = performance.now();
+  lastTouchAt = now;
+  saidLongIdle = false;
+  rig.markTouched(now);
+
+  // Something is lifted, so this press is about where it lands rather than about
+  // what is in this slot. Cleared BEFORE the move, because the move repaints and
+  // the repaint reads this.
+  if (lifted !== null) {
+    const from = lifted;
+    lifted = null;
+    if (from !== i) inventory.moveSlot(from, i);
+    // Painted unconditionally, and not only because pressing the lifted slot
+    // again means "put it back down". A refused move — the slot emptied under
+    // the lift by something the world did while it was up — returns false
+    // without emitting, and then nothing else would take the mark off it.
+    paintPack();
+    return;
+  }
+
+  const cell = inventory.slots[i];
+  if (!cell) return;
+  // Pressing the slot you are already holding puts it away — the same button
+  // meaning take-out and put-back, which is how a pocket works. The sheet STAYS
+  // OPEN either way now: you came in here to look at your bag, and taking one
+  // thing out is not a reason to be shown the door.
+  if (inventory.held === i) inventory.putAway();
+  else inventory.holdSlot(i);
+}
+
+// The line under the grid, and the highlight that goes with it.
+function showLift() {
+  sheetCard.classList.toggle('is-moving', lifted !== null);
+
+  if (lifted !== null) {
+    const c = inventory.slots[lifted];
+    sheetCap.textContent = c ? `${ITEMS[c.id].name} を どこへ？` : '';
+    return;
+  }
+  const held = inventory.held === null ? null : inventory.slots[inventory.held];
+  if (held) { sheetCap.textContent = `${ITEMS[held.id].name} を もっているよ`; return; }
+  sheetCap.textContent = inventory.slots.some(Boolean)
+    ? 'タップで てに とる ・ ながおしで いれかえ'
+    : 'まだ なにも もっていないよ';
 }
 
 // THE 図鑑, in a drawer of its own. It shared the pack's panel while both were
@@ -1343,7 +1557,9 @@ const ZUKAN = [
 ];
 
 function paintZukan() {
-  zukanPanel.textContent = '';
+  sheetBody.textContent = '';
+  sheetCap.textContent = '';
+  sheetCard.classList.remove('is-moving');
   for (const section of ZUKAN) {
     const ids = Object.keys(ITEMS).filter((id) => section.has(ITEMS[id]));
     if (!ids.length) continue;
@@ -1351,7 +1567,7 @@ function paintZukan() {
     const head = document.createElement('p');
     head.className = 'zukan-head';
     head.textContent = `${section.head}  ${seen}/${ids.length}`;
-    zukanPanel.appendChild(head);
+    sheetBody.appendChild(head);
     for (const id of ids) {
       const met = (inventory.caught[id] || 0) > 0;
       const row = document.createElement('div');
@@ -1365,7 +1581,7 @@ function paintZukan() {
       n.className = 'pouch-n';
       n.textContent = met ? `×${inventory.caught[id]}` : '';
       row.append(img, name, n);
-      zukanPanel.appendChild(row);
+      sheetBody.appendChild(row);
     }
   }
 }
@@ -1380,11 +1596,25 @@ function syncPouch() {
     if (!handMeshes[art]) handMeshes[art] = HAND_BUILDERS[art]();
     globe.hand.holdMesh(handMeshes[art]);
     const loose = uniqueByItem(inventory.heldUnique);
-    if (loose) loose.anchor.visible = false;
+    if (loose) globe.carryLoose(loose);
   } else if (inventory.holding) {
     globe.holdItem(itemIcon(inventory.holding));
   } else {
     globe.clearHand();
+  }
+  // ANYTHING STILL MARKED AS CARRIED THAT IS NOT IN THE HAND went somewhere
+  // this function was not told about, and there is exactly one such somewhere:
+  // the pack. Putting a thing DOWN goes through putDownUnique, which places it
+  // and says so; putting it AWAY just empties the hand.
+  //
+  // Without this the piece keeps the state it had while you were holding it,
+  // which is "present in the world, body hidden" — an invisible bear standing
+  // whereever you last were, and, if it is the lamp, still lighting it. Asked
+  // of the world rather than of the item table, so it stays true whatever a
+  // future state gets called.
+  for (const l of globe.loose) {
+    if (l === (inventory.heldUnique && uniqueByItem(inventory.heldUnique))) continue;
+    if (globe.isCarried(l)) globe.stowLoose(l);
   }
   if (pouchEl.classList.contains('is-open')) paintPack();
   if (zukanEl.classList.contains('is-open')) paintZukan();
@@ -1404,6 +1634,41 @@ syncPouch();
 onPress(pouchBtn, () => openPouch(!pouchEl.classList.contains('is-open')));
 
 onPress(zukanBtn, () => openZukan(!zukanEl.classList.contains('is-open')));
+
+// The three ways out, now that there is no timer: the cross, anywhere off the
+// card, and — for whoever is playing this at a desk — escape.
+onPress(document.getElementById('sheet-close'), () => openSheet(null));
+onPress(document.getElementById('sheet-scrim'), () => openSheet(null));
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && sheetMode) openSheet(null);
+});
+
+// --- the drawer
+//
+// The clock and the 図鑑 fold behind one button, and そらへ and もちもの do not.
+// The split is HOW OFTEN, not what kind: the first two are things you visit and
+// the last two are things you live in, and a permanent pill for each of the four
+// was 214px of furniture standing over the corner of a drawing to serve two of
+// them well.
+//
+// It sits below the pills it hides, so opening it pushes nothing: the two you
+// live in keep their positions whether this is out or away, and the thing you
+// press is always where you left it.
+const ctlStack = document.getElementById('ctl-stack');
+const menuBtn = document.getElementById('menu-toggle');
+let menuCloseAt = 0;
+
+function openMenu(open) {
+  ctlStack.classList.toggle('is-more', open);
+  menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  menuCloseAt = open ? performance.now() + CONFIG.daylight.closeMs : 0;
+  // Shutting the drawer takes whatever it had open with it, or a panel would be
+  // left hanging in the air off a button that is no longer on screen.
+  if (!open) { openTime(false); openZukan(false); }
+}
+
+onPress(menuBtn, () => openMenu(!ctlStack.classList.contains('is-more')));
 
 // --- movement pad
 // Purely a drawing: it has no pointer events of its own and appears wherever
@@ -1465,175 +1730,597 @@ onPress(viewToggle, () => {
 const jumpBtn = document.getElementById('jump-btn');
 const sprintBtn = document.getElementById('sprint-btn');
 
-// --- the context verb
+// --- the focus: what you are looking at
 //
-// One button, one word, decided fresh each frame from where you are standing
-// and what is in your hands. It is the other half of taps no longer moving
-// you: a tap POINTS at something, this button ACTS.
+// ONE OBJECT AT A TIME, decided by where you are standing AND which way you are
+// facing, and every verb the world offers you is about that one thing.
 //
-// The whole of the situation logic lives in `verbNow`, which returns a name or
-// null, and `doVerb`, which performs one. Keeping the decision and the doing
-// in two functions rather than a pile of button handlers is what stops the
-// button and the world disagreeing: there is exactly one place that knows
-// which verb is available, and the label is drawn from the same call that
-// would run it.
-const actBtn = document.getElementById('act-do');
-
-const VERB_LABEL = {
-  fish: 'つりをする',
-  reel: 'やめる',
-  strike: 'あげる!',
-  grab: 'ひろう',
-  put: 'おく',
-  // Two words for two different endings, and the pack is why they had to
-  // become two. 「おく」 sets the thing down IN THE WORLD and gives its slot
-  // back; 「しまう」 keeps it and stops holding it. With one word for both, a
-  // press meant to tidy your hand would leave the bear in a field.
-  stow: 'しまう',
+// Proximity alone decided this before, and it was wrong in both directions at
+// once. The hung bulb has no bearing of its own — see `ceiling` in the furniture
+// table — so "near the light" was true everywhere under the roof, and
+// 「あかりを けす」 sat on screen for the entire time you were indoors. A
+// permanently parked button, which is precisely what the stack was built to be
+// rid of. And in the other direction 「ひろう」 named no target: standing between
+// the bear and the teapot, you pressed it to find out which one you got.
+//
+// Facing answers both. What it costs is the thing facing always costs — a cone
+// that chatters as a thumb wobbles the stick — and the four rules below are the
+// price paid, because there are four different ways a focus can flicker and one
+// rule does not cover them.
+const FOCUS = {
+  // Metres of surface. This near to take something up...
+  reach: CONFIG.uniques.reach,
+  // ...and it stays yours a little past that, so half a step back does not drop
+  // what you were reaching for.
+  hold: CONFIG.uniques.reach + 0.7,
+  // Half-angles, radians. NARROW TO ACQUIRE, WIDE TO KEEP. Turning toward
+  // something is deliberate and should need aim; drifting a little off what you
+  // are already holding on to is not, and should not cost you it.
+  cone: 0.61,
+  keep: 1.05,
+  // Stood on top of it, a bearing is noise: the tangent toward something under
+  // your feet swings through a half circle for millimetres of movement. Inside
+  // this, being there IS facing it.
+  onTop: 0.5,
+  // How much better a challenger must be to take the focus off what you already
+  // had, as a fraction of its score. TIES GO TO THE INCUMBENT, which is what
+  // stops two pieces stood side by side trading the ring back and forth.
+  beat: 0.75,
+  // ...and it may not even try for this long after a change. A focus that can
+  // turn over twice in three frames reads as a fault however good each
+  // individual decision was.
+  dwellMs: 180,
 };
 
-// What the button would do if pressed right now, or null for nothing. Ordered
-// by urgency rather than by category: a fish on the line outranks everything,
-// because the window to strike is under a second and anything that stole the
-// button during it would be a bug you could feel.
-function verbNow() {
-  if (!rig.isFirstPerson) return null;
-  if (fishing.state === 'bite') return 'strike';
-  if (fishing.active) return 'reel';
-  // Carrying something: put it down where you are, or stow it. `put` leads
-  // because it is the reversible one — you can always pick it back up, and
-  // stowing is a decision about where a thing lives.
-  if (inventory.heldUnique) return 'put';
-  // Standing beside a piece you could pick up.
-  if (nearbyLoose()) return 'grab';
-  if (fishing.canCastFrom(rig.anchor)) return 'fish';
-  if (inventory.holding) return 'stow';
-  return null;
+// What to call a thing on a button. The uniques bring their names from the item
+// table; the bulb is not an item and never will be — you cannot carry a light
+// fitting — so it gets its name here.
+const ART_NAME = { bulb: 'でんき' };
+for (const it of Object.values(ITEMS)) if (it.art) ART_NAME[it.art] = it.name;
+
+const _fTan = new THREE.Vector3();
+const _fLook = new THREE.Vector3();
+const fixtureDir = new WeakMap();
+
+let focus = null;
+let focusAt = 0;
+
+// Where a hung light is, as a spot on the floor. Its anchor sits at (R + rad)
+// along the room's own normal, so normalising it is the place you stand and look
+// up from. Worked out once and remembered: a fitting is called that because it
+// does not move.
+function dirOfFixture(L) {
+  let d = fixtureDir.get(L);
+  if (!d) { d = L.anchor.position.clone().normalize(); fixtureDir.set(L, d); }
+  return d;
+}
+
+// Read live rather than remembered, because a loose piece MOVES — you can shove
+// the bear across the floor with your shins while it is the thing you are
+// facing, and a focus holding a copy of where it used to be would keep the ring
+// on the rug behind it.
+function focusDir(f) { return f.loose ? f.loose.dir : dirOfFixture(f.fixture); }
+
+// The angle between the way you are looking and the way something lies, both in
+// the tangent plane you are standing on. Radians, zero dead ahead.
+function bearingTo(dir) {
+  const A = rig.anchor;
+  _fTan.copy(dir).addScaledVector(A, -dir.dot(A));
+  if (_fTan.lengthSq() < 1e-12) return 0;
+  _fTan.normalize();
+  rig.facing(_fLook);
+  return Math.acos(Math.max(-1, Math.min(1, _fTan.dot(_fLook))));
+}
+
+function gapTo(dir) { return rig.anchor.angleTo(dir) * CONFIG.globe.radius; }
+
+// Everything there is to look at. The loose pieces you could take up, and the
+// bulb, which is not loose and never will be but is still a thing in the room
+// that you can face and switch.
+function eachCandidate(fn) {
+  for (const l of globe.loose) {
+    if (!l.anchor.visible || (l.body && !l.body.visible)) continue;
+    if (!UNIQUE_ARTS.includes(l.art)) continue;
+    fn({ art: l.art, loose: l, fixture: null });
+  }
+  for (const L of globe.roomLights) {
+    if (!L.ceiling || !L.anchor) continue;
+    fn({ art: L.art, loose: null, fixture: L });
+  }
+}
+
+function sameFocus(a, b) {
+  if (!a || !b) return false;
+  return a.loose ? a.loose === b.loose : (!b.loose && a.fixture === b.fixture);
+}
+
+// Still a thing you could be looking at: a piece that has since been picked up,
+// stowed or lent is gone from the world and cannot go on being the focus.
+function focusAlive(f) {
+  if (!f.loose) return true;
+  return f.loose.anchor.visible && (!f.loose.body || f.loose.body.visible);
+}
+
+// Near and centred, lower being better. Metres, with the bearing charged at two
+// metres a radian — so a piece a full 35° off has to be about 1.2m closer than
+// one dead ahead to be worth turning the focus over for.
+function scoreOf(gap, off) { return gap + off * 2; }
+
+// Redecided every frame, but not freely. The hysteresis is what separates "it
+// changed because the world changed" from "it changed because your thumb moved
+// two pixels".
+function updateFocus(now) {
+  if (!rig.isFirstPerson) { focus = null; return; }
+
+  // Does the one you already had survive? Generously judged: the wide cone and
+  // the longer reach, and nothing else needs to be true of it.
+  let keep = null;
+  if (focus && focusAlive(focus)) {
+    const dir = focusDir(focus);
+    const gap = gapTo(dir);
+    const off = bearingTo(dir);
+    if (gap <= FOCUS.hold && (off <= FOCUS.keep || gap <= FOCUS.onTop)) {
+      keep = { ...focus, score: scoreOf(gap, off) };
+    }
+  }
+
+  // The best thing you are actually looking at. Narrow cone, arm's reach.
+  let best = null;
+  eachCandidate((c) => {
+    const dir = focusDir(c);
+    const gap = gapTo(dir);
+    if (gap > FOCUS.reach) return;
+    const off = bearingTo(dir);
+    if (off > FOCUS.cone && gap > FOCUS.onTop) return;
+    const score = scoreOf(gap, off);
+    if (!best || score < best.score) best = { ...c, score };
+  });
+
+  if (!keep) { setFocus(best, now); return; }
+  if (sameFocus(best, keep)) { focus = keep; return; }
+  if (!best || now - focusAt < FOCUS.dwellMs) { focus = keep; return; }
+  if (best.score > keep.score * FOCUS.beat) { focus = keep; return; }
+  setFocus(best, now);
+}
+
+function setFocus(f, now) {
+  // Nothing to nothing is not a change. Without this the clock restarts on every
+  // frame spent facing empty meadow, and the dwell below — which exists to stop
+  // a focus turning over twice in three frames — would be measuring the wrong
+  // thing the moment something finally arrived.
+  if (!f && !focus) return;
+  if (sameFocus(f, focus)) { focus = f; return; }
+  focus = f;
+  focusAt = now;
+}
+
+function focusName() { return focus ? (ART_NAME[focus.art] || '') : ''; }
+
+// --- the interaction stack
+//
+// EVERY verb the world is offering, rather than the one that won. One pill per
+// thing you could do from where you are standing, stacked upward out of the
+// thumb's arc, decided fresh each frame. It is the other half of taps no longer
+// moving you: a tap POINTS at something, these buttons ACT.
+//
+// It used to be one button that ranked its candidates and displayed the winner,
+// and RANKING IS WHAT MADE IT WRONG — not because the loser went unshown, but
+// because the loser went unreachable. Standing on the shore of a fishable lake
+// with a bear at your feet, ひろう outranked つりをする, and the only way to
+// fish from that spot was to walk away from the bear first. There was no press
+// that could reach the other verb. A list has no losers.
+//
+// Three parts, and the split is the one the single button already had, which is
+// why it survived the rewrite: `actionsNow` decides WHAT is on offer, `ACTIONS`
+// knows how to SAY and how to DO each one, and `syncInteract` is the only thing
+// that touches the DOM. The word a pill shows is drawn from the same table entry
+// that runs when it is pressed, so a button cannot offer one verb and perform
+// another.
+const ixEl = document.getElementById('interact');
+
+// Bottom of the stack first. The bottom pill is the one nearest the thumb, so
+// the verbs you reach for most sit there, and the ones that are really endings
+// — put it away, turn it off — sit above.
+//
+// FIXED, and deliberately not sorted by distance the way the big open-world
+// games sort theirs. Theirs re-order as you move, which is exactly the
+// complaint people have about them: the list shuffles under a thumb already
+// travelling toward one entry, and you mine the ore instead of opening the
+// chest. Here a verb's seat depends only on which kind of verb it is, so it is
+// where you last found it every time, and pressing without reading is safe.
+const IX_ORDER = ['strike', 'reel', 'grab', 'fish', 'put', 'stow', 'light'];
+
+// Stroke glyphs in the app's own ink, the same recipe as jump and sprint. Four
+// pills in a column are four similar shapes, and the glyph is what lets you
+// pick the one you want out of them without reading all four.
+const IX_GLYPH = {
+  strike: '<path d="M12 19V6"/><path d="m6.5 11.5 5.5-5.5 5.5 5.5"/>',
+  reel: '<path d="m7 7 10 10"/><path d="m17 7-10 10"/>',
+  grab: '<path d="M12 3.2v9"/><path d="m8.5 6.7 3.5-3.5 3.5 3.5"/>'
+      + '<path d="M5 13.2a7 7 0 0 0 14 0"/>',
+  fish: '<path d="M3.2 12c2.4-3 5.3-4.6 7.9-4.6s5.6 1.6 7.2 4.6c-1.6 3-4.6 4.6-7.2 4.6S5.6 15 3.2 12Z"/>'
+      + '<path d="m18.3 12 2.5-2.4v4.8Z"/><path d="M7.6 11.2h.01"/>',
+  put: '<path d="M12 3.6v9"/><path d="m8.5 9.1 3.5 3.5 3.5-3.5"/><path d="M5 18.4h14"/>',
+  stow: '<path d="M4.5 8.6h15v10.9h-15z"/><path d="M8.6 8.6v-2a3.4 3.4 0 0 1 6.8 0v2"/>',
+  light: '<path d="M9.4 16.5h5.2"/><path d="M10 19.2h4"/>'
+       + '<path d="M12 3.6a5.6 5.6 0 0 0-3.3 10.1c.4.3.7.8.7 1.3h5.2c0-.5.3-1 .7-1.3A5.6 5.6 0 0 0 12 3.6Z"/>',
+};
+
+// What each verb says, and what it does. The word is a function rather than a
+// string because two of them are not constants: あかりを changes with the
+// switch it is offering to flip.
+const ACTIONS = {
+  strike: { word: () => 'あげる!', run: () => fishing.onTap() },
+  reel: { word: () => 'やめる', run: () => fishing.onTap() },
+  // Named, which is the entire reason facing was worth its cost: the button now
+  // says WHICH thing it will take. Stood between the bear and the teapot you
+  // used to press this to find out.
+  grab: { word: () => 'ひろう', of: focusName, run: grabFocus },
+  // Casting with a full hand puts the hand away first, which is why this can be
+  // offered while you are carrying something rather than having to wait for you
+  // to deal with it.
+  fish: {
+    word: () => 'つりをする',
+    run: () => { inventory.putAway(); fishing.castFrom(rig.anchor); },
+  },
+  // Two words for two different endings, and the pack is why they had to become
+  // two. 「おく」 sets the thing down IN THE WORLD and gives its slot back;
+  // 「しまう」 keeps it and stops holding it. With one word for both, a press
+  // meant to tidy your hand would leave the bear in a field.
+  put: {
+    word: () => 'おく',
+    of: heldName,
+    run: () => {
+      const spot = placeSpot();
+      if (!spot) { refuse('put'); return; }
+      putDownUnique(spot.clone());
+    },
+  },
+  stow: { word: () => 'しまう', of: heldName, run: () => inventory.putAway() },
+  // THE WORD CARRIES THE STATE, so this needs no lit styling of its own. As a
+  // lone round button it was filled when the light was on and outlined when it
+  // was off, because a glyph cannot say which way it is about to go. A pill can:
+  // it reads つける or けす, which is what pressing it DOES rather than what the
+  // lamp currently is, and that is the rule the rest of this app already
+  // follows. It frees the filled treatment to mean one thing here — the entry
+  // under your thumb — instead of two.
+  //
+  // 「あかりを つける」 shortened to 「つける」 when the pills learned to name
+  // their object: あかり was doing the naming, badly — one word for the bulb and
+  // the lantern both — and でんき or ランプ beside the verb says it properly.
+  light: {
+    word: () => {
+      const L = lightNow();
+      return L && globe.lightIsOn(L) ? 'けす' : 'つける';
+    },
+    of: () => { const L = lightNow(); return L ? (ART_NAME[L.art] || '') : ''; },
+    run: () => { const L = lightNow(); if (L) globe.toggleLight(L); },
+  },
+};
+
+// Everything on offer right now, in stack order, bottom entry first. Empty is
+// the ordinary answer — hands free, facing nothing — and an empty stack leaves
+// this corner to jump and sprint alone.
+function actionsNow() {
+  if (!rig.isFirstPerson) return [];
+
+  // THE ROD TAKES THE WHOLE STACK. A bite is a window under a second wide, and
+  // あげる! sharing the corner with しまう would lose fish to a mis-tap on the
+  // neighbour. While the line is out there is nothing else you could sensibly
+  // be doing anyway, so both rod states return alone and the stack becomes the
+  // one button the moment deserves.
+  if (fishing.state === 'bite') return ['strike'];
+  if (fishing.active) return ['reel'];
+
+  const list = [];
+  // WORLD VERBS NEED YOU TO BE FACING THE THING, because a verb about an object
+  // is unusable without knowing which object, and proximity cannot say. One
+  // hand: nothing may be taken up while a unique is already in it.
+  if (focus && focus.loose && !inventory.heldUnique) list.push('grab');
+  if (facingWater()) list.push('fish');
+  // HAND VERBS DO NOT. What is in your hand is in your hand whichever way you
+  // are pointed, and a rule that made you face something to put it down would
+  // be a rule with no object to attach itself to. `put` leads because it is the
+  // reversible one: you can always pick it back up, where stowing is a decision
+  // about where a thing lives.
+  if (inventory.heldUnique) list.push('put');
+  if (inventory.holding || inventory.heldUnique) list.push('stow');
+  // Last, so a lamp you happen to be carrying never pushes the verb you were
+  // reaching for out from under your thumb.
+  if (lightNow()) list.push('light');
+  return list;
+}
+
+// The lake, which cannot be a focus: it is a place rather than an object, with
+// no single point to stand in front of. So it gets the facing test on its own
+// terms — near enough to cast, and looking AT the water rather than along the
+// shore. The wide cone, because a pond is wide.
+//
+// Without the second half this button blinked on and off for the whole length of
+// a walk beside the water, which is the shoreline version of the bulb's bug.
+function facingWater() {
+  if (!fishing.canCastFrom(rig.anchor)) return false;
+  const school = globe.fish;
+  if (!school || !school.pond) return true;
+  return bearingTo(school.pond.centre) <= FOCUS.keep;
 }
 
 // The light this button would flip: the one in your hand first, otherwise the
-// one you are standing under or beside. Null when there is none.
+// one you are LOOKING AT. Null when there is none.
 //
-// A LIGHT GETS ITS OWN BUTTON rather than a turn in the verb above, and the
-// carried lamp is what settles it. Sharing the pill, a lamp in your hand would
-// have to choose between offering 「けす」 and offering 「おく」 — and whichever
-// lost, you would be holding a thing you could not do the other with. Two
-// controls, because there are genuinely two things to do, and a lamp you are
-// carrying somewhere dark is exactly when you want both.
-function lightArtNow() {
+// Looking at, rather than near — and this is the fix the whole focus system was
+// built for. `globe.lightNear` answers "is there a light in this room", because
+// a hung bulb has no bearing of its own, and in a room you can cross in three
+// steps that is true from the doorway to the far wall. The button never left.
+//
+// A LIGHT GETS ITS OWN ENTRY rather than sharing one with the verbs, and the
+// carried lamp is what settles it. Sharing a single control, a lamp in your
+// hand would have to choose between offering 「けす」 and offering 「おく」 —
+// and whichever lost, you would be holding a thing you could not do the other
+// with. A lamp carried somewhere dark is exactly when you want both, which is
+// the same argument the stack makes in general, made by the case that forced it.
+//
+// Facing the lantern on the floor gives you BOTH ひろう and けす, because it is
+// one object that is honestly two things — a thing you can carry and a thing
+// that is lit — and the stack has room to say so.
+//
+// Answers with the LIGHT ITSELF rather than with its art. There are two
+// lanterns in the world now — Chiikawa's and Hachiware's — so a name is no
+// longer an identity, and passing one to globe.toggleLight would have flipped
+// both. See Globe.lightAt.
+function lightNow() {
   const held = inventory.heldUnique;
   if (held) {
-    const art = ITEMS[held].art;
-    if (globe.roomLights.some((L) => L.art === art)) return art;
+    const l = uniqueByItem(held);
+    const L = l && globe.lightAt(l.anchor);
+    if (L) return L;
   }
-  return globe.lightNear(rig.anchor);
+  // A fitting IS a room light — that is what the focus put in the field — and a
+  // loose piece has to be looked up by the group it hangs on.
+  if (focus && focus.fixture) return focus.fixture;
+  if (focus && focus.loose) return globe.lightAt(focus.loose.anchor);
+  return null;
 }
 
-function doVerb() {
-  const v = verbNow();
-  if (!v) return;
-  const now = performance.now();
-  if (v === 'strike' || v === 'reel') { fishing.onTap(); return; }
-  if (v === 'put') { putDownUnique(rig.anchor.clone()); return; }
-  if (v === 'grab') {
-    const loose = nearbyLoose();
-    const id = loose && Object.keys(ITEMS).find(
-      (k) => ITEMS[k].kind === 'unique' && ITEMS[k].art === loose.art,
-    );
-    if (id) { inventory.putAway(); inventory.setUnique(id, { state: 'hand' }); }
-    return;
-  }
-  if (v === 'fish') { inventory.putAway(); fishing.castFrom(rig.anchor); return; }
-  if (v === 'stow') inventory.putAway();
+// Take the focused piece into your hand. The loose furniture knows its art and
+// the item table knows the id, so the lookup here is the join between them.
+function grabFocus() {
+  if (!focus || !focus.loose) return;
+  const id = focus.loose.item || Object.keys(ITEMS).find(
+    (k) => ITEMS[k].kind === 'unique' && ITEMS[k].art === focus.loose.art,
+  );
+  if (id) { inventory.putAway(); inventory.setUnique(id, { state: 'hand' }); }
 }
 
-// The nearest carryable piece within arm's length, or null. Distance only —
-// no ray — because this answers "what could I reach", which is a question
-// about where you are standing rather than about where you are looking.
-function nearbyLoose() {
-  if (inventory.heldUnique) return null;
-  const reach = Math.cos(CONFIG.uniques.reach / CONFIG.globe.radius);
-  let best = null;
-  let bestDot = reach;
-  for (const l of globe.loose) {
-    if (!l.anchor.visible || !UNIQUE_ARTS.includes(l.art)) continue;
-    const d = rig.anchor.dot(l.dir);
-    if (d > bestDot) { bestDot = d; best = l; }
-  }
-  return best;
+// What is in your hand, by name, for the pills that act on it.
+function heldName() {
+  const id = inventory.heldUnique || inventory.holding;
+  return (id && ITEMS[id] && ITEMS[id].name) || '';
 }
 
-// Redrawn every frame from verbNow, which is cheap and means the button can
-// never be showing a verb the world has since withdrawn — you walk away from a
-// stump mid-reach and the word goes with the distance.
-let shownVerb = null;
-function syncActBtn() {
-  const v = verbNow();
-  if (v === shownVerb) return;
-  shownVerb = v;
-  actBtn.hidden = !v;
-  if (v) actBtn.textContent = VERB_LABEL[v];
-}
-
-actBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  touched();
-  doVerb();
-  syncActBtn();
-});
-
-// --- しまう, for a carried unique
+// --- where 「おく」 puts it
 //
-// The pill offers おく, which puts the piece down in the world where you are
-// standing. This is the other ending: it goes in your bag instead. Both exist
-// because both are things you might mean, and a carried bear used to reach
-// only the first from the thumb — the second needed the pack panel opened and
-// its own slot pressed, which is a long way round for "actually, I'll keep it".
-const stowBtn = document.getElementById('act-stow');
-let stowShown = null;
+// AT ARM'S LENGTH IN FRONT OF YOU, not under your feet.
+//
+// Under your feet is where it went, and the floor took it straight back off you:
+// `nudgeLoose` shoves any loose piece within `interior.nudgeReach` of where you
+// are standing, and nothing on the planet is nearer to that than the spot you
+// are standing on. You set the bear down and it squirted out from between your
+// ankles at the full shove. The distances below are all comfortably outside that
+// reach and comfortably inside `uniques.reach`, so a thing you put down stays
+// where you put it AND is still there to pick back up.
+//
+// Two more things fall out of placing it in front, both of which were the point
+// as much as the shove was: you can SEE it land, rather than having it appear
+// hidden under your own feet, and it lands inside the cone you are facing — so
+// 「ひろう」 is offered for it the instant it is down. Setting a thing down and
+// picking it up again became one symmetrical gesture instead of two unrelated
+// ones.
+const PLACE = {
+  // Metres in front, longest first. The shorter tries are for setting something
+  // down with your nose against a wall.
+  steps: [0.95, 0.72, 0.52],
+  // ...and then off to either side, because "straight ahead" with a tree in it
+  // still has somewhere perfectly good half a step to the left. Radians.
+  //
+  // THE LAST PAIR IS NEARLY SQUARE ON, and it is there for one situation: stood
+  // close to a wall and facing it. Everything genuinely in front of you then is
+  // masonry, and the only floor left is beside you. Measured from two metres out
+  // in a room you may walk 2.25 of, nothing inside 50° found anywhere at all and
+  // the button refused — which is a correct refusal and a miserable one, because
+  // the room was mostly empty. 80° is still somewhere you can see.
+  fan: [0, 0.44, -0.44, 0.86, -0.86, 1.4, -1.4],
+  // Kept off walls and trunks by about the margin a walk keeps.
+  keep: 0.02,
+};
 
-function syncStowBtn() {
-  const on = rig.isFirstPerson && !!inventory.heldUnique;
-  if (on === stowShown) return;
-  stowShown = on;
-  stowBtn.hidden = !on;
+const _pSpot = new THREE.Vector3();
+const _pTan = new THREE.Vector3();
+
+// A spot on the surface `metres` away along a bearing `turn` radians off your
+// look. The great-circle step every other bit of placement here uses.
+function spotAhead(metres, turn, out) {
+  const A = rig.anchor;
+  rig.facing(_pTan);
+  if (turn) _pTan.applyAxisAngle(A, turn);
+  const arc = metres / CONFIG.globe.radius;
+  return out.copy(A).multiplyScalar(Math.cos(arc))
+    .addScaledVector(_pTan, Math.sin(arc)).normalize();
 }
 
-stowBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  touched();
-  inventory.putAway();
-  syncStowBtn();
-  syncActBtn();
-});
-
-// --- the light switch
-const lightBtn = document.getElementById('light-btn');
-const lightLabel = document.getElementById('light-label');
-let shownLight = null;
-
-function syncLightBtn() {
-  const art = rig.isFirstPerson ? lightArtNow() : null;
-  const on = art ? globe.lightIsOn(art) : false;
-  const key = art ? `${art}:${on}` : null;
-  if (key === shownLight) return;
-  shownLight = key;
-  lightBtn.hidden = !art;
-  if (!art) return;
-  lightBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  // Said in words for whoever is listening rather than looking, and it says
-  // what PRESSING it does rather than what state the light is in — the filled
-  // ring already says the state.
-  lightLabel.textContent = on ? 'あかりを けす' : 'あかりを つける';
+// Somewhere a thing may actually be left.
+//
+// The solid test is asked with the feet at infinity ON PURPOSE: a solid with a
+// `top` — a table, a stump — then reads as somewhere to put something rather
+// than as something in the way, and putDownUnique lifts the piece onto it and
+// runs its own topple check from there. Only the topless solids, which are
+// trunks and walls, say no.
+function canPlaceAt(spot) {
+  if (inSolid(spot, PLACE.keep, 1e9)) return false;
+  if (inBuilding(spot, PLACE.keep)) return false;
+  // Water is REFUSED rather than accepted. ぽちゃん is a lovely answer to
+  // deliberately aiming at a pond — see putDownUnique, which still does it for
+  // a tap — and a rotten one to a button you pressed to tidy your hands.
+  if (CONFIG.lakes.some((l) => inLake(spot, l))) return false;
+  // NOT THROUGH A WALL. `inBuilding` above already refuses the masonry itself,
+  // and this refuses the far side of it: the band is 0.95 thick and the longest
+  // reach here is 0.95, so from hard against the outside you could otherwise
+  // lay the bear on the rug indoors without going in.
+  //
+  // Asked as "the same side as me" rather than as a distance from the middle,
+  // which is the question the doorway answers correctly for free — step inside
+  // and both are true, so turning round and putting something down by the door
+  // still works.
+  //
+  // This replaced a rim test of `interior.walk - nudgeReach`, which was stricter
+  // than the wall and cost real floor: standing two metres out in a room you may
+  // walk 2.25 of, everything in front was refused and the button shook its head
+  // in an empty room.
+  if (globe.isInside(spot) !== globe.isInside(rig.anchor)) return false;
+  return true;
 }
 
-lightBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  touched();
-  const art = lightArtNow();
-  if (art) globe.toggleLight(art);
-  syncLightBtn();
-});
+// Straight ahead if it can be, then nearer, then off to one side. Null when
+// there is genuinely nowhere — nose into a corner — and the button refuses
+// rather than inventing somewhere for you.
+//
+// Returns a SHARED vector. Clone it if you mean to keep it.
+function placeSpot() {
+  for (const turn of PLACE.fan) {
+    for (const metres of PLACE.steps) {
+      spotAhead(metres, turn, _pSpot);
+      if (canPlaceAt(_pSpot)) return _pSpot;
+    }
+  }
+  return null;
+}
+
+// Nowhere to put it. The pill shakes its head, because a button that silently
+// does nothing reads as a broken button rather than as a refusal.
+function refuse(key) {
+  const rec = ixNodes.get(key);
+  if (!rec) return;
+  rec.el.classList.remove('is-refused');
+  // Read a layout property, so re-adding the class on a second press restarts
+  // the animation instead of being folded into the first one.
+  void rec.el.offsetWidth;
+  rec.el.classList.add('is-refused');
+}
+
+// --- the ring on the ground
+//
+// WHAT YOU ARE ABOUT TO PICK UP, and only that.
+//
+// It is the walk marker, built for tap-to-walk and unused since that went away —
+// kept, the note there says, against the day a verb wanted it. A ring in the
+// same pen as every outline in this world, tinted with the hour, breathing
+// gently so it reads as the app holding on to something. Exactly what was
+// wanted, already drawn, and the alternative was drawing it again.
+//
+// IT ALSO SHOWED WHERE 「おく」 WOULD LAND, on the reasoning that the two
+// questions — which of these will I pick up, where will this land — are never
+// live at once, so they could share the one ring. They are not both live, and
+// it was still wrong: with the lamp in your hands the ring sat out on the floor
+// a step ahead of you, a hole in the middle of the room the whole time you were
+// carrying anything. A mark that follows you everywhere is scenery, and this
+// world's rule for its own furniture is that a control appears when it has
+// something to say and is otherwise not there.
+//
+// So the ring is only ever the answer to the first question. Where a thing will
+// land is a thing you find out by putting it down, which you can immediately
+// undo, and a preview was never worth a permanent hole in the floor.
+//
+// Gated on 「ひろう」 actually being on offer rather than merely on there being a
+// focus, because with your hands full it is not offered — and ringing something
+// the buttons will not act on is the same lie in a quieter voice.
+function updateMark(dt) {
+  const on = rig.isFirstPerson && focus && focus.loose && !inventory.heldUnique;
+  globe.setWalkMarker(on ? focusDir(focus) : null, dt);
+}
+
+// --- drawing the stack
+//
+// One node per verb, kept across frames and NEVER MOVED. Where a pill sits
+// comes from the CSS `order` stamped on it when it is built, so an entry
+// arriving or leaving cannot shuffle its neighbours. That matters more than it
+// sounds: the entry that arrives usually arrives BECAUSE you have just walked
+// up to something, which is precisely when your thumb is already travelling
+// toward the pill below it.
+const ixNodes = new Map();
+
+function buildIx(key) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = `ix ix-${key}`;
+  el.style.order = String(IX_ORDER.indexOf(key));
+  // Two words rather than one: the VERB, and the thing it will be done to. The
+  // verb is what you scan for and stays the size it was; the name is smaller and
+  // second, because it is an answer to "which one" rather than to "what".
+  el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${IX_GLYPH[key]}</svg>`
+    + '<span class="ix-word"></span><span class="ix-of" hidden></span>';
+  // pointerdown rather than click, for the reason jump and sprint use it too:
+  // these are about NOW, and あげる! has under a second to be pressed in.
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    touched();
+    ACTIONS[key].run();
+    // The world just changed, under the very button that changed it, so the
+    // stack is redrawn before the finger lifts rather than on the next frame.
+    syncInteract();
+  });
+  return {
+    el,
+    label: el.querySelector('.ix-word'),
+    of: el.querySelector('.ix-of'),
+    word: '',
+    name: '',
+  };
+}
+
+// Asked of the world every frame rather than wired to events, because the thing
+// that most often withdraws a verb is you walking away from it, and walking
+// away fires nothing. Cheap: the answer is usually an empty list, and when it
+// is not, only what actually changed is touched.
+function syncInteract() {
+  const want = actionsNow();
+
+  // Gone from the world — you walk away from a stump mid-reach and the word
+  // goes with the distance.
+  for (const [key, rec] of ixNodes) {
+    if (!want.includes(key)) { rec.el.remove(); ixNodes.delete(key); }
+  }
+
+  for (let i = 0; i < want.length; i++) {
+    const key = want[i];
+    let rec = ixNodes.get(key);
+    if (!rec) {
+      rec = buildIx(key);
+      ixNodes.set(key, rec);
+      ixEl.appendChild(rec.el);
+    }
+    // Rewritten rather than rebuilt, so つける becoming けす — or ひろう turning
+    // from くまさん to やかん as you look from one to the other — does not re-run
+    // the arrival animation on a pill that never went anywhere.
+    const word = ACTIONS[key].word();
+    if (rec.word !== word) { rec.word = word; rec.label.textContent = word; }
+    const name = ACTIONS[key].of ? ACTIONS[key].of() : '';
+    if (rec.name !== name) {
+      rec.name = name;
+      rec.of.textContent = name;
+      // Hidden rather than empty, so the pill loses the gap as well as the word
+      // and shrinks back to exactly the shape a nameless verb wears.
+      rec.of.hidden = !name;
+    }
+    // Filled is this app's word for "the one being offered", and it goes to the
+    // BOTTOM entry, which is the one under the thumb. With a single verb on
+    // offer — the common case by a long way — that entry is the only entry, and
+    // the stack looks exactly like the one filled pill it replaced.
+    rec.el.classList.toggle('is-primary', i === 0);
+    // The strike is the one press in this game with a deadline on it. It gets
+    // to be bigger, and it is always alone when it is showing.
+    rec.el.classList.toggle('is-urgent', key === 'strike');
+  }
+}
 
 // The hop, and now the only way to make one — the double tap that used to
 // share the verb is gone with tap-to-walk. `hopSeen` still answers it, because
@@ -1756,13 +2443,20 @@ const marks = bots.map((b) => makeMark(
   },
 ));
 
-if (globe.house) {
+// One chip per home. They are the only fixed things on the planet worth being
+// pointed at, and with the cave twenty units from the house on a world whose
+// horizon is under five, a chip is most of how you find it the first time.
+for (const home of globe.homes) {
+  // Both wear the house drawing, which is a compromise worth naming: the cave
+  // has no card of its own that is not a retired stand-in, and a chip is a
+  // twenty-pixel disc read at a glance. What distinguishes them on screen is
+  // which way it points, not what is on it.
   marks.push(makeMark(discFace(IMG.houseDay), (out) => {
     // Halfway up the building rather than at its foot, so the arrow points at
     // the house you can see rather than at the ground under it. It only matters
     // when you are close enough for the two to differ, which is exactly when
     // the chip is about to hand over to the building itself.
-    out.copy(globe.house.anchor.position).addScaledVector(globe.house.normal, 1.4);
+    out.copy(home.sprite.anchor.position).addScaledVector(home.sprite.normal, 1.4);
     return true;
   }));
 }
@@ -2025,11 +2719,17 @@ timeTrack.addEventListener('pointercancel', releaseTrack);
 
 // Pressing anywhere else puts it away. Capture phase so it is decided before
 // the canvas starts a look or a walk, and passive so it never eats that press.
-// The pouch folds the same way for the same press.
 document.addEventListener('pointerdown', (e) => {
+  // The sheet is modal: while it is up, a press is about the sheet and none of
+  // the tidying below should read it as having moved on. Without this, tapping a
+  // row of the 図鑑 folds the drawer holding its pill, and the drawer takes the
+  // 図鑑 down with it. The sheet's own three dismissals are wired where it is.
+  if (sheetMode) return;
   if (closeAt && !timeEl.contains(e.target)) openTime(false);
-  if (pouchCloseAt && !pouchEl.contains(e.target)) openPouch(false);
-  if (zukanCloseAt && !zukanEl.contains(e.target)) openZukan(false);
+  // The drawer folds for a press outside the WHOLE stack rather than outside
+  // itself, so reaching past it for そらへ is not also an instruction to put it
+  // away — those two pills are its neighbours, not the world.
+  if (menuCloseAt && !ctlStack.contains(e.target)) openMenu(false);
 }, { capture: true, passive: true });
 
 applyPhase(activePhase(), { instant: true });
@@ -2332,13 +3032,16 @@ function frame(now) {
   tickTopple(now);
   carryLent();
 
-  // `globe.setWalkMarker(rig.goto, dt)` ran here. Nothing sets `rig.goto` any
-  // more — it was written by `walkTo`, which only tap-to-walk ever called — so
-  // the marker had nothing left to mark. Both it and `walkTo` are kept rather
-  // than deleted, the same way `flat` in lakeGeo is: the machinery is correct
-  // and the day a "walk here" verb comes back on a button, it is a one-line
-  // call away. What must not survive is a call that pretends to do something,
-  // which is why this is a comment and not a no-op.
+  // `globe.setWalkMarker(rig.goto, dt)` ran here, and stopped when nothing set
+  // `rig.goto` any more: it was written by `walkTo`, which only tap-to-walk ever
+  // called. The marker was kept rather than deleted, the same way `flat` in
+  // lakeGeo is, on the reasoning that the machinery is correct and the day a
+  // verb wanted it it would be a one-line call away.
+  //
+  // THAT DAY CAME. It is called from `updateMark` further down this same frame,
+  // and it marks what you are facing or where the thing in your hands will land
+  // — see the note there. It is not called from here because it has to be
+  // decided AFTER the focus is, and the focus is settled with the buttons.
 
   // Shove the bear about, if your feet are anywhere near it. Only from the
   // ground and only from indoors, which is where the only loose thing in the
@@ -2358,8 +3061,17 @@ function frame(now) {
     paintScrubber();
     if (!scrubbing && now > closeAt) openTime(false);
   }
-  if (pouchCloseAt && now > pouchCloseAt) openPouch(false);
-  if (zukanCloseAt && now > zukanCloseAt) openZukan(false);
+  // The drawer folds itself away on the same forgotten-about timer, with one
+  // extra rule: while something it opened is still open, its clock is held at
+  // the top rather than running. Otherwise a minute spent dragging the scrubber
+  // would leave the drawer already overdue, and closing the panel would snap it
+  // shut in the same breath — the timer would be counting your attention as
+  // neglect.
+  if (menuCloseAt) {
+    if (timeEl.classList.contains('is-open') || zukanEl.classList.contains('is-open')) {
+      menuCloseAt = now + CONFIG.daylight.closeMs;
+    } else if (now > menuCloseAt) openMenu(false);
+  }
 
   if (started) {
     for (const b of bots) {
@@ -2402,13 +3114,19 @@ function frame(now) {
       if (!onFoot) rig.sprintOn = false;
     }
 
-    // The context verb, redrawn from the world rather than from events —
-    // walking away from a stump has to take the word with it, and nothing
-    // fires an event when you walk away from something. verbNow already
-    // returns null off the ground, so this hides it in the sky for free.
-    syncActBtn();
-    syncStowBtn();
-    syncLightBtn();
+    // What you are looking at, then what that lets you do, then the ring that
+    // says so. STRICTLY THIS ORDER: every verb in the stack is now a question
+    // about the focus, and the mark is a drawing of the answer — so a focus
+    // settled after the stack was built would put a word on screen for a thing
+    // the ring was not under, for one frame, every time you turned.
+    //
+    // All three redrawn from the world rather than from events, because the
+    // thing that most often changes them is you walking or turning, and neither
+    // fires anything. updateFocus already gives up off the ground, so the sky
+    // empties this corner for free.
+    updateFocus(now);
+    syncInteract();
+    updateMark(dt);
 
     // A CARRIED LAMP BRINGS ITS LIGHT WITH IT. The light's position is an empty
     // object parented to the piece's own anchor — see the note where it is
@@ -2420,8 +3138,12 @@ function frame(now) {
     if (heldLamp && globe.roomLights.some((L) => L.art === heldLamp)) {
       const loose = uniqueByItem(inventory.heldUnique);
       if (loose) {
+        // Carried FIRST, then moved. placeLoose leaves a carried piece carried
+        // — see the exception in it — so the order here is what stops the walk
+        // over your feet from putting the lantern back on the ground under you
+        // on every frame.
+        globe.carryLoose(loose);
         globe.placeLoose(loose, rig.anchor);
-        loose.anchor.visible = false;
       }
     }
 
@@ -2561,22 +3283,30 @@ if (IS_LOCAL) {
     // Straight in and straight out, for poking at the room without having to
     // walk there. Debug teleports, and the only ones left in the app: goIn
     // stands you mid-room facing the door, goOut on the doorstep facing it.
-    house: () => (globe.house ? globe.house.normal.clone() : null),
-    goIn() {
-      const n = globe.house && globe.house.normal;
-      if (!n || !globe.doorstepDir(doorSpot)) return null;
+    //
+    // `i` picks which home — 0 is Chiikawa's house and 1 Hachiware's cave, in
+    // CONFIG.homes order. It defaults to 0, so every call that existed before
+    // there were two of them still means what it meant.
+    house: (i = 0) => (globe.homes[i] ? globe.homes[i].sprite.normal.clone() : null),
+    goIn(i = 0) {
+      const home = globe.homes[i];
+      if (!home || !globe.doorstepDir(doorSpot, undefined, home)) return null;
+      const n = home.sprite.normal;
       // A step back from the middle along the door's bearing, facing the door.
+      // How far back is a fraction of THIS room rather than a fixed 1.1: the
+      // cave is a smaller hollow, and a step measured for the house would put
+      // you in its far wall.
       playerDir.copy(doorSpot).addScaledVector(n, -doorSpot.dot(n)).normalize();
-      const a = 1.1 / CONFIG.globe.radius;
+      const a = (home.spec.walk * 0.49) / CONFIG.globe.radius;
       probe.copy(n).multiplyScalar(Math.cos(a)).addScaledVector(playerDir, -Math.sin(a)).normalize();
       rig.standAt(probe, doorSpot);
       rig.settle();
       return probe.clone();
     },
-    goOut() {
-      const n = globe.house && globe.house.normal;
-      if (!n || !globe.doorstepDir(doorSpot)) return null;
-      rig.standAt(doorSpot, n);
+    goOut(i = 0) {
+      const home = globe.homes[i];
+      if (!home || !globe.doorstepDir(doorSpot, undefined, home)) return null;
+      rig.standAt(doorSpot, home.sprite.normal);
       rig.settle();
       return doorSpot.clone();
     },
@@ -2615,4 +3345,5 @@ if (IS_LOCAL) {
       };
     },
   };
+
 }

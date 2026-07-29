@@ -851,6 +851,326 @@ export function buildFuton(h) {
   };
 }
 
+// -------------------------------------------------------- Hachiware's bedding
+//
+// A worn sleeping mat with the comforter folded at one end. This is NOT
+// Chiikawa's cloud-edged futon in cheaper colours: Hachiware's brown base is
+// nearly rag-thin, and the white comforter is a tired double layer with broad
+// slumps instead of scallops. Both still use the futon's one-surface cloth
+// geometry so their ink remains a single drawn silhouette.
+export function buildWornBedding(h) {
+  const g = new THREE.Group();
+  const mat = fillMat(PAL.wornBeddingMat);
+  const cloth = fillMat(PAL.wornBeddingCloth);
+  const matWear = markMat(new THREE.Color(PAL.wornBeddingMat));
+  const clothWear = markMat(new THREE.Color(PAL.wornBeddingCloth));
+
+  // Long and narrow in plan, matching the sheet and the side-on anime frames.
+  // It stays this size because the cave placement and walkable gap were composed
+  // around it; the remodelling is in its section and edge language, not its
+  // footprint.
+  const L = h * 4.10;
+  const W = h * 1.55;
+  const matSpec = {
+    rx: L / 2,
+    rz: W / 2,
+    ry: h * 0.045,
+    box: 8.0,
+    cx: 0,
+    cz: 0,
+    cy: h * 0.017,
+    flat: 0.38,
+    // A crooked fabric perimeter, not the regular little lobes of a fresh futon.
+    n: 22,
+    amp: 0.10,
+    rings: 18,
+    cols: 168,
+  };
+  matSpec.bumps = rimBumps(
+    matSpec.n, matSpec.rx, matSpec.rz, matSpec.box, matSpec.amp);
+  const matFill = part(g, (pad) => fluff(matSpec, pad), mat, null, INK * 0.78);
+
+  // The comforter is folded crosswise once. Two separate, shallow slabs keep the
+  // doubled edge readable from every side, but a small gap leaves both inverted
+  // ink hulls visible instead of merging them into one pillow-shaped mound.
+  // The upper half overhangs by only a few centimetres and both halves keep
+  // nearly smooth rims: old cloth sags, it does not bloom into cloud lobes.
+  const matTop = matSpec.cy + matSpec.ry;
+  const lower = {
+    rx: h * 0.82,
+    rz: h * 0.64,
+    ry: h * 0.060,
+    box: 5.2,
+    cx: -L * 0.265,
+    cz: h * 0.025,
+    cy: matTop + h * 0.045,
+    flat: 0.62,
+    n: 12,
+    amp: 0.18,
+    rings: 22,
+    cols: 128,
+  };
+  lower.bumps = rimBumps(lower.n, lower.rx, lower.rz, lower.box, lower.amp);
+  const lowerFill = part(g, (pad) => fluff(lower, pad), cloth, null, INK * 0.88);
+
+  const lowerTop = lower.cy + lower.ry;
+  const upper = {
+    rx: h * 0.86,
+    rz: h * 0.66,
+    ry: h * 0.085,
+    box: 4.8,
+    cx: -L * 0.275,
+    cz: -h * 0.025,
+    cy: lowerTop + h * 0.060,
+    flat: 0.60,
+    n: 11,
+    amp: 0.22,
+    rings: 24,
+    cols: 136,
+  };
+  upper.bumps = rimBumps(upper.n, upper.rx, upper.rz, upper.box, upper.amp);
+  const upperFill = part(g, (pad) => fluff(upper, pad), cloth, null, INK * 0.88);
+
+  // The one long fold stroke visible in the reference sheet. It rides the crown
+  // rather than floating at a fixed height, and bows just enough to keep it from
+  // looking like upholstery piping.
+  const crownY = (spec, x, z) => {
+    const ax = Math.pow(Math.abs((x - spec.cx) / spec.rx), spec.box);
+    const az = Math.pow(Math.abs((z - spec.cz) / spec.rz), spec.box);
+    const plan = Math.pow(ax + az, 2 / spec.box);
+    return spec.cy + spec.ry * Math.sqrt(Math.max(0, 1 - plan));
+  };
+  const foldPoints = [];
+  for (let i = 0; i <= 8; i++) {
+    const t = i / 8;
+    const x = upper.cx + (t - 0.5) * upper.rx * 1.38;
+    const z = upper.cz + upper.rz * (0.27 + Math.sin(t * Math.PI) * 0.025);
+    foldPoints.push(new THREE.Vector3(
+      x,
+      crownY(upper, x, z) + h * 0.007,
+      z,
+    ));
+  }
+  g.add(new THREE.Mesh(
+    new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(foldPoints), 24, h * 0.006, 5, false),
+    clothWear,
+  ));
+
+  // Worn ticks on both materials. Unlike Chiikawa's fresh futon, the reference
+  // deliberately scatters faded strokes over the mat and the folded cloth.
+  const addWear = (fill, material, opts) => {
+    const geo = scuffs(fill.geometry, opts);
+    if (!geo) return;
+    const mesh = new THREE.Mesh(geo, material);
+    g.add(mesh);
+  };
+  addWear(matFill, matWear, {
+    count: 14,
+    len: h * 0.095,
+    weight: h * 0.009,
+    minUp: 0.45,
+    lift: h * 0.006,
+    seed: 67,
+  });
+  addWear(lowerFill, clothWear, {
+    count: 5,
+    len: h * 0.075,
+    weight: h * 0.010,
+    minUp: 0.24,
+    lift: h * 0.006,
+    seed: 71,
+  });
+  addWear(upperFill, clothWear, {
+    count: 7,
+    len: h * 0.080,
+    weight: h * 0.010,
+    minUp: 0.24,
+    lift: h * 0.006,
+    seed: 79,
+  });
+
+  // A handful of loose fibres at the mat's perimeter. Each is a bent stroke
+  // growing out from the edge, sparse enough to read as wear rather than fur.
+  const fibre = (x, z, dx, dz, bend) => {
+    const path = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, h * 0.028, z),
+      new THREE.Vector3(x + dx * 0.55, h * (0.026 + bend), z + dz * 0.55),
+      new THREE.Vector3(x + dx, h * 0.022, z + dz),
+    ]);
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(path, 7, h * 0.0065, 5, false),
+      matWear,
+    ));
+  };
+  fibre(-L * 0.47, W * 0.48, -h * 0.10, h * 0.025, 0.020);
+  fibre(-L * 0.18, -W * 0.50, -h * 0.025, -h * 0.095, 0.014);
+  fibre(L * 0.18, W * 0.50, h * 0.030, h * 0.085, 0.018);
+  fibre(L * 0.47, -W * 0.42, h * 0.095, -h * 0.040, 0.012);
+  fibre(L * 0.49, W * 0.18, h * 0.090, h * 0.018, 0.016);
+
+  const box = new THREE.Box3();
+  for (const fill of [matFill, lowerFill, upperFill]) {
+    fill.geometry.computeBoundingBox();
+    box.union(fill.geometry.boundingBox);
+  }
+  return {
+    group: g,
+    fills: [mat, cloth, matWear, clothWear],
+    top: box.max.y,
+    rx: Math.max(box.max.x, -box.min.x),
+    rz: Math.max(box.max.z, -box.min.z),
+  };
+}
+
+// ---------------------------------------------------------- sasumata weapons
+//
+// A rounded shaft ending in a U-shaped capture fork. The fork is genuinely
+// open geometry rather than a flat silhouette, so its twelve white teeth and
+// the space between the jaws survive both on the floor and in the carried view.
+function buildSasumata(h, bodyColour, highlightColour) {
+  const g = new THREE.Group();
+  const body = fillMat(bodyColour);
+  const highlight = fillMat(highlightColour);
+  const white = fillMat(PAL.furniturePaper);
+
+  const L = h * 3.80;
+  const left = -L / 2;
+  const right = L / 2;
+  const join = left + h * 1.34;
+  const gripStart = right - h * 0.66;
+  const r = h * 0.073;
+  const y = r;
+
+  const tube = (curve, radius, material, segments, weight = INK * 0.74) => (
+    part(
+      g,
+      (pad) => new THREE.TubeGeometry(
+        curve, segments, radius + pad, 10, false),
+      material,
+      null,
+      weight,
+    )
+  );
+  const ball = (x, z, radius, material) => part(
+    g,
+    (pad) => new THREE.SphereGeometry(radius + pad, 14, 10),
+    material,
+    (m) => m.position.set(x, y, z),
+    INK * 0.74,
+  );
+
+  // Pink shaft up to the white end grip.
+  const shaft = new THREE.LineCurve3(
+    new THREE.Vector3(join - h * 0.04, y, 0),
+    new THREE.Vector3(gripStart + h * 0.025, y, 0),
+  );
+  tube(shaft, r, body, 48);
+
+  // Two mirrored jaws. Their tips bend gently away from the opening, matching
+  // the top and perspective views rather than ending as parallel prongs.
+  const forkPoints = (side) => [
+    new THREE.Vector3(join + h * 0.06, y, 0),
+    new THREE.Vector3(join - h * 0.10, y, side * h * 0.18),
+    new THREE.Vector3(join - h * 0.34, y, side * h * 0.40),
+    new THREE.Vector3(left + h * 0.56, y, side * h * 0.51),
+    new THREE.Vector3(left + h * 0.19, y, side * h * 0.52),
+    new THREE.Vector3(left, y, side * h * 0.62),
+  ];
+  const topPoints = forkPoints(1);
+  const bottomPoints = forkPoints(-1);
+  const topFork = new THREE.CatmullRomCurve3(topPoints);
+  const bottomFork = new THREE.CatmullRomCurve3(bottomPoints);
+  tube(topFork, r * 1.08, body, 64);
+  tube(bottomFork, r * 1.08, body, 64);
+  ball(join, 0, r * 1.16, body);
+  ball(left, h * 0.62, r * 1.08, body);
+  ball(left, -h * 0.62, r * 1.08, body);
+
+  // White grip, a touch broader than the shaft, with a dark join ring.
+  const grip = new THREE.LineCurve3(
+    new THREE.Vector3(gripStart, y, 0),
+    new THREE.Vector3(right - h * 0.06, y, 0),
+  );
+  tube(grip, r * 1.06, white, 24);
+  ball(right - h * 0.06, 0, r * 1.06, white);
+  const collar = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 1.15, r * 1.15, h * 0.025, 12),
+    legMat(),
+  );
+  collar.rotation.z = Math.PI / 2;
+  collar.position.set(gripStart, y, 0);
+  g.add(collar);
+
+  // Six inward-facing and six outward-facing triangular teeth. Cones make the
+  // top view triangular while retaining a real narrow side profile in the
+  // reference's left/right elevations.
+  const toothH = h * 0.19;
+  const toothR = h * 0.066;
+  const teeth = [
+    [left + h * 0.34, h * 0.51],
+    [left + h * 0.68, h * 0.50],
+    [left + h * 1.00, h * 0.39],
+  ];
+  const tooth = (x, z, side, direction) => {
+    const centre = z + side * direction * (r * 1.03 + toothH / 2);
+    part(
+      g,
+      (pad) => new THREE.ConeGeometry(
+        toothR + pad * 0.55, toothH + pad * 1.2, 3),
+      white,
+      (m) => {
+        m.position.set(x, y, centre);
+        const pointsPositiveZ = side * direction > 0;
+        m.rotation.x = pointsPositiveZ ? Math.PI / 2 : -Math.PI / 2;
+      },
+      INK * 0.60,
+    );
+  };
+  for (const [x, z] of teeth) {
+    tooth(x, z, 1, -1);
+    tooth(x, -z, -1, -1);
+    tooth(x, z, 1, 1);
+    tooth(x, -z, -1, 1);
+  }
+
+  // A narrow pale stripe along the crown gives the solid pink the same soft
+  // highlight the modeling sheet paints down the shaft and both prongs.
+  const shineTube = (curve, segments) => {
+    const points = [];
+    for (let i = 0; i <= segments; i++) {
+      const p = curve.getPoint(i / segments);
+      points.push(new THREE.Vector3(p.x, y + r * 0.94, p.z - r * 0.18));
+    }
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(
+        new THREE.CatmullRomCurve3(points), segments, r * 0.15, 6, false),
+      highlight,
+    ));
+  };
+  shineTube(shaft, 24);
+  shineTube(topFork, 32);
+  shineTube(bottomFork, 32);
+
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  return {
+    group: g,
+    fills: [body, highlight, white],
+    top: box.max.y,
+    rx: Math.max(box.max.x, -box.min.x),
+    rz: Math.max(box.max.z, -box.min.z),
+  };
+}
+
+export function buildPinkWeapon(h) {
+  return buildSasumata(h, PAL.weaponPink, PAL.weaponPinkHighlight);
+}
+
+export function buildBlueWeapon(h) {
+  return buildSasumata(h, PAL.weaponBlue, PAL.weaponBlueHighlight);
+}
+
 // ------------------------------------------------------------- the plushie
 //
 // A small bear: Chiikawa's, and it belongs on the futon.
@@ -1184,6 +1504,214 @@ export function buildBox(h) {
     rx: L / 2,
     rz: D / 2,
   };
+}
+
+// ------------------------------------------------------------ the trash bag
+//
+// Hachiware keeps a few tied bags against the cave wall. This is one soft,
+// asymmetric surface rather than a pile of spheres: overlapping balls would
+// each draw their own outline through the next one and turn a single bag into
+// a heap of bubbles. The only separate pieces are the knot and its two tied
+// ears, whose silhouettes genuinely sit in front of the body.
+function trashBagBody(h, pad = 0, variant = 0) {
+  const rings = 30;
+  const cols = 64;
+  // [height fraction, x radius, z radius]. The wide, flattened bottom and
+  // narrow cinch are what distinguish a filled bag from a pear or a boulder.
+  const profile = variant ? [
+    // Lower and broader through the belly, then pulled abruptly into the
+    // neck: a differently filled bag rather than a resized first one.
+    [0.00, 0.38, 0.30],
+    [0.06, 0.54, 0.41],
+    [0.23, 0.60, 0.46],
+    [0.48, 0.56, 0.43],
+    [0.68, 0.44, 0.34],
+    [0.86, 0.22, 0.18],
+    [1.00, 0.075, 0.070],
+  ] : [
+    [0.00, 0.34, 0.28],
+    [0.06, 0.50, 0.38],
+    [0.22, 0.56, 0.44],
+    [0.50, 0.53, 0.42],
+    [0.72, 0.42, 0.33],
+    [0.88, 0.23, 0.19],
+    [1.00, 0.075, 0.070],
+  ];
+  const sample = (u) => {
+    let i = 0;
+    while (i < profile.length - 2 && profile[i + 1][0] < u) i++;
+    const a = profile[i];
+    const b = profile[i + 1];
+    const raw = (u - a[0]) / (b[0] - a[0]);
+    // Smooth rather than linear between the measured sections. Straight
+    // interpolation left a visible corner at every row in the profile and
+    // made the bag read as a low-poly vase instead of soft plastic.
+    const t = raw * raw * (3 - 2 * raw);
+    return [
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
+  };
+
+  const pos = [];
+  const idx = [];
+  for (let i = 0; i <= rings; i++) {
+    const u = i / rings;
+    const [rx, rz] = sample(u);
+    const y = h * 0.86 * u;
+    // A slight sideways drift and two different ripples keep every view from
+    // resolving to the same mathematically perfect pear.
+    const drift = variant
+      ? h * (-0.052 * Math.sin(u * Math.PI * 1.18) + 0.014 * u)
+      : h * (0.040 * Math.sin(u * Math.PI * 1.25) - 0.018 * u);
+    for (let j = 0; j < cols; j++) {
+      const a = (j / cols) * Math.PI * 2;
+      // Broad, low-frequency unevenness through the filled body, becoming
+      // tighter gathered ripples as it approaches the knot.
+      const gather = Math.pow(u, 4);
+      const phase = variant ? 1.7 : 0;
+      const wobbleX = 1 + 0.040 * Math.sin(a * 2 + u * 3.7 + phase)
+        + 0.025 * Math.sin(a * 3 - u * 2.2 - phase * 0.7)
+        + gather * 0.055 * Math.sin(a * 7 + 0.8 + phase);
+      const wobbleZ = 1 + 0.035 * Math.sin(a * 2 - u * 3.1 - phase)
+        + gather * 0.045 * Math.sin(a * 6 - 0.4 + phase);
+      pos.push(
+        drift + Math.cos(a) * h * rx * wobbleX,
+        y,
+        Math.sin(a) * h * rz * wobbleZ,
+      );
+    }
+  }
+
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < cols; j++) {
+      const k = (j + 1) % cols;
+      const a = i * cols + j;
+      const b = i * cols + k;
+      const c = (i + 1) * cols + k;
+      const d = (i + 1) * cols + j;
+      idx.push(a, d, c, a, c, b);
+    }
+  }
+  // Flat caps: the lower one lets the bag sit with weight on the floor, while
+  // the upper is hidden inside the cinching ring.
+  const bottom = pos.length / 3;
+  pos.push(0, 0, 0);
+  const top = pos.length / 3;
+  pos.push(-h * 0.018, h * 0.86, 0);
+  for (let j = 0; j < cols; j++) {
+    const k = (j + 1) % cols;
+    idx.push(bottom, k, j);
+    const a = rings * cols + j;
+    const b = rings * cols + k;
+    idx.push(top, a, b);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  if (pad) {
+    const P = geo.attributes.position;
+    const N = geo.attributes.normal;
+    for (let i = 0; i < P.count; i++) {
+      P.setXYZ(i,
+        P.getX(i) + N.getX(i) * pad,
+        P.getY(i) + N.getY(i) * pad,
+        P.getZ(i) + N.getZ(i) * pad);
+    }
+  }
+  return geo;
+}
+
+function buildTrashBagModel(h, colour, variant = 0) {
+  const g = new THREE.Group();
+  const bag = fillMat(colour);
+  part(g, (pad) => trashBagBody(h, pad, variant), bag, null, INK_SMALL);
+
+  const neckY = h * 0.86;
+  // The cinch wrapped around the gathered plastic.
+  part(g, (pad) => new THREE.TorusGeometry(
+    h * 0.082, h * 0.027 + pad, 9, 22),
+  bag, (m) => {
+    m.rotation.x = Math.PI / 2;
+    m.position.set(-h * 0.018, neckY, 0);
+  }, INK_SMALL);
+
+  // A compact filled knot with two short pinched tips. The first version used
+  // large hollow loops and read as rabbit ears; tied plastic is a small twist
+  // of material, not a bow.
+  part(g, (pad) => {
+    const s = new THREE.SphereGeometry(1, 20, 14);
+    s.scale(h * 0.095 + pad, h * 0.065 + pad, h * 0.075 + pad);
+    return s;
+  }, bag, (m) => m.position.set(-h * 0.018, neckY + h * 0.025, 0), INK_SMALL);
+  for (const side of [-1, 1]) {
+    part(g, (pad) => {
+      const s = new THREE.SphereGeometry(1, 20, 14);
+      s.scale(h * 0.115 + pad, h * 0.075 + pad, h * 0.052 + pad);
+      return s;
+    }, bag, (m) => {
+      m.position.set(side * h * 0.090 - h * 0.018, neckY + h * 0.105, 0);
+      m.rotation.z = side * 0.58;
+    }, INK_SMALL);
+  }
+
+  // Sparse crease strokes on the front, matching the reference's handful of
+  // short marks rather than texturing the whole plastic surface.
+  const crease = (points, weight = h * 0.016) => {
+    const curve = new THREE.CatmullRomCurve3(points);
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 12, weight, 8, false),
+      legMat(),
+    ));
+  };
+
+  // Gathered folds radiating down from the cinch. These are the marks that make
+  // the narrowing top read as plastic pulled tight rather than a narrow neck.
+  for (const side of [-1, 1]) {
+    crease([
+      new THREE.Vector3(side * h * 0.018 - h * 0.018, h * 0.835, h * 0.070),
+      new THREE.Vector3(side * h * 0.090, h * 0.720, h * 0.190),
+      new THREE.Vector3(side * h * 0.190, h * 0.580, h * 0.285),
+    ]);
+    crease([
+      new THREE.Vector3(side * h * 0.045 - h * 0.018, h * 0.825, h * 0.060),
+      new THREE.Vector3(side * h * 0.165, h * 0.665, h * 0.205),
+      new THREE.Vector3(side * h * 0.310, h * 0.500, h * 0.285),
+    ]);
+  }
+  crease([
+    new THREE.Vector3(-h * 0.32, h * 0.29, h * 0.30),
+    new THREE.Vector3(-h * 0.25, h * 0.31, h * 0.35),
+    new THREE.Vector3(-h * 0.19, h * 0.28, h * 0.36),
+  ]);
+  crease([
+    new THREE.Vector3(h * 0.18, h * 0.50, h * 0.32),
+    new THREE.Vector3(h * 0.24, h * 0.51, h * 0.34),
+    new THREE.Vector3(h * 0.29, h * 0.48, h * 0.32),
+  ]);
+  crease([
+    new THREE.Vector3(h * 0.20, h * 0.16, h * 0.35),
+    new THREE.Vector3(h * 0.27, h * 0.20, h * 0.37),
+    new THREE.Vector3(h * 0.34, h * 0.20, h * 0.33),
+  ]);
+
+  return {
+    group: g,
+    fills: [bag],
+    top: h * 1.06,
+    rx: h * (variant ? 0.61 : 0.57),
+    rz: h * (variant ? 0.47 : 0.45),
+  };
+}
+
+export function buildTrashBag(h) {
+  return buildTrashBagModel(h, PAL.trashBag, 0);
+}
+
+export function buildTrashBagAlt(h) {
+  return buildTrashBagModel(h, PAL.trashBagAlt, 1);
 }
 
 // ---------------------------------------------------------- the nightstand
@@ -1569,7 +2097,11 @@ export function buildShelf(h) {
   const vy = bh + T;                 // stands on the plank
   const vh = h * 0.42;
   const vr = h * 0.115;
-  const vz = D * 0.52;
+  // Forward of the shelf's midpoint. On a flat house wall the old 0.52 was
+  // enough, but the cave shell curves inward behind the vase and clipped its
+  // rear outline. 0.68 buys that clearance while keeping the vase's front
+  // edge on the plank.
+  const vz = D * 0.68;
   const raw = vaseProfile(vr, vh);
   part(g, (pad) => new THREE.LatheGeometry(potOffset(raw, pad), 26),
     clay, (m) => m.position.set(0, vy, vz), INK_SMALL);
@@ -2202,6 +2734,9 @@ export const BUILD = {
   stool: buildStool,
   cushion: buildCushion,
   futon: buildFuton,
+  wornbedding: buildWornBedding,
+  pinkweapon: buildPinkWeapon,
+  blueweapon: buildBlueWeapon,
   plushie: buildPlushie,
   box: buildBox,
   teapot: buildTeapot,
@@ -2209,4 +2744,6 @@ export const BUILD = {
   lantern: buildLantern,
   bulb: buildBulb,
   nightstand: buildNightstand,
+  trashbag: buildTrashBag,
+  trashbag2: buildTrashBagAlt,
 };

@@ -120,40 +120,27 @@ export const PAL = {
   sun: '#F7E7A8',
   cloud: '#FFFFFF',
 
-  // The tracks between the landmarks. It was #E3D3A8, a pale sand, and that is
-  // very nearly the same colour as the grass it has to be seen against: laid
-  // over #CEE4A4 the channels differ by 21, 17 and 4, so the strongest track it
-  // could paint measured 33 parts in 765 on the rendered frame. Present in a
-  // pixel diff, and invisible to look at — which for the one thing in the app
-  // whose whole job is to be followed is the same as not being there.
-  //
-  // Almost all of the difference between grass and bare earth is in the GREEN
-  // channel, so this trades the sand's brightness for a browner one and reads at
-  // twice the strength. It is still a worn track rather than a road, which is
-  // what it should be. See PATH_LAYERS in art.js for the other half of the knob.
-  path: '#D5BB84',
+  // `path: '#D5BB84'` stood here, the colour of the tracks worn between the
+  // landmarks. It went with the tracks — see the note in paintGlobe. Its own
+  // history is a warning worth keeping: it began #E3D3A8, a pale sand, which
+  // laid over the meadow's #CEE4A4 differed by 21, 17 and 4 in the channels and
+  // measured 33 parts in 765 on the rendered frame — present in a pixel diff and
+  // invisible to look at. Almost all the difference between grass and bare earth
+  // is in the GREEN channel, so anything drawn ON this meadow has to spend
+  // brightness to buy it.
 
   soil: '#C29A6E',
   soilDark: '#A87F55',
 
-  // THE FIELD ITSELF, now that it is painted rather than loaded. `ground-day.png`
-  // was a flat #CEE4A4 fill and nothing else — two million pixels of one colour —
-  // so this is the same meadow with the drawing actually done.
+  // `ground: '#CEE4A4'`, `groundTick: '#6E7F4F'` and `groundBloom: [...]` stood
+  // here — the field's colour, the short dark stroke scattered over it, and the
+  // specks of blossom printed in at the same scale.
   //
-  // `groundTick` is the mark the whole look rests on: the short dark stroke the
-  // reference frames scatter everywhere, in ones and twos and threes, which is
-  // what stops a field of one colour reading as felt. It is a brown-green rather
-  // than a green, which is what keeps it reading as a mark ON grass instead of as
-  // more grass.
-  ground: '#CEE4A4',
-  groundTick: '#6E7F4F',
-  // ...and the tiny flowers printed into the field at the same scale as the
-  // ticks. These are what `flat-flower-*.png` used to be: white and yellow
-  // specks, too small to be a thing you look at and too many to leave out.
-  // Mostly white, and white is listed twice on purpose: the pink is a seasoning
-  // rather than a colour of the field, and given an equal share it turns the
-  // whole meadow faintly rosy from any distance where the specks blur together.
-  groundBloom: ['#FBFBF0', '#FBFBF0', '#FBEDA8', '#F1C6D1'],
+  // They have not gone anywhere, they have moved somewhere they can be said
+  // TWICE. There are two grounds on this planet now and each wants its own three
+  // of these, so a single set in the palette could only ever describe one of
+  // them; they live in CONFIG.biomes, one set per biome, and the meadow's are
+  // exactly these values. See the note there.
 
   // THE PONDS, now that they are built rather than stamped. `lake.png` was one
   // drawing of one pond wearing its own light, which is exactly what a surface
@@ -218,16 +205,23 @@ export const PAL = {
   // same green mixed toward the sky reads as woods on the far side of a valley.
   // The mountains carry that furthest, which is why they are barely green at all.
   //
-  // Blue-grey rather than purple. The reference frames drift between the two and
-  // both work; blue keeps company with this sky, and a purple range against a
-  // #BFE4F5 noon reads as a bruise.
-  horizonFar: '#B3BDD4',
-  horizonNear: '#9AA8C6',
-  // The band of woods along the skyline. Muted well below the canopies you can
-  // walk up to, and inked, because a treeline with no line reads as a smear —
-  // it is the one thing up there near enough to have an edge.
-  horizonTree: '#7CA36B',
-  horizonTreeInk: '#52704A',
+  // Sparse individual lavender-grey mountains. Most share the main colour; a
+  // few paler silhouettes sit locally behind a neighbour, which creates the
+  // occasional overlap in the references without turning the whole distance
+  // into two repetitive stacked rows.
+  horizonMountainBack: '#C4C4D5',
+  horizonMountain: '#B3B4C9',
+  horizonMountainBackInk: '#857A84',
+  horizonMountainInk: '#6F646F',
+  // The band of woods along the skyline. The anime backgrounds separate it
+  // into broad, pale scalloped shrubs instead of one dark hedge: the back row
+  // is airiest and the lower row holds the familiar leaf green when a jump
+  // uncovers it. One soft grey-green outline ties the rows together; sparse
+  // warm branches keep the foliage from reading as decorative cloud shapes.
+  horizonTreeBack: '#B7D39F',
+  horizonTree: '#A5C78E',
+  horizonTreeInk: '#5D6652',
+  horizonTreeBranch: '#6E5B47',
   // The field running out to the foot of those woods. A shade deeper than the
   // ground you are stood on, so the join at the limb reads as distance rather
   // than as a seam.
@@ -366,7 +360,58 @@ export const PAL = {
   // colour: what fills an opening is whatever is on the other side of it.
   houseWall: '#F8F3EF',
   houseInk: '#1C1614',
-  houseMark: [176, 168, 164],
+  houseMark: [128, 116, 110],
+
+  // ------------------------------------------------------- the cave and its hill
+  //
+  // Hachiware's place, which is not a building at all: a hollow in the side of a
+  // rock face, with a dome-shaped room behind a mouth as wide as the front of
+  // it. Everything here is read off the anime frames rather than derived from
+  // the house's palette, because the two are deliberately different materials —
+  // the house is painted plaster and this is stone.
+  //
+  // The rock is drawn as PLATES: irregular polygons outlined in a brown pen,
+  // which is the one motif the reference never drops, at any distance. The face
+  // colour is barely off white — the cliff in the manga panel is almost paper —
+  // and what makes it read as rock is the crack network on top of it, not the
+  // fill. So the fill stays pale and the pen does the work.
+  cliffFace: '#F4F1EE',
+  // The cave's own shell is a step darker than the cliff it is set into, which
+  // is what gives the mouth its shape from a distance: the reference draws the
+  // hollow as a grey dome against a white wall, before a single crack is on
+  // either of them.
+  caveWall: '#CFCBC7',
+  // The interior, and A STEP DARKER THAN THE MOUND rather than paler.
+  //
+  // It was #F2EFEC — near enough to `cliffFace` to be the same colour — on the
+  // reasoning that a wall two paces off with the daylight over your shoulder is
+  // a bright wall, which is what the interior frame shows. Seen from OUTSIDE
+  // that is a disaster: the mouth is a hole with a wall behind it, and if the
+  // wall behind it is the same value as the rock around it, the hole stops
+  // being a hole. Rendered, the hollow read as a patch of slightly different
+  // cracks on an otherwise solid mound.
+  //
+  // The reference settles it — every exterior frame draws the inside of the
+  // hollow markedly darker than the rock around the opening, because it is in
+  // shadow, and that tonal step is the only thing saying there is a space back
+  // there. So the room is a step down, and what brings it back up close to is
+  // the lamp standing in it.
+  caveRoomWall: '#DFDAD5',
+  caveRoomFloor: '#CBC5BF',
+  // The pen. Warmer and lighter than the house's near-black houseInk: the
+  // reference outlines rock in a soft brown that reads as drawn rather than as
+  // cut, and a near-black crack network at this density would turn the whole
+  // face into a grid.
+  caveInk: '#6B5348',
+  // ...and the same pen at the weight the fine cracks are drawn in — the hairline
+  // spurs and the little paired ticks that fill the middle of a plate.
+  caveMark: [124, 100, 88],
+  // The grass on the clifftop, and the fringe of it that overhangs the edge.
+  // Deliberately the ground's own green rather than a third one: it is the same
+  // meadow, lifted. The fringe is a shade deeper so the overhang reads as being
+  // in its own shadow, which is how the reference draws it.
+  cliffGrass: '#B7DC8D',
+  cliffGrassEdge: '#8FBF66',
 
   furnitureCushion: '#E3B4A8',
   furniturePaper: '#FFFDF8',
@@ -390,6 +435,20 @@ export const PAL = {
   // multiplies it, which is why the reference photograph of it at night is blue
   // and this is not painted blue anywhere.
   furnitureFuton: '#FFFFFF',
+
+  // Hachiware's bedding is older and rougher than Chiikawa's white futon:
+  // a faded earth-grey sleeping mat with warm, repeatedly folded cloth.
+  wornBeddingMat: '#81786D',
+  wornBeddingCloth: '#F0EFEB',
+
+  // Chiikawa's sasumata: candy pink under the same dark furniture pen, with
+  // a paler stripe catching the top of its rounded shaft.
+  weaponPink: '#EF8FB2',
+  weaponPinkHighlight: '#F8B7CD',
+  // Hachiware's matching weapon uses the cool blue of his markings, lifted by
+  // a milky highlight so its rounded shaft stays legible in the dim cave.
+  weaponBlue: '#78AACA',
+  weaponBlueHighlight: '#ACD2E4',
 
   // Chiikawa's bear, and the drawing's own two colours. The fur is the only
   // warm mid-tone anywhere under this roof — everything else in the room is a
@@ -415,6 +474,12 @@ export const PAL = {
   // other near-white under this roof — a strip of tape should read as the one
   // NEW thing in a room of soft old colours.
   boxTape: '#FCF9F4',
+
+  // Hachiware's tied rubbish bag. A cool middle grey, kept distinct from both
+  // the cave floor and its warmer stone walls so the soft silhouette remains
+  // legible even before the furniture ink is drawn around it.
+  trashBag: '#B9BCBA',
+  trashBagAlt: '#ADB3B4',
 
   // The bedside cabinet. One wood, and the builder shades its own faces off it
   // — a box of flat faces has to, for the reason buildBox sets out.
@@ -601,7 +666,17 @@ export const CONFIG = {
     // you are standing among them; by orbitAlt the view has swung fully round
     // to looking down at the whole planet. Everything between is a blend, so
     // there are no modes to switch — just how high up you are.
-    eyeHeight: 1.7,
+    //
+    // 1.47 IS MOMONGA'S OWN EYE LINE, measured off the idle sheet rather than
+    // chosen: the drawn body is 1.91 tall and the eyes sit 1.47 above the feet
+    // at the scale the body renders at. It stood at 1.7 — picked before there
+    // was a visible you to check against — which put the lens a whole head
+    // above where the avatar's eyes are drawn, so the world read a size
+    // smaller from first person than it did the moment you rose and looked at
+    // yourself. Anyone re-tuning this: the horizon band in scene.js is PINNED
+    // to this height (see HORIZON_FROM and its arithmetic), so the two move
+    // together or the treeline sinks behind the planet.
+    eyeHeight: 1.47,
     // First person is a place you are, not a region you are near. You are
     // either stood on the ground or at least landSnap above it — never
     // hovering in between, where it is unclear whether you can walk.
@@ -952,51 +1027,108 @@ export const CONFIG = {
     regrowMs: 240000,
   },
 
-  // BIOMES. Patches of the planet that are a different country underfoot, in
-  // radians, exactly the way the lakes are.
+  // THE TWO BIOMES. There are exactly two countries underfoot on this planet and
+  // both of them are written down here — a green meadow that is most of the
+  // world, and the pale sand each of them lives on.
   //
-  // One table with three readers — the ground painted in art.js, the colour of
-  // the grass standing in it, and how thickly anything sprouts — for the same
-  // reason `lakes` has four. Paint a dry clearing into a ground image and the
-  // grass still grows whatever green it was told to somewhere else; describe it
-  // here and the paint, the blades and the flowers all move together when you
-  // drag it to another hillside.
+  // ONE TABLE, FOUR READERS: the ground painted in art.js, the colour of the
+  // grass standing in it, how thickly anything sprouts, and — new — WHAT SPROUTS
+  // AT ALL. Paint a sandy clearing into a ground image and the trees still grow
+  // wherever the spiral put them; describe it here and the paint, the blades, the
+  // flowers and the treeline all move together when you drag it to another
+  // hillside.
   //
-  // `r` is the angular radius of the patch's solid middle and `fade` how far
-  // past that it takes to become ordinary meadow again. THE SECOND NUMBER IS THE
-  // ONE THAT MATTERS: a hard rim is a circle drawn on a planet, and a border you
-  // cross without noticing is a landscape. At these widths the wash is most of a
-  // biome's own radius again, which is why there is no edge to find.
+  // The shape of the table changed with it and the change is the point. A biome
+  // used to BE a circle on the globe, so it could only be in one place and the
+  // meadow — being everywhere — could not be one at all. Now a biome is a KIND OF
+  // GROUND and `patches` is a list of where it turns up, so sand can be at two
+  // homes on opposite sides of the world without being two different biomes, and
+  // the meadow can be an entry like any other by having no patches: whatever the
+  // patches have not claimed is base. See `biomesAt` in sphere.js.
   //
-  // There is no `meadow` entry, and that is deliberate rather than an omission:
-  // the meadow is what the planet is, and a biome is somewhere it stops being
-  // that. Everything not named here is the default in PAL.
+  // Per patch, `r` is the angular radius of its solid middle and `fade` how far
+  // past that it takes to become base again. THE SECOND NUMBER IS THE ONE THAT
+  // MATTERS: a hard rim is a circle drawn on a planet, and a border you cross
+  // without noticing is a landscape.
   //
-  // `ground` is the field's colour, `blade` the two greens of the grass in it —
-  // root and tip, as PAL.grassBlade* — and `cover` a multiplier on how much
-  // grass, flower and mushroom bother to grow. The dry field is the one the
-  // reference frames actually show: a pale straw clearing with thin green ticks
-  // on it, which is what you get by keeping the ticks green and letting the
-  // ground go blond underneath them.
+  // Per biome:
+  //   `ground` the field's colour, `tick` the short stroke scattered over it and
+  //   `bloom` the specks printed in among them — the three that used to be
+  //   PAL.ground, PAL.groundTick and PAL.groundBloom, one set each now.
+  //   `ticks`, `blooms` and `bloomScale` how many of each and how big, against
+  //   the counts in paintGlobe. These are PAINT and they are deliberately not
+  //   `cover`: one number cannot do both jobs, because the sand is bare of
+  //   growing things and still HEAVILY marked — take its hatching away with its
+  //   grass and what is left is a blank cream fill, which is the one thing the
+  //   reference frames never show.
+  //   `blade` the two greens of the grass growing in it, root then tip.
+  //   `cover` a multiplier on how much of what it DOES grow bothers to.
+  //   `grows` what may stand here at all. This is the one that turns a colour
+  //   into a place: the sand is not a beige meadow, it is ground with nothing on
+  //   it but a few tufts, and that is a different thing to walk across.
   biomes: [
     {
-      key: 'dry',
-      lat: 0.35, lon: -2.70, r: 0.50, fade: 0.34,
-      ground: '#E6E0B4',
-      blade: ['#8C9A57', '#BFC77E'],
-      // Only a little thinner, not bare. The reference frames put a pale field
-      // and a green meadow side by side with much the SAME scatter of ticks on
-      // both — what changes is the ground under them. Thinned to a half it read
-      // as scorched earth rather than as a dry clearing, and the near ground had
-      // nothing on it at all.
-      cover: 0.85,
+      // BASE — no `patches`, so this is what the planet is anywhere the sand has
+      // not claimed. Roughly three-quarters of the surface.
+      key: 'meadow',
+      // A shade greener and a shade stronger than the #CEE4A4 it inherits from
+      // the retired PAL.ground. That colour was chosen while it was the only
+      // ground in the world and had to hold both a meadow and the pale field
+      // washing over it; with the sand now saying "pale" outright, the green is
+      // free to be green, which is what the reference frames actually show.
+      ground: '#B4DC8E',
+      // A brown-green rather than a green, which is what keeps it reading as a
+      // mark ON grass instead of as more grass.
+      tick: '#6E7F4F',
+      ticks: 1,
+      // White and yellow specks, too small to be a thing you look at and too
+      // many to leave out. Mostly white, and white is listed twice on purpose:
+      // the pink is a seasoning rather than a colour of the field, and given an
+      // equal share it turns the whole meadow faintly rosy from any distance
+      // where the specks blur together.
+      bloom: ['#FBFBF0', '#FBFBF0', '#FBEDA8', '#F1C6D1'],
+      blooms: 1,
+      bloomScale: 1,
+      blade: [PAL.grassBladeLow, PAL.grassBladeHigh],
+      cover: 1,
+      // Everything. This is the biome with things in it — the walk between the
+      // two homes is meant to be through a wood with a floor.
+      grows: ['grass', 'flower', 'mushroom', 'tree', 'bush', 'stump'],
     },
     {
-      key: 'deep',
-      lat: -0.20, lon: 1.30, r: 0.38, fade: 0.28,
-      ground: '#B2D68C',
-      blade: ['#4C6A3B', '#7DA25D'],
-      cover: 1.45,
+      // THE GROUND BOTH OF THEM LIVE ON. Two patches, one at each home, and one
+      // biome rather than two because they are the same place twice: whatever
+      // the ground is around a house on this planet, it is that around both.
+      key: 'sand',
+      // Almost paper-white with a warm yellow cast. The old khaki value read as
+      // dry soil once the globe's lighting reached it; the anime uses a pale
+      // cream field whose sparse pencil marks carry all of its texture.
+      ground: '#FFF9DD',
+      // Sparse horizontal pencil dashes, not the meadow's upright grass ticks.
+      tick: '#77665A',
+      tickStyle: 'dash',
+      tickScale: 0.72,
+      ticks: 0.24,
+      // No painted green patches or ground-cover tufts in this biome.
+      bloom: [],
+      blooms: 0,
+      bloomScale: 1,
+      // Retained for smooth colour interpolation outside the bare sand patch.
+      blade: ['#7FA352', '#A9CC72'],
+      cover: 0,
+      grows: [],
+      patches: [
+        // Chiikawa's, at the origin. 0.72 radians is 5.8 units of solid sand
+        // against a horizon 4.9 units off, so standing at her door the whole
+        // visible world is this — which is the frame the reference actually
+        // shows. The bench at 0.66 is inside it; the nearest planted tree, at
+        // 0.95, is out past the wash with a green hillside under it.
+        { lat: 0.00, lon: 0.00, r: 0.72, fade: 0.26 },
+        // Hachiware's, and a shade tighter — the mound is 4.0 units across and
+        // its clearing wants to end before the small pond at 1.03 rather than
+        // wash over the water's near shore.
+        { lat: 0.15, lon: -2.64, r: 0.70, fade: 0.26 },
+      ],
     },
   ],
 
@@ -1077,6 +1209,41 @@ export const CONFIG = {
     // equator at lon 0 makes it the middle of the map rather than an outpost,
     // and everything else in this table is placed around it.
     { type: 'house', lat: 0.00, lon: 0.00, h: 3.0, solid: true, radius: 3.2 },
+    // Hachiware's, and ON THE OTHER SIDE OF THE WORLD from Chiikawa's — 21
+    // units of walking, which is most of the way round a planet whose horizon
+    // is 4.9 off. That distance is the whole point of there being two of them:
+    // if they were in sight of each other they would read as a village, and the
+    // one thing this planet has instead of a village is a long walk between two
+    // places where somebody lives.
+    //
+    // `radius` 4.0 makes this the biggest thing on the planet — a quarter again
+    // the house, and level with the tallest tree. IT IS THE HILL, not a hut
+    // standing in front of one, and that is the whole design: see the note on
+    // CONFIG.cave for why the mound and the hollow ended up being one shell.
+    //
+    // It was 4.8 and that was too much of the world. Half again the house put
+    // the rock at nearly twice Usagi's height and 9.6 units across on a planet
+    // whose horizon is 4.9 — a mass you could never see whole from the ground,
+    // and which filled the frame edge to edge from its own doorstep. 4.0 keeps
+    // the gap that matters (this is plainly bigger than the house, and made of
+    // different stuff) and drops the part that did not: it now reads as a hill
+    // you walk up to rather than a wall you stand under.
+    //
+    // The size is NOT free to change on its own. Three numbers in CONFIG.cave
+    // are derived from it — `walk`, `doorstep` and the mouth — and SPRITE_SIZE
+    // in scene.js carries it a fourth time. See each.
+    //
+    // SEARCHED, not placed by eye. A mound this size does not fit just anywhere
+    // on a world 50 units around: at the first spot tried it overlapped the big
+    // lake outright. This is the most open ground on the sphere among spots at
+    // least 18 units from the house, and everything — both lakes, all three
+    // trees, the bench — clears the rock by better than two units.
+    //
+    // `radius` states the shell outright, exactly as the house does and for the
+    // same reason: it is built rather than drawn, so there is no card to
+    // measure and the number here drives the wall, the ground cover's keep-out
+    // and the berth the scatter gives it all at once.
+    { type: 'cave', lat: 0.15, lon: -2.64, h: 4.0, solid: true, radius: 4.0 },
     // In the garden rather than against the wall: 5.3 units out leaves it a
     // clear two past the 3.2 shell, and off the door's own bearing so it is
     // not the first thing you walk into on the way in.
@@ -1086,27 +1253,24 @@ export const CONFIG = {
     { type: 'tree2', lat: 0.81, lon: 0.57, s: 1.75 },
   ],
 
-  // ...and the tracks worn between them, as pairs of indices into the list
-  // above. Painted into the ground texture by paintPaths.
+  // `paths: [[0, 2], [2, 5], [5, 3], [2, 4], [3, 4], [0, 1]]` stood here — the
+  // tracks worn between the landmarks, as pairs of indices into the list above,
+  // painted into the ground texture by paintPaths. Both are retired; see the
+  // note where paintPaths was called in art.js.
   //
-  // A LANDMARK ANSWERS "WHERE AM I". A PATH ANSWERS "WHICH WAY". They are
-  // different questions and the second one is the harder of the two here,
-  // because the horizon on this planet is 4.8 units off: whatever you set out
-  // towards goes behind the curve almost at once, and from then on there is
-  // nothing under your feet that distinguishes one direction from another. A
-  // line on the ground survives the horizon in a way a landmark cannot.
-  //
-  // It is a minimum spanning tree over the five, plus the cheapest edge that
-  // closes it into a loop — so every landmark is reachable by following a track
-  // and no track is a long way round something. 58 units of path in total, which
-  // at the width below covers about an eighth of the surface.
-  //
-  // Two things came out of measuring it and are worth keeping if this is ever
-  // rebuilt. It passes 0.4 units from where you arrive, so you begin the visit
-  // stood ON a path with somewhere to follow it to. And no leg of it goes within
-  // 1.6 lake-radii of water, so there is no track that walks you into a pond you
-  // cannot enter — which would be worse than no track at all.
-  paths: [[0, 1], [1, 4], [4, 2], [1, 3], [2, 3]],
+  // The question it answered has not gone away, so it is written down rather
+  // than deleted. A LANDMARK ANSWERS "WHERE AM I". A PATH ANSWERED "WHICH WAY",
+  // which is the harder of the two here: the horizon on this planet is 4.8 units
+  // off, so whatever you set out towards goes behind the curve almost at once,
+  // and a line on the ground survives that in a way a landmark cannot. The
+  // routes were a minimum spanning tree over the landmarks plus the cheapest
+  // edge closing it into a loop — 58 units in all, about an eighth of the
+  // surface — and they were fitted to two measurements: the network passed 0.4
+  // units from where you arrive, so a visit began stood on one, and no leg came
+  // within 1.6 lake-radii of water, so no track ever walked you into a pond you
+  // cannot enter. Anything put here in their place wants both of those checks
+  // again, plus the indices re-read against `landmarks` — a stale index drew a
+  // line between the wrong two things and nothing complained.
 
   social: {
     // Walk this close on foot and they say hello — the same distance a tap sets
@@ -1545,19 +1709,23 @@ export const CONFIG = {
     // 2.05 indoors and 0.95/1.05 outside, which put the same window in two
     // different places depending which side of the wall you stood on.
     // ONE window. There were two, mirrored either side of the door, and the
-    // reference has a single one off to the left — which is also the more
+    // reference has a single one off to the right — which is also the more
     // characterful arrangement: a pair reads as architecture, one reads as
     // somebody's house. The list is still a list, so a second can be put back
     // by adding a bearing here and nothing else.
-    windowsAt: [-1.15],
-    // Lowered from 1.70. It measured right against the reference — 53% of the
-    // way up — and still sat high, because a window this far round the dome is
-    // seen near the SILHOUETTE, where the wall curves away steeply and the
-    // outline climbs. Height on the dome and height on your screen are not the
-    // same thing once an opening is off to the side, so this is set by eye
-    // rather than by the fraction.
-    windowHeight: 1.44,
-    windowSize: 1.92,
+    windowsAt: [0.82],
+    // Lowered after moving to the right. The old height and 1.92 patch pushed
+    // its top into the silhouette, where the curved patch collapsed into a
+    // roof-like wedge. This smaller square sits on the visible wall while
+    // retaining the reference's upper-right placement.
+    windowHeight: 0.90,
+    windowSize: 1.30,
+    // The small mounting block for Chiikawa's portrait plate, tucked between
+    // the door and the window. Like `windowsAt`, its bearing is measured from
+    // the door; unlike a window it is only a surface patch and cuts no hole.
+    plateAt: 0.55,
+    plateHeight: 0.25,
+    plateSize: 0.46,
     // THE door — one width for the whole building, used by the arch you see
     // from the grass and the arch you see from the rug alike. There is one way
     // in, so there is one number for it; the height follows DOOR_SHEET's aspect
@@ -1588,7 +1756,7 @@ export const CONFIG = {
     // If the house is resized, this does not follow it automatically, and
     // should not: re-derive it against the cast, the same way.
     doorWidth: 2.2,
-    rug: 1.30,
+    rug: 0,
 
     // What is in it. `at` is a bearing round the room and `out` a distance
     // from the middle in world units; `h` is the drawn height and the width
@@ -1667,6 +1835,11 @@ export const CONFIG = {
       // back round to the bearing itself. What actually moves is the PILLOW:
       // the head end is now the other end.
       { art: 'futon', at: 1.78, out: 1.28, h: 0.60, spin: 1.78 },
+      // Chiikawa's pink sasumata, laid across the futon. The
+      // explicit item id makes this one physical weapon independently
+      // pickup-able, placeable, and returnable to this home position.
+      { art: 'pinkweapon', at: 1.78, out: 1.28, h: 0.52, spin: 1.78,
+        lift: 0.61, item: 'chiikawaWeapon' },
       // Chiikawa's bear, LYING on the floor at the head end of the futon —
       // dropped where its owner got up, which is where a toy actually is. It
       // stood on the bed first, held there by a `lift` field the scene grew for
@@ -1709,23 +1882,6 @@ export const CONFIG = {
       // cushion, which on two round things is touching. This clears everything
       // by better than a sixth of a unit.
       { art: 'teapot', at: 0.20, out: 0.86, h: 0.26, spin: 0.62, item: true },
-      // The wall shelf, and the only piece in here with `wall` rather than
-      // `out`: it is HUNG, so what places it is a bearing round the room and a
-      // HEIGHT up the shell, not a distance across the floor. `wall` also keeps
-      // it out of the solids — a footprint under a shelf would be a piece of
-      // thin air you could not walk through.
-      //
-      // Bearing 1.15 is clear wall: the door takes about 0.45 either side of 0
-      // and the one window sits at -1.15, so this is the stretch opposite it.
-      // 1.32 up puts it above head height for the cast — Usagi is 2.79 to the
-      // ear tips, but the shelf stands only 0.28 out from a wall that is
-      // leaning away by then, so nobody walks into it.
-      // 0.82 up rather than the 1.32 this started at, and 0.64 rather than
-      // 0.70 across. Both are the dome's doing: it sheds radius as it climbs,
-      // so the higher a wall piece hangs the further its top leans into the
-      // masonry — at 1.32 the flower stood a quarter of a unit outside the
-      // shell. Low and short is what fits a room with no vertical wall in it.
-      { art: 'shelf', at: 1.15, y: 0.82, h: 0.64, wall: true },
       // The lantern — the third ITEM, and the first light source in the app.
       //
       // `item` rather than `nudge`, and the word is the point: these three are
@@ -1734,8 +1890,15 @@ export const CONFIG = {
       // `unique` kind is reserved for exactly this trio.
       //
       // Beside the bed at its head end, in the one gap left between the bear
-      // and the futon. `lit: false` would switch it off; it is on because a
-      // lantern nobody has lit is a brass ornament.
+      // and the futon.
+      //
+      // `lit: false` — IT STARTS OUT, and the argument that had it starting lit
+      // ("a lantern nobody has lit is a brass ornament") was answered by the
+      // lamp becoming something you carry. A lamp that is already burning when
+      // you first walk into the room is scenery; one you have to light is a
+      // thing you own, and lighting it is the first small act the room offers.
+      // It also stops the house from arriving pre-lit at noon, which is what a
+      // burning lantern in a sunlit room looks like.
       //
       // SEARCHED, and then searched again properly. It sat at 1.42/1.02 and
       // measured 0.014 off the futon — a lamp buried in the bedding.
@@ -1753,57 +1916,7 @@ export const CONFIG = {
       // household's standing spots were counted as obstacles too — somebody
       // standing in the lamp is the same picture as the lamp standing in
       // somebody.
-      { art: 'lantern', at: -2.93, out: 1.75, h: 0.34, item: true, lit: true },
-      // The bare bulb, hung from the middle of the ceiling. `ceiling` takes no
-      // bearing and no `out` — a thing at the apex of a dome has no bearing to
-      // have — and like `wall` it keeps the piece out of the solids and gives
-      // it no ground shadow.
-      //
-      // `night` is the other new word, and it is the difference between this
-      // and the lantern: the lantern is LIT because somebody lit it, and this
-      // one follows the hour because it is wired in. See _syncItemLights.
-      //
-      // `h` is the whole drop, plaster to the bottom of the glass, and it is the
-      // one number to turn: everything about the piece is a fraction of it, so
-      // a longer flex hangs it lower without changing its shape.
-      //
-      // 1.03 puts the glass at about 2.23 above the boards on a 3.2 ceiling. It
-      // was 0.78 and read as stuck to the plaster. WHO IT CLEARS is the price
-      // of that and is worth stating: Chiikawa at 2.01 walks under it, and
-      // Hachiware at 2.33 and Usagi at 2.79 do not. The front door already
-      // makes the same trade with Usagi's ears — a room is built for bodies —
-      // but two of three brushing it is a longer drop than the cast is really
-      // built for. Take it back toward 0.95 if that shows.
-      { art: 'bulb', ceiling: true, h: 1.03, night: true },
-      // A cardboard box, against the wall on the far side past the futon —
-      // the one stretch of floor with nothing on it and nothing crossing it.
-      // Bearing 2.85 clears the futon's own spread (it reaches to about 2.55)
-      // and sits outside the standing spots, which are all in at 0.6 or so.
-      //
-      // `spin` turns its long side to the room rather than an end, so what you
-      // see from the door is a box rather than a post. It is the one piece in
-      // here with a front, a top and an end all at once, and it wants all three
-      // in view — that is the whole of what makes it read as solid.
-      { art: 'box', at: 2.85, out: 1.50, h: 0.38, spin: 2.85 },
-      // The bedside cabinet, on the one stretch of wall nothing else reaches.
-      // Every other piece claims a span of bearings — the table runs -1.58 to
-      // -0.72, the futon 1.01 to 2.55, the box 2.60 to 3.10 — and what is left
-      // is the back corner from about -2.0 round to -3.1. This sits in the
-      // middle of it. The standing spots share those bearings and do not
-      // conflict: a guest stands at `out` 0.6, and this is at 1.45.
-      //
-      // NO `spin`, and that is the fix rather than an omission. The default
-      // facing is already "look across the room", which is exactly what a piece
-      // with a front wants; this carried `spin: -2.55` — the bearing itself —
-      // which is that default turned a half circle, so the drawers faced the
-      // wall. A cabinet showing a room its back is the one way to build one
-      // wrong, and it is the same half-turn error the bear made.
-      //
-      // `out` 1.68 rather than 1.45: pushed back until it is nearly against the
-      // masonry, which is where a chest of drawers goes. It reaches 2.05 of arc
-      // from the middle of the room against a walkable 2.25 — a shade further
-      // out than the futon manages, and still short of the wall.
-      { art: 'nightstand', at: -2.55, out: 1.68, h: 0.62 },
+      { art: 'lantern', at: -2.93, out: 1.75, h: 0.34, item: 'lamp', lit: false },
     ],
 
     // Sitting — the guests'. The player does not sit in this version of the
@@ -1825,6 +1938,160 @@ export const CONFIG = {
     // the door being real. It has to move if the house is resized, or a wall
     // grown past it would set you down inside the masonry.
     doorstep: 3.8,
+  },
+
+  // ------------------------------------------------------- Hachiware's cave
+  //
+  // The second home, and deliberately NOT a second house. It is the same
+  // machinery — a dome shell with the openings punched through it and a room
+  // inside made of the same world — wearing a different set of numbers, and the
+  // numbers are where the difference lives.
+  //
+  // THE MOUND AND THE HOLLOW ARE ONE SHELL, and that is the decision the whole
+  // of this depends on. The obvious build was two things: a cave, and a cliff
+  // behind it for the cave to be cut into. It was built that way first and it
+  // does not work on a planet this small, for a reason worth writing down.
+  //
+  // A hill that the cave is cut into has to stand BEHIND the cave, and its
+  // near face has to clear the room — so its middle ends up at least a room's
+  // width plus its own radius away. On a globe of radius 8 the horizon is 4.9
+  // units off, so a hill big enough to read as a landscape is already sunk
+  // behind the curve: measured, its top sat 21 degrees BELOW eye level from the
+  // cave's own doorstep, lower on screen than the cave itself and completely
+  // hidden by it. Every size traded the same way — close enough to see meant
+  // too small to matter, big enough to matter meant over the horizon.
+  //
+  // So the hill IS the cave. One dome of rock, 4.0 across the radius, with
+  // grass over its crown and a mouth at its foot — which is what the manga
+  // panel actually shows, and what the interior frame is the inside of. It
+  // costs one shell instead of three meshes, needs no collision of its own, and
+  // cannot be hidden behind itself.
+  //
+  //   The MOUTH is not a door. The reference draws the opening as a small arch
+  //   at the base of a large mound, so `doorWidth` here is 3.40 against a shell
+  //   of 4.00 — and it is the one number that did NOT shrink with the mound,
+  //   because it is the one number the cast set rather than the rock. You do
+  //   not walk through it, you walk in.
+  //
+  //   There are NO WINDOWS. `windowsAt` is empty, and that is not an omission:
+  //   a hole in the side of a rock is a second entrance, not a window, and the
+  //   mouth is already letting in all the light there is.
+  //
+  //   Its few belongings are Chiikawa's old cardboard box, a second lantern,
+  //   the flower-and-vase shelf, the cabinet, Hachiware's tied rubbish bags,
+  //   worn bedding, and Chiikawa's former ceiling bulb. There are still no
+  //   windows, but the two lights give the cave its own warm glow after dark.
+  cave: {
+    // How far out from the middle you may walk, in world units. Same job as the
+    // house's 2.25: it holds the EYE clear of a shell that curls in overhead,
+    // not the feet clear of the wall. At 2.75 out an eye 1.70 up is 3.23 from
+    // the middle against a shell at 4.00, so three quarters of a unit of stone
+    // in every direction — twice the house's own margin, on a room a quarter
+    // wider than hers.
+    //
+    // Scaled with the shell when it came down from 4.8, since what it measures
+    // is a distance to that shell. Anything derived from this — the household's
+    // standing spots, which are fractions of it — follows for free.
+    walk: 2.75,
+    nudgeReach: 0.42,
+    nudgeSpeed: 0.8,
+    nudgeDamp: 160,
+    gapInset: 0.14,
+
+    // WHICH WAY THE MOUTH FACES, as a compass bearing: 0 north, positive turns
+    // east. You arrive from Chiikawa's house on bearing 1.30, so this is 17
+    // degrees off it — the mound is what you see first, and the hollow in its
+    // side a moment later, from an angle. Dead-on would have read as a front
+    // door, and it is not one.
+    doorFacing: 1.00,
+
+    // NONE. See the note above — this is the field that makes it a cave.
+    windowsAt: [],
+    windowHeight: 1.44,
+    windowSize: 1.92,
+
+    // The mouth: 3.40 across, which after the arch sheet's own proportions
+    // comes out 2.61 tall.
+    //
+    // THE ONE NUMBER HERE THAT DID NOT SHRINK WITH THE MOUND, and the reason is
+    // that it was never the mound's to set. Work back from the cast, exactly as
+    // the house's front door does: the drawn arch loses about 0.17 to its own
+    // ink, so a 3.40 mouth offers 2.44 of clear opening, and Hachiware is 2.33.
+    // Below about 3.43 he stops fitting through his own front door upright —
+    // 3.20 would leave him 0.05 short. Usagi's ears brush it, which is the same
+    // trade the house already makes and says so.
+    //
+    // What that costs is a mouth which is now 43 percent of the mound's width
+    // rather than 35, so the hollow is a larger part of the hill than it was.
+    // That is the right way round: a hole sized for the people who live in it
+    // reads as somebody's home, and a hole sized for the hill reads as scenery.
+    //
+    // It was 4.30 once, and at that width it was a mouth pretending to be a
+    // building: the crown reached 79 percent of the way up the shell and landed
+    // within a couple of degrees of the mound's own skyline, so the rock read as
+    // a thin hood over an enormous opening.
+    doorWidth: 3.40,
+    // No rug. The floor is stone and stays stone. 0 skips the stamp entirely.
+    rug: 0,
+
+    // ALMOST EMPTY. The hollow is bare stone apart from a cardboard box with a
+    // lantern beside it, a flower-and-vase shelf above a cabinet, two tied
+    // rubbish bags, worn bedding, and a bulb hanging from the ceiling.
+    //
+    // It was furnished — a low table with cups on it, two cushions drawn up to
+    // it, a futon, two crates and a lantern, all read off the anime frames —
+    // and it is deliberately not any more. What remains is the space itself:
+    // a dome of rock, eight small belongings, light, and stone plates.
+    //
+    // The list stays a list, and every field the house's pieces use still works
+    // here; put a line back and the piece comes back with it. Nothing else in
+    // this spec is furniture-dependent.
+    //
+    // The room still has no seats:
+    //
+    //   The duplicated lantern is lit independently of Chiikawa's original,
+    //   giving the cave a warm pool of light and a visible glow at night.
+    //
+    //   No seats, so a guest who comes home stands. household.js already falls
+    //   back to `household.spots` when it cannot find a free cushion, which is
+    //   the case this room now always takes.
+    //
+    //   The few floor solids stay around the wall and leave the middle clear.
+    furniture: [
+      // The cardboard box sits in front of the cabinet on the cave's right,
+      // close enough to read as one arrangement without blocking its drawers.
+      { art: 'box', at: 0.25, out: 0.88, h: 0.38, spin: 0.25 },
+      // A duplicate of Chiikawa's floor lantern, standing beside the box and
+      // aimed toward the cave mouth.
+      // It has its own item id, so both lanterns remain independently
+      // carryable despite sharing the same art.
+      // Unlit to start, like Chiikawa's — see the note there. The cave has no
+      // wired bulb at all, so this is the only light in it, and one you light
+      // yourself is a better thing to find at the back of a cave than one
+      // already burning for nobody.
+      { art: 'lantern', at: 1.05, out: 1.45, h: 0.34, spin: 0,
+        item: 'hachiwareLamp', lit: false },
+      // The flower-and-vase shelf sits low on the right wall above the cabinet.
+      { art: 'shelf', at: 1.58, y: 1.10, h: 0.64, wall: true },
+      // The cabinet sits against the right wall; both bags occupy the left.
+      { art: 'nightstand', at: 1.75, out: 2.62, h: 0.62 },
+      { art: 'trashbag', at: -2.23, out: 2.66, h: 0.78, item: 'trashBag' },
+      { art: 'trashbag2', at: -1.72, out: 2.69, h: 0.72, item: 'trashBagAlt' },
+      // Hachiware's worn mat runs front-to-back along the open left floor,
+      // with its folded bedding toward the rear of the cave.
+      { art: 'wornbedding', at: -0.85, out: 1.15, h: 0.58, spin: -1.57 },
+      // Hachiware's blue sasumata lies across the bedding. It is a separate
+      // physical item from Chiikawa's pink one and can be carried independently.
+      { art: 'blueweapon', at: -0.85, out: 1.15, h: 0.52, spin: -1.57,
+        lift: 0.20, item: 'hachiwareWeapon' },
+      // Chiikawa's former bare bulb, wired into the apex of the cave.
+      { art: 'bulb', ceiling: true, hang: 0.62, h: 1.03, night: true },
+    ],
+
+    sitSink: 0.34,
+    // A pace clear of the 4.00 shell, on the mouth's own line. Moves with the
+    // shell, or a tap on the mound would set you down inside the rock.
+    doorstep: 4.8,
   },
 
   // Going home.
@@ -1867,7 +2134,25 @@ export const CONFIG = {
     // an 0.9 arrival would call the far side of it "here". The fade that used
     // to stand in for the threshold is gone — they walk through the gap the
     // same way you do, in view the whole way.
-    homeArrive: 0.35,
+    //
+    // 0.60, AND IT HAS TO BE. It was 0.35, which is a distance no guest could
+    // ever reach, so nobody had sat down since the furniture became solid —
+    // measured over a hundred simulated minutes and twenty-nine errands, in
+    // this build and in the one before the cave went in: not one arrival.
+    //
+    // The seat a guest is walking to IS a cushion, and a cushion is a solid
+    // now. Their pathing pushes every target off a solid by its own radius plus
+    // the wander berth, so the nearest they can legally stand to a cushion's
+    // middle is 0.44 — measured at every seat in both homes, the widest being
+    // 0.443. Asking them to get within 0.35 of it is asking them to stand
+    // inside the thing they came to sit on. They walked in, fetched up against
+    // the cushion, waited out `headingMax` and left again, which read as the
+    // house being one you can visit but never be at home in.
+    //
+    // So: the widest push-out, plus a third of a unit of slack for the room to
+    // grow a wider cushion without this going quietly dead again. Still well
+    // under `arriveArc`, and a seventh of the smaller room's width.
+    homeArrive: 0.60,
 
     // How long a walk home may take before they think better of it. The trip is
     // at most about fifty seconds from the far side of the planet, so this is
@@ -1989,3 +2274,33 @@ export const CONFIG = {
     swaySettleMs: 103,   // how quickly the walking sway unwinds on stopping
   },
 };
+
+// ---------------------------------------------------------------- the homes
+//
+// WHICH BUILDINGS YOU CAN GO INSIDE, and what is in each one. Two of them now:
+// Chiikawa's house on the equator and Hachiware's cave on the far side.
+//
+// It is written down here, after the object, rather than inside it, because
+// every entry has to point at an interior spec that is a sibling key — and a
+// literal cannot refer to itself while it is still being built. Holding the
+// references rather than copying the specs is deliberate: scene.js mutates
+// nothing in them, but a copy would be a second place for a doorWidth to live.
+//
+// `style` is the only genuinely new field, and it picks which set of painters
+// the shell wears — plaster and pen for the house, stone and cracks for the
+// cave. It is NOT a second name for the landmark type: two caves in different
+// hillsides would be two entries of one style, which is the whole reason it is
+// its own word.
+//
+// `owner` is who lives there, as a key into CAST. It decides where somebody
+// goes when they go home — see household.js, which routes each of them to
+// their own door rather than to whichever building it found first. Nobody is
+// SEALED to it: any of them can wander into either place, and being in one is
+// still only a question of where you are stood.
+//
+// Order matters in exactly one respect: the first entry is where you arrive.
+// See camera.spawnBack and the doorstep in main.js.
+CONFIG.homes = [
+  { type: 'house', style: 'house', spec: CONFIG.interior, owner: 'chiikawa' },
+  { type: 'cave', style: 'cave', spec: CONFIG.cave, owner: 'hachiware' },
+];

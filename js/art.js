@@ -303,159 +303,272 @@ const HORIZON_SEED = 70413;
 // TWO ROWS MATTER MORE THAN THE REST, and both are set against the planet's limb
 // rather than chosen by eye:
 //
-//   `treeTop` at 0.48 sits ABOVE the limb's 0.567, so the crowns break the
+//   `treeTop` at 0.46 sits ABOVE the limb's 0.567, so the crowns break the
 //   horizon. That is the whole read of a far treeline — a nodding row of tops
-//   with the trunks and everything under them behind the hill. HOW FAR above is
-//   the trade: this leaves 0.087 of sheet standing proud of the limb, against
-//   0.147 at the 0.42 it was, and the difference is all mountain. At 0.42 the
-//   wood took 40% of the visible band and the near range had almost nowhere to
-//   show; at 0.48 it takes 24% and the hills read behind it again. Below about
-//   0.52 it stops being a wood and becomes a green fringe.
+//   with the trunks and everything under them behind the hill. It is a little
+//   higher than the old 0.48 because the new silhouette is made from broad,
+//   quiet shrubs rather than hundreds of small circles; the extra ten texels
+//   let their shoulders read without taking the mountains away.
 //
-//   `treeBase` at 0.78 sits BELOW the limb's 0.744 AT THE TOP OF A HOP. The
-//   woods' fill runs from there to the bottom of the sheet, so treeBase is the
-//   row where bumpy crowns give way to flat green — and a hop uncovers every
-//   row from 0.567 down to 0.744. Put treeBase at 0.64, as it was, and 0.10 of
-//   flat green swings into frame on every hop, which is exactly the slab this
-//   was reported as. Past 0.744 the reveal is crowns the whole way.
+//   `treeBase` at 0.90 sits well BELOW the limb's 0.761 AT THE TOP OF A HOP.
+//   It is only where the lowest foliage finally becomes a solid fill; two
+//   overlapping rows of crowns occupy everything above it. A jump therefore
+//   reveals more shrubs and a few branches rather than a flat green slab, with
+//   0.139 of the sheet still in reserve for jumping from low furniture or a
+//   future small increase in hop height.
 //
-// The gap between them is why `count` had to go up and `grow` had to arrive:
-// twice the depth needs twice the blobs to stay a wood rather than a scatter.
+// The gap between them is deliberate depth: the back row breaks the standing
+// horizon, and the lower row keeps the area exposed during a hop illustrated.
 const SKYLINE = {
-  farPeak: 0.20,
-  farBase: 0.62,
-  nearPeak: 0.33,
-  nearBase: 0.66,
-  treeTop: 0.48,
-  treeBase: 0.78,
+  mountainPeak: 0.18,
+  mountainBase: 0.62,
+  treeTop: 0.46,
+  treeBase: 0.90,
   hazeTo: 0.62,
 };
 
-// A smooth silhouette through a list of points, rounded rather than folded.
-//
-// Quadratic segments THROUGH THE MIDPOINTS, with each given point as the control
-// — the standard trick, and the right one here: it makes every corner a curve
-// without needing tangents worked out, so a ridge of peaks and saddles comes out
-// as rolling hills rather than as a saw. The anime's mountains have no straight
-// edges anywhere on them.
-function ridge(g, pts) {
-  g.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i][0] + pts[i + 1][0]) / 2;
-    const my = (pts[i][1] + pts[i + 1][1]) / 2;
-    g.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
-  }
-  g.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+// One individual mountain: a broad paper-cut pyramid with just enough curve in
+// its slopes and cap to keep the outline soft. It is not a bell curve. Most of
+// the silhouette is two long sides; the rounded summit occupies only the small
+// meeting place between them.
+function traceMountain(g, m, off = 0) {
+  const cx = m.x + off;
+  const left = cx - m.width / 2;
+  const right = cx + m.width / 2;
+  const px = cx + m.lean;
+  g.moveTo(left, m.baseY);
+  g.bezierCurveTo(
+    left + m.width * 0.18,
+    m.baseY - m.rise * 0.20,
+    px - m.cap * 1.55,
+    m.peakY + m.capDrop * 1.55,
+    px - m.cap,
+    m.peakY + m.capDrop,
+  );
+  g.quadraticCurveTo(
+    px,
+    m.peakY - m.capDrop * 0.60,
+    px + m.cap,
+    m.peakY + m.capDrop,
+  );
+  g.bezierCurveTo(
+    px + m.cap * 1.55,
+    m.peakY + m.capDrop * 1.55,
+    right - m.width * 0.18,
+    m.baseY - m.rise * 0.20,
+    right,
+    m.baseY,
+  );
 }
 
-// One range of hills, filled down to the bottom of the band so whatever is drawn
-// in front of it has something to sit against.
-//
-// The peaks are generated for ONE lap and then drawn three times, a lap apart, as
-// a single unbroken polyline. That is what makes the seam invisible: the list is
-// periodic by construction, so the curve arriving at the right edge is the same
-// curve leaving the left, with the same control points and the same slope.
-function range(g, W, H, rand, { peak, base, count, jitter, saddle, fill }) {
+// Independent mountains distributed around one periodic lap. Their gaps are
+// randomised and normalised back to W, so the spacing is irregular without the
+// seam accumulating an error. Most sit in one visual row; a few are paler and
+// painted first, allowing LOCAL overlaps rather than a second range stacked
+// behind the entire horizon.
+function mountainBand(g, W, H, rand, {
+  peak, base, count, fill, backFill, ink, backInk, line,
+}) {
   const step = W / count;
-  const lap = [];
+  const gaps = [];
+  let gapTotal = 0;
   for (let i = 0; i < count; i++) {
-    // A saddle, then a peak. Heights wander and so does the peak's placing
-    // inside its own slot, so no two hills are the same hill and none of them
-    // sits on a grid.
-    const sx = i * step;
-    const px = sx + step * (0.30 + rand() * 0.40);
-    const ph = peak + (base - peak) * rand() * jitter;
-    const sh = base - (base - ph) * (saddle * (0.7 + rand() * 0.6));
-    lap.push([sx, sh * H], [px, ph * H]);
+    // A deliberately broad interval: small values make the occasional cluster
+    // and large ones pay that space back as open sky elsewhere. A narrow
+    // jitter range still reads as a ruler once it has repeated ten times.
+    const gap = 0.42 + rand() * 1.22;
+    gaps.push(gap);
+    gapTotal += gap;
   }
-  g.beginPath();
-  const pts = [];
-  for (const off of [-W, 0, W]) for (const [x, y] of lap) pts.push([x + off, y]);
-  pts.push([W * 2, lap[0][1]]);
-  ridge(g, pts);
-  g.lineTo(W * 2, H);
-  g.lineTo(-W, H);
-  g.closePath();
-  g.fillStyle = fill;
-  g.fill();
-}
 
-// The woods along the skyline: overlapping blobs on a baseline, outlined the way
-// every soft thing in this world is outlined — by UNDERPAINTING. The whole run
-// is filled once in ink a hair oversize and once in green on top, so what shows
-// is a line round the union rather than a line round each blob. Stroking would
-// draw the buried halves too and the treeline would come out as a heap of
-// circles, which is the same lesson the blossoms taught.
-// THE UNIT HERE IS A BUSH, NOT A CIRCLE, and that is the whole of the change
-// from what stood here before. A lap of single circles on a baseline reads as
-// what it is — a scatter of green dots — however many you draw and however big
-// you draw them, because the eye is given no group to see. What it wants is a
-// shape with shoulders: several lobes over one body, wider than it is tall and
-// tallest in the middle. Draw thirty of those and it reads as a wood, because
-// the thing being repeated is a bush.
-//
-// `size` is a bush's radius as a fraction of the band's height, so it is
-// independent of `count` — those two were the same knob when the radius came
-// off `step`, and asking for more trees asked for smaller ones in the same
-// breath.
-//
-// `top` is the top of the SILHOUETTE, not the highest foot. Bushes are placed by
-// their feet, and a bush stands `reach` above its own foot, so the foot range
-// starts that far down. Getting this wrong is invisible until you try to lower
-// the treeline and it does not move.
-//
-// Outlined the way every soft thing in this world is outlined — by
-// UNDERPAINTING. The whole run is filled once in ink a hair oversize and once in
-// green on top, so what shows is a line round the union rather than a line round
-// each lobe. Stroking would draw the buried halves too and the wood would come
-// out as a heap of circles, which is the same lesson the blossoms taught, and
-// doubly so now that a single bush is six overlapping arcs.
-function treeline(g, W, H, rand, { top, base, count, size, ink, fill }) {
-  const step = W / count;
-  const lap = [];
+  const mountains = [];
+  const mains = [];
+  let x = rand() * step;
   for (let i = 0; i < count; i++) {
-    const cx = i * step + step * (rand() - 0.5) * 0.9;
-    const R = size * H * (0.75 + rand() * 0.5);
-
-    // How far this bush's crown stands above its own foot, which is what the
-    // lobe placing below works out to: 0.85R of lift plus the top lobe's own
-    // radius. Kept as one number so the foot range and the silhouette agree.
-    const reach = R * 1.5;
-    const footTop = top * H + reach;
-    const cy = footTop + (base * H - footTop) * rand();
-
-    // The lobes, walked left to right with a sine for the shoulders. Without
-    // the dome term they come out as a row of equal balls — a caterpillar,
-    // not a bush.
-    const lobes = 4 + Math.floor(rand() * 3);
-    for (let j = 0; j < lobes; j++) {
-      const t = j / (lobes - 1);
-      const dome = Math.sin(Math.PI * t);
-      lap.push([
-        cx + (t - 0.5) * R * 1.9,
-        cy - R * (0.30 + 0.55 * dome) * (0.85 + rand() * 0.30),
-        R * (0.55 + 0.25 * dome) * (0.85 + rand() * 0.30),
-      ]);
-    }
-    // ...and the body they sit on. Without it a bush is a ring of balls with
-    // the field showing through the middle of it.
-    lap.push([cx, cy - R * 0.34, R * 0.86]);
+    const peakY = (peak + (base - peak) * rand() * 0.42) * H;
+    const baseY = (base + (rand() - 0.5) * 0.045) * H;
+    const width = step * (1.08 + rand() * 0.42);
+    const mountain = {
+      x: ((x % W) + W) % W,
+      width,
+      peakY,
+      baseY,
+      rise: baseY - peakY,
+      lean: width * (rand() - 0.5) * 0.18,
+      cap: width * (0.052 + rand() * 0.026),
+      capDrop: H * (0.016 + rand() * 0.012),
+      back: false,
+      depth: 0.55 + rand() * 0.45,
+    };
+    mountains.push(mountain);
+    mains.push(mountain);
+    x += (gaps[i] / gapTotal) * W;
   }
-  const paint = (grow, style) => {
-    g.beginPath();
+
+  // Three guaranteed background neighbours, each tucked beside a different
+  // main mountain. Making these as ADDITIONS rather than randomly reclassifying
+  // three of the main row is what guarantees an overlap is actually visible:
+  // there is still a foreground mountain at the same bearing to cross it.
+  for (let i = 1; i < mains.length; i += 3) {
+    const anchor = mains[i];
+    const side = rand() < 0.5 ? -1 : 1;
+    const width = step * (1.48 + rand() * 0.40);
+    const peakFloor = peak + 0.035;
+    const peakY = (peakFloor + (base - peakFloor) * rand() * 0.36) * H;
+    const baseY = (base + (rand() - 0.5) * 0.04) * H;
+    mountains.push({
+      x: (anchor.x + side * step * (0.30 + rand() * 0.18) + W) % W,
+      width,
+      peakY,
+      baseY,
+      rise: baseY - peakY,
+      lean: width * (rand() - 0.5) * 0.16,
+      cap: width * (0.052 + rand() * 0.024),
+      capDrop: H * (0.016 + rand() * 0.011),
+      back: true,
+      depth: rand() * 0.30,
+    });
+  }
+
+  mountains.sort((a, b) => a.depth - b.depth);
+  for (const m of mountains) {
     for (const off of [-W, 0, W]) {
-      for (const [x, y, r] of lap) {
-        g.moveTo(x + off + r + grow, y);
-        g.arc(x + off, y, r + grow, 0, TAU);
-      }
+      g.beginPath();
+      traceMountain(g, m, off);
+      g.closePath();
+      g.fillStyle = m.back ? backFill : fill;
+      g.fill();
+
+      g.beginPath();
+      traceMountain(g, m, off);
+      g.strokeStyle = m.back ? backInk : ink;
+      g.lineWidth = H * line;
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.stroke();
     }
-    // The ground the bushes stand on, so the row has no daylight under it.
-    g.rect(-W, base * H, W * 3, H);
-    g.fillStyle = style;
+  }
+}
+
+// A distant Chiikawa wood is one continuous scalloped silhouette, not a pile of
+// circles and not a row of isolated shrubs. The reference backgrounds gather
+// four to six soft lobes into each broad clump, then let the clumps join at
+// shallow valleys. That last part matters most when a hop reveals more of the
+// band: separate closed bushes turn into a row of U shapes, while a continuous
+// wood remains foliage all the way down.
+function traceHorizonRow(g, row, off = 0) {
+  g.moveTo(off, row.edgeY);
+  for (const lobe of row.lobes) {
+    g.quadraticCurveTo(
+      off + lobe.peakX,
+      lobe.peakY,
+      off + lobe.endX,
+      lobe.endY,
+    );
+  }
+}
+
+function paintHorizonRow(g, W, H, row, base, fill, ink) {
+  for (const off of [-W, 0, W]) {
+    g.beginPath();
+    traceHorizonRow(g, row, off);
+    g.lineTo(off + W, base * H);
+    g.lineTo(off, base * H);
+    g.closePath();
+    g.fillStyle = fill;
     g.fill();
+
+    g.beginPath();
+    traceHorizonRow(g, row, off);
+    g.strokeStyle = ink;
+    g.lineWidth = H * 0.009;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.stroke();
+  }
+}
+
+// Sparse forked marks inside some crowns are enough to make the band read as
+// trees rather than a decorative hedge. They are painted after their own row
+// but before the next row, so nearer foliage naturally buries most of them.
+function paintHorizonBranch(g, W, H, branch, ink) {
+  const { x, y0, y1, lean, fork } = branch;
+  for (const off of [-W, 0, W]) {
+    const px = x + off;
+    g.beginPath();
+    g.moveTo(px, y0);
+    g.quadraticCurveTo(px + lean * 0.35, (y0 + y1) / 2, px + lean, y1);
+    g.moveTo(px + lean * 0.52, y0 + (y1 - y0) * 0.48);
+    g.lineTo(px + lean * 0.52 - fork, y1 + (y0 - y1) * 0.13);
+    g.moveTo(px + lean * 0.70, y0 + (y1 - y0) * 0.68);
+    g.lineTo(px + lean * 0.70 + fork * 0.88, y1 + (y0 - y1) * 0.22);
+    g.strokeStyle = ink;
+    g.lineWidth = H * 0.006;
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.stroke();
+  }
+}
+
+// One periodic row of connected shrubs. `top` is where the tallest clump may
+// begin and `wander` is the depth over which the other clumps drift. `count`
+// counts whole bushes rather than lobes: around three broad clumps cross a
+// portrait lens, and each clump supplies its own four-to-six scallops.
+function treelineLayer(g, W, H, rand, {
+  top, wander, count, height, base, fill, ink, branches,
+}) {
+  const step = W / count;
+  const row = {
+    // The valley between two whole clumps, kept shallow enough that a hop does
+    // not expose long bare-sided Vs. The next row will cover most of it, but
+    // the silhouette is sound even when inspected on its own.
+    edgeY: (top + wander * 0.65 + height * 0.42) * H,
+    lobes: [],
+    branches: [],
   };
-  paint(H * 0.012, ink);
-  paint(0, fill);
+  let fromY = row.edgeY;
+  for (let i = 0; i < count; i++) {
+    const crownTop = (top + rand() * wander) * H;
+    const crownHeight = height * H * (0.88 + rand() * 0.24);
+    const lobeCount = 3 + Math.floor(rand() * 3);
+    for (let j = 0; j < lobeCount; j++) {
+      const startT = j / lobeCount;
+      const endT = (j + 1) / lobeCount;
+      const midT = (startT + endT) / 2;
+      const dome = Math.sin(Math.PI * midT);
+      const endY = j === lobeCount - 1
+        ? row.edgeY
+        : crownTop + crownHeight * (0.39 + rand() * 0.07);
+      const apexY = crownTop
+        + crownHeight * (0.025 + (1 - dome) * 0.17 + rand() * 0.035);
+      // A quadratic control point is not itself on the curve. Solving its
+      // midpoint equation puts the visible apex at `apexY`, keeping the lobes
+      // round rather than pointed even when their neighbouring valleys differ.
+      const controlY = 2 * apexY - (fromY + endY) / 2;
+      row.lobes.push({
+        peakX: (i + midT) * step,
+        peakY: controlY,
+        endX: (i + endT) * step,
+        endY,
+      });
+      fromY = endY;
+    }
+
+    if (rand() < branches) {
+      row.branches.push({
+        x: (i + 0.43 + rand() * 0.14) * step,
+        y0: Math.min(base * H - H * 0.01, crownTop + crownHeight * 1.38),
+        y1: crownTop + crownHeight * (0.22 + rand() * 0.10),
+        lean: step * (rand() - 0.5) * 0.28,
+        fork: step * (0.10 + rand() * 0.04),
+      });
+    }
+  }
+
+  paintHorizonRow(g, W, H, row, base, fill, ink);
+  for (const branch of row.branches) {
+    paintHorizonBranch(g, W, H, branch, PAL.horizonTreeBranch);
+  }
 }
 
 // The whole band, back to front.
@@ -466,43 +579,56 @@ export function paintHorizon() {
   const g = c.getContext('2d');
   const rand = makeRandom(HORIZON_SEED);
 
-  // Roughly three ranges across the 31 degrees a portrait phone shows at once,
-  // which is what the reference frames put there. Counted round the whole lap:
-  // 31 degrees is a twelfth of it, so three on screen is thirty-odd in total.
-  range(g, W, H, rand, {
-    peak: SKYLINE.farPeak, base: SKYLINE.farBase,
-    count: 26, jitter: 0.55, saddle: 0.45, fill: PAL.horizonFar,
-  });
-  range(g, W, H, rand, {
-    peak: SKYLINE.nearPeak, base: SKYLINE.nearBase,
-    count: 34, jitter: 0.50, saddle: 0.40, fill: PAL.horizonNear,
+  // About three major mountains cross the wide first-person view, but they are
+  // not three copies laid on a ruler: spacing, width, height and lean all vary.
+  // The occasional pale one is drawn behind a neighbour, reproducing the small
+  // local overlaps in the references without building another full row.
+  mountainBand(g, W, H, rand, {
+    peak: SKYLINE.mountainPeak, base: SKYLINE.mountainBase,
+    count: 10,
+    fill: PAL.horizonMountain,
+    backFill: PAL.horizonMountainBack,
+    ink: PAL.horizonMountainInk,
+    backInk: PAL.horizonMountainBackInk,
+    line: 0.009,
   });
 
   // The field, laid in before the woods so their feet are planted in it.
   g.fillStyle = PAL.horizonField;
-  g.fillRect(0, SKYLINE.farBase * H, W, H - SKYLINE.farBase * H);
+  g.fillRect(0, SKYLINE.mountainBase * H, W, H - SKYLINE.mountainBase * H);
 
   // Haze along the foot of the hills. Distance is haze, and without it the
   // ranges sit on the treeline like cut paper. Stopped above the woods rather
   // than run down behind them — see SKYLINE.treeBase.
-  const haze = g.createLinearGradient(0, SKYLINE.nearPeak * H, 0, SKYLINE.hazeTo * H);
+  const haze = g.createLinearGradient(0, SKYLINE.mountainPeak * H, 0, SKYLINE.hazeTo * H);
   haze.addColorStop(0.00, 'rgba(255,255,255,0)');
   haze.addColorStop(0.70, `${PAL.horizonHaze}7A`);
   haze.addColorStop(1.00, 'rgba(255,255,255,0)');
   g.fillStyle = haze;
-  g.fillRect(0, SKYLINE.nearPeak * H, W, (SKYLINE.hazeTo - SKYLINE.nearPeak) * H);
+  g.fillRect(
+    0,
+    SKYLINE.mountainPeak * H,
+    W,
+    (SKYLINE.hazeTo - SKYLINE.mountainPeak) * H,
+  );
 
-  // 260 BUSHES, not 260 circles — each one is six or seven arcs, so this is
-  // some seventeen hundred of them round the lap. `size` 0.05 makes a bush 19
-  // to 32 texels in the radius and near enough three of those across, so a bush
-  // is 60 to 100 texels wide against the 353 a portrait phone shows: five or
-  // six across the frame per row, two or three rows deep. That overlap is the
-  // point. Below about four per row the wood breaks into separate clumps with
-  // field between them, and above about eight the shoulders stop reading and it
-  // goes back to being a hedge.
-  treeline(g, W, H, rand, {
-    top: SKYLINE.treeTop, base: SKYLINE.treeBase,
-    count: 260, size: 0.05, ink: PAL.horizonTreeInk, fill: PAL.horizonTree,
+  // The fill begins below anything the ordinary hop can reveal. Above it are
+  // two quiet rows: one pale silhouette against the mountains and one deeper
+  // row that only comes into view while jumping. A third row made the reveal
+  // read as horizontal stripes; two keeps the woodland continuous while still
+  // giving the newly exposed area real crowns and branches.
+  g.fillStyle = PAL.horizonTree;
+  g.fillRect(0, SKYLINE.treeBase * H, W, H - SKYLINE.treeBase * H);
+
+  treelineLayer(g, W, H, rand, {
+    top: SKYLINE.treeTop, wander: 0.085,
+    count: 32, height: 0.145, base: SKYLINE.treeBase,
+    ink: PAL.horizonTreeInk, fill: PAL.horizonTreeBack, branches: 0.55,
+  });
+  treelineLayer(g, W, H, rand, {
+    top: 0.615, wander: 0.13,
+    count: 38, height: 0.15, base: SKYLINE.treeBase,
+    ink: PAL.horizonTreeInk, fill: PAL.horizonTree, branches: 0.48,
   });
 
   return c;
@@ -520,108 +646,22 @@ export function paintHorizon() {
 // the easy way round, and it retires a readback of four and a half million
 // pixels at load along with every guess the old pass had to make.
 
-// ------------------------------------------------------------------- tracks
-
-// How far apart the stamps are laid along a worn track, in world units.
+// ---------------------------------------------------------- tracks, retired
 //
-// A track is STAMPED along its arc rather than stroked as a polyline, and that
-// is not a stylistic choice: this texture squeezes horizontally toward the poles
-// and a stroke has one width in texels the whole way, so a path climbing to the
-// two big trees at 46 degrees would arrive about 1.44 times too narrow. A stamp
-// can be widened per step by the same 1/cos(lat) everything else here uses.
+// PATH_STEP, PATH_LAYERS, pathStamp() and paintPaths() stood here: a soft
+// radial stamp laid every 0.2 units along the great circle between two
+// landmarks, in two passes — wide-and-faint under narrow-and-firm, because one
+// pass saturates inside a texel and gives a road with a cut edge instead of a
+// path worn into a field.
 //
-// Close enough together that some eight stamps cover any point on the line,
-// which is what makes the edge continuous rather than scalloped.
-const PATH_STEP = 0.2;
-
-// Two passes, wide-and-faint under narrow-and-firm. `w` is the full width of the
-// stamp in world units.
-//
-// One pass cannot do it. Eight overlapping stamps compound whatever falloff a
-// single one carries, so a single layer saturates almost immediately — it went
-// from bare grass to full track inside about a texel, which is a road with a cut
-// edge rather than a path worn into a field. Two passes saturating at different
-// widths leave a shoulder between them, and a shoulder is what reads as wear.
-const PATH_LAYERS = [
-  { w: 3.2, alpha: 0.34 },
-  { w: 1.9, alpha: 0.80 },
-];
-
-// One soft stamp, built once and scaled per step. Sizing it here rather than
-// making a gradient per stamp matters: a track is a couple of hundred steps long
-// and there are five of them, two layers deep, drawn three times for the seam.
-let PATH_STAMP = null;
-function pathStamp() {
-  const S = 128;
-  const c = makeCanvas(S, S);
-  const g = c.getContext('2d');
-  const grd = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  grd.addColorStop(0.00, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.52, 'rgba(255,255,255,0.85)');
-  grd.addColorStop(1.00, 'rgba(255,255,255,0)');
-  g.fillStyle = grd;
-  g.fillRect(0, 0, S, S);
-  // Tinted through once, so the stamp arrives the track's own colour and every
-  // step is a plain drawImage.
-  g.globalCompositeOperation = 'source-in';
-  g.fillStyle = PAL.path;
-  g.fillRect(0, 0, S, S);
-  return c;
-}
-
-// The tracks worn between the landmarks, laid along GREAT CIRCLES — the same
-// line the walking stick actually takes, so following a track really is walking
-// straight rather than approximately straight.
-//
-// `CONFIG.paths` is pairs of indices into `CONFIG.landmarks`: a minimum spanning
-// tree over them plus the one edge that closes it into a loop, so every landmark
-// is reachable by following a line on the ground and no track is a long way
-// round something.
-function paintPaths(g, W, H, widen, wrap) {
-  const R = CONFIG.globe.radius;
-  const marks = CONFIG.landmarks;
-  if (!PATH_STAMP) PATH_STAMP = pathStamp();
-  const dirOf = (lat, lon) => {
-    const cl = Math.cos(lat);
-    return [cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon)];
-  };
-
-  for (const layer of PATH_LAYERS) {
-    // Half the stamp's width as an angle, and as texels down the sheet. Across
-    // it, the pole stretch goes on top — exactly as it does for a lake.
-    const ry = ((layer.w / 2 / R) / Math.PI) * H;
-    g.globalAlpha = layer.alpha;
-    for (const [ai, bi] of CONFIG.paths) {
-      const a = dirOf(marks[ai].lat, marks[ai].lon);
-      const b = dirOf(marks[bi].lat, marks[bi].lon);
-      const dot = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-      const arc = Math.acos(dot);
-      const sin = Math.sin(arc);
-      const steps = Math.max(1, Math.round((arc * R) / PATH_STEP));
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        // Slerped rather than lerped-and-normalised, which is the difference
-        // between even spacing along the arc and stamps bunching at the ends.
-        const k0 = sin < 1e-6 ? 1 - t : Math.sin((1 - t) * arc) / sin;
-        const k1 = sin < 1e-6 ? t : Math.sin(t * arc) / sin;
-        const dx = a[0] * k0 + b[0] * k1;
-        const dy = a[1] * k0 + b[1] * k1;
-        const dz = a[2] * k0 + b[2] * k1;
-        const lat = Math.asin(Math.max(-1, Math.min(1, dy)));
-        const lon = Math.atan2(dx, dz);
-        // The same texture frame the lakes and the sun are read in: u = 0 sits a
-        // quarter turn west of lon 0.
-        const x = ((((0.25 + lon / (Math.PI * 2)) % 1) + 1) % 1) * W;
-        const y = (0.5 - lat / Math.PI) * H;
-        const rx = ry * widen(y);
-        wrap(x, rx, (px) => {
-          g.drawImage(PATH_STAMP, px - rx, y - ry, rx * 2, ry * 2);
-        });
-      }
-    }
-  }
-  g.globalAlpha = 1;
-}
+// Retired with the tracks themselves — see the note where paintPaths was
+// called, below in paintGlobe. Two things it knew are worth having if this is
+// ever rebuilt rather than rewritten: a track has to be STAMPED rather than
+// stroked, because this canvas squeezes toward the poles and a stroked
+// polyline has one width in texels the whole way (a path climbing to 46
+// degrees arrived 1.44 times too narrow); and the stamps have to overlap by
+// enough that eight of them cover any point, which is what made the edge
+// continuous rather than scalloped.
 
 // The seed for the field's own marks, so the planet has the same freckles every
 // visit for the same reason the constellations do.
@@ -660,6 +700,35 @@ function fieldTick(g, rand, x, y, scale, xs, colour) {
       ox + lean * len * 0.35 + len * 0.10, oy - len * 0.55,
       ox + lean * len, oy - len,
     );
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  g.restore();
+}
+
+// Sand uses the anime's other ground gesture: one to three short horizontal
+// pencil dashes, loosely stacked. It is deliberately not a rotated fieldTick;
+// that painter describes blades and leans upward, while these marks lie flat
+// on bare ground.
+function fieldDash(g, rand, x, y, scale, xs, colour) {
+  const roll = rand();
+  const n = roll < 0.30 ? 1 : roll < 0.86 ? 2 : 3;
+  const base = (7 + rand() * 7) * scale;
+  const tilt = (rand() - 0.5) * 0.12;
+  g.save();
+  g.translate(x, y);
+  g.scale(xs, 1);
+  g.strokeStyle = colour;
+  g.lineCap = 'round';
+  for (let i = 0; i < n; i++) {
+    const len = base * (0.68 + rand() * 0.55);
+    const ox = (rand() - 0.5) * 5 * scale;
+    const oy = (i - (n - 1) / 2) * (3.6 + rand() * 1.8) * scale;
+    g.lineWidth = (1.05 + rand() * 0.55) * scale;
+    g.globalAlpha = 0.62 + rand() * 0.28;
+    g.beginPath();
+    g.moveTo(ox - len / 2, oy - tilt * len / 2);
+    g.lineTo(ox + len / 2, oy + tilt * len / 2);
     g.stroke();
   }
   g.globalAlpha = 1;
@@ -729,24 +798,46 @@ export function paintGlobe() {
   // the biome weight only has to be asked once per CELL rather than once per
   // pixel — at 2048 across, a 16-pixel cell is a fifth of a degree, which is
   // finer than the softest edge in the table.
+  //
+  // A WEIGHTED SUM over the whole mix, rather than starting from a meadow colour
+  // written in here and lerping toward whatever else was in force. The meadow is
+  // an entry in the table now like anything else and arrives with its own share
+  // of the weight — see `biomesAt` — so there is no default to hold, and no
+  // second copy of "what this planet is when nothing else is happening" living
+  // in the painter. It is also simply the right arithmetic: chained lerps are
+  // order-dependent and only agree with the average when one weight is small.
   const CELL = 16;
   const mix = [];
   const base = new THREE.Color();
   const other = new THREE.Color();
-  const meadow = new THREE.Color(PAL.ground);
   for (let y = 0; y < H; y += CELL) {
     for (let x = 0; x < W; x += CELL) {
-      base.copy(meadow);
       biomesAt(dirAt(x + CELL / 2, y + CELL / 2), CONFIG.biomes, mix);
-      for (const { biome, w } of mix) base.lerp(other.set(biome.ground), w);
+      base.setRGB(0, 0, 0);
+      for (const { biome, w } of mix) {
+        other.set(biome.ground);
+        base.r += other.r * w;
+        base.g += other.g * w;
+        base.b += other.b * w;
+      }
       g.fillStyle = `#${base.getHexString()}`;
       // A pixel of overlap, so neighbouring cells cannot leave a seam grid.
       g.fillRect(x, y, CELL + 1, CELL + 1);
     }
   }
 
-  // The marks. Density follows the biome's own `cover`, which is what makes a
-  // dry field read as dry: the same ticks, fewer of them, on blonder ground.
+  // The marks, and each biome brings its own — its own colour, its own size and
+  // its own number of them. This is most of what makes the sand read as bare
+  // ground rather than as a bleached meadow: the ticks there are BROWN, because
+  // they are marks on dirt, and the specks among them are GREEN, because on a
+  // field with nothing growing on it the only thing worth printing is the little
+  // that does. On the meadow it is the other way round and always was.
+  //
+  // Their density is the biome's `ticks` and `blooms` rather than its `cover`,
+  // which is the one thing about this that changed shape rather than value.
+  // `cover` is now about LIVING things only — see CONFIG.biomes — because the
+  // sand grows almost nothing and is still heavily hatched, and one number
+  // asked to say both left it a blank cream fill.
   //
   // Scattered by AREA rather than by row — a count per unit of solid angle,
   // turned into a count per row by the cosine — or the caps would end up furred
@@ -760,15 +851,25 @@ export function paintGlobe() {
   // reference frames run nearer a tenth, and this is what a tenth costs.
   const TICKS = 6000;
   const BLOOMS = 1600;
-  const scatter = (count, draw) => {
+  // `howMany` reads this mark's own density off a biome and is averaged across
+  // the mix; `draw` is handed the biome that WON the spot, so it can use that
+  // one's colours and scale.
+  //
+  // Strongest-wins for the look and a blend for the count, which is not an
+  // inconsistency — a mark is a discrete thing and there is no half-brown,
+  // half-green hatch stroke to draw. What it does along a border is better than
+  // a blend would be: the two kinds interleave across the wash in proportion to
+  // their weights, and a dither between two textures reads as one becoming the
+  // other rather than as a line where they meet.
+  const scatter = (count, howMany, draw) => {
     for (let i = 0; i < count; i++) {
       const lat = Math.asin(1 - 2 * rand());
       const y = (0.5 - lat / Math.PI) * H;
       const x = rand() * W;
       biomesAt(dirAt(x, y), CONFIG.biomes, mix);
-      let cover = 1;
-      for (const { biome, w } of mix) cover += (biome.cover - 1) * w;
-      if (rand() > cover) continue;
+      let density = 0;
+      for (const { biome, w } of mix) density += howMany(biome) * w;
+      if (rand() > density) continue;
       // THE POLE CORRECTION, applied as the mark is drawn rather than hunted
       // down afterwards. A sphere squeezes a texture horizontally by cos(lat),
       // so a mark widened about its own centre by the reciprocal comes out
@@ -776,14 +877,33 @@ export function paintGlobe() {
       // pole genuinely is ten texels wide for one tall, and that is what makes
       // it a tick rather than a hair when it gets to the sphere.
       const xs = Math.min(10, 1 / Math.max(0.02, Math.cos(lat)));
-      for (const wrap of [-W, 0, W]) draw(x + wrap, y, xs);
+      for (const wrap of [-W, 0, W]) draw(x + wrap, y, xs, mix[0].biome);
     }
   };
-  scatter(TICKS, (x, y, xs) => fieldTick(g, rand, x, y, 1, xs, PAL.groundTick));
-  scatter(BLOOMS, (x, y, xs) => fieldBloom(
-    g, rand, x, y, 1, xs,
-    PAL.groundBloom[Math.floor(rand() * PAL.groundBloom.length)],
-  ));
+  scatter(
+    TICKS,
+    (b) => b.ticks,
+    (x, y, xs, b) => {
+      if (b.tickStyle === 'dash') {
+        fieldDash(g, rand, x, y, b.tickScale || 1, xs, b.tick);
+      } else {
+        fieldTick(g, rand, x, y, 1, xs, b.tick);
+      }
+    },
+  );
+  scatter(
+    BLOOMS,
+    (b) => b.blooms,
+    (x, y, xs, b) => {
+      // A blended border can have non-zero density while the dominant biome is
+      // deliberately bare. Do not borrow a neighbouring biome's bloom there.
+      if (b.blooms <= 0) return;
+      fieldBloom(
+        g, rand, x, y, b.bloomScale, xs,
+        b.bloom[Math.floor(rand() * b.bloom.length)],
+      );
+    },
+  );
 
   // `poleCorrect(g, W, H)` ran here, and does not any more. It was a whole pass
   // that read the finished texture back, found every isolated mark in the polar
@@ -840,13 +960,22 @@ export function paintGlobe() {
   // carpeted the visible water. Measured by rendering the bare planet and
   // reading pixels, not deduced — the formula lies convincingly.
   //
-  // Before the lakes, so water has the last word if a track ever comes near
-  // one. It does not today — the closest leg passes clear, and CONFIG.paths
-  // says so — but a path that appeared to run into a pond you cannot walk into
-  // would be worse than no path, so the ordering is the cheapest possible
-  // insurance against somebody moving a landmark.
-  paintPaths(g, W, H, widen, wrap);
-
+  // `paintPaths(g, W, H, widen, wrap)` stood here, and with it the whole of the
+  // worn-track system — the stamp, the two layers, `CONFIG.paths` and PAL.path.
+  // Six tan lines along great circles between the landmarks, about an eighth of
+  // the surface, laid to answer "which way" on a planet whose horizon is 4.8
+  // units off.
+  //
+  // They are gone because the field is better without them. A meadow with roads
+  // drawn on it is a map of somewhere; this one is a place, and the ticks and
+  // the biomes were already doing the work of making it readable. Getting lost
+  // on a small planet is a walk, not a failure state.
+  //
+  // What went with them is worth knowing if they are ever wanted back: the
+  // ordering mattered — the tracks were painted BEFORE the lakes so water had
+  // the last word if a leg ever ran at a pond — and the routes were a minimum
+  // spanning tree over the landmarks plus one closing edge, which is what kept
+  // every one of them reachable by following a line.
   for (const spec of CONFIG.lakes) paintBed(g, W, H, widen, wrap, spec);
 
   return c;
@@ -1987,8 +2116,9 @@ export function paintBench() {
 // two greys it uses: a lighter one on the wall, a darker one on the floor, since
 // a mark has to sit at the same distance from a #FFFBF9 ground as from a
 // #E4E1E2 one to read as the same pen.
-const ROOM_MARK_WALL = [168, 160, 162];
-const ROOM_MARK_FLOOR = [147, 140, 143];
+const ROOM_MARK_WALL = [128, 116, 112];
+const ROOM_MARK_FLOOR = [108, 98, 96];
+const ROOM_MARK_RUG = [147, 140, 143];
 
 // The pen marks. One to three short strokes stacked loosely — mostly pairs,
 // because the reference reads as `=` far more often than as a lone dash — each
@@ -2042,20 +2172,10 @@ const SEAM_GAPS = 5;
 // the compromise actually shipped: 12MB on the GPU with its mipmaps, half again
 // as sharp, and still a third of what 4096 would have cost.
 //
-// MARK_SCALE follows it, because the marks are sized in TEXELS. Without it,
-// sharpening the wall would have quietly shrunk every mark on it.
+// The seam is still drawn directly in this texture, so its widths follow the
+// resolution. The polar mark field handles its own output-space scaling.
 export const ROOM_WALL_TEX = { w: 3072, h: 768 };
-const MARK_SCALE = ROOM_WALL_TEX.w / 2048;
-
-// Marks stop where the ring they sit on has shrunk to this fraction of the
-// dome's full circumference. 0.42 puts the boundary 27 degrees off the apex,
-// which leaves the top 28% of the texture — the ceiling proper — plain.
-const MARK_HORIZON = 0.42;
-
-// ...and how far the squeeze correction is allowed to go before it is simply
-// refused. 1/sin runs away toward the apex, and a mark stretched much past this
-// stops reading as a pen stroke and starts reading as a scratch on the lens.
-const MAX_STRETCH = 2.4;
+const WALL_TEX_SCALE = ROOM_WALL_TEX.w / 2048;
 
 export function paintRoomWall() {
   const { w: W, h: H } = ROOM_WALL_TEX;
@@ -2066,44 +2186,30 @@ export function paintRoomWall() {
   g.fillStyle = PAL.roomWall;
   g.fillRect(0, 0, W, H);
 
-  // Canvas top is the apex and canvas bottom is the floor, because three.js
-  // hands a sphere's v as 1 at theta 0 and flips the image on the way in. So
-  // `y` here climbs DOWN the dome, and theta with it.
-  const theta = (y) => (y / H) * (Math.PI / 2);
-
-  // A jittered grid rather than a free scatter: it spreads the marks without
-  // ever letting two land on top of each other, which is what gives a hand
-  // scatter away.
-  //
-  // 26 columns is one cluster every 1.26 units around the base, which sounds
-  // dense and is not: a portrait phone sees 31 degrees of the wall at a time,
-  // which is a twelfth of it, so this is what puts about nine marks on screen —
-  // the count the reference drawing has.
-  const COLS = 26;
-  const ROWS = 4;
-  const yTop = H * (Math.asin(MARK_HORIZON) / (Math.PI / 2));
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
-      if (rand() < 0.15) continue;
-      const x = (col + 0.15 + rand() * 0.7) * (W / COLS);
-      const y = yTop + (row + 0.2 + rand() * 0.6) * ((H - 38 * MARK_SCALE - yTop) / ROWS);
-      const xs = Math.min(MAX_STRETCH, 1 / Math.sin(theta(y)));
-      markCluster(g, rand, x, y, ROOM_MARK_WALL, MARK_SCALE, xs);
-    }
-  }
+  // A polar Voronoi field instead of rows in the rectangular wall texture.
+  // Only its seeds are painted: the invisible cells give each little cluster
+  // its own patch of plaster, while tangential strokes unwrap as horizontal
+  // dashes everywhere from the wall to the ceiling. No cell edges belong on
+  // Chiikawa's smooth interior.
+  domeStoneNet(g, W, H, {
+    rand, ink: PAL.line, mark: ROOM_MARK_WALL,
+    drawEdges: false, tangentialMarks: true,
+    markSkip: 0.58, includeCentreMark: false,
+    rings: 5, edgeCount: 18, scratchScale: 1.15,
+  });
 
   // The seam, along the very bottom edge — which is the rim of the dome, and so
   // exactly where the floor comes up to meet it.
-  const seamY = H - 6 * MARK_SCALE;
+  const seamY = H - 6 * WALL_TEX_SCALE;
   const gaps = [];
   for (let i = 0; i < SEAM_GAPS; i++) {
     gaps.push({
       at: ((i + 0.35 + rand() * 0.3) / SEAM_GAPS) * W,
-      half: (9 + rand() * 7) * MARK_SCALE,
+      half: (9 + rand() * 7) * WALL_TEX_SCALE,
     });
   }
   g.strokeStyle = PAL.line;
-  g.lineWidth = 7 * MARK_SCALE;
+  g.lineWidth = 7 * WALL_TEX_SCALE;
   g.lineCap = 'round';
   let from = 0;
   for (const gap of gaps.concat([{ at: W + 100, half: 0 }])) {
@@ -2121,20 +2227,15 @@ export function paintRoomWall() {
     for (const side of [-1, 1]) {
       g.beginPath();
       g.arc(
-        gap.at + side * (3 + rand() * 3) * MARK_SCALE,
-        seamY + (rand() - 0.3) * 4 * MARK_SCALE,
-        3.4 * MARK_SCALE, 0, TAU,
+        gap.at + side * (3 + rand() * 3) * WALL_TEX_SCALE,
+        seamY + (rand() - 0.3) * 4 * WALL_TEX_SCALE,
+        3.4 * WALL_TEX_SCALE, 0, TAU,
       );
       g.fill();
     }
   }
   return c;
 }
-
-// The floor is a smaller world per texel than the wall is — 1024 across ten and
-// a half units against 2048 around thirty-three — so its marks are drawn 1.57
-// times larger in texels to come out the same size underfoot.
-const FLOOR_MARK_SCALE = 1.57;
 
 export function paintRoomFloor() {
   const S = 1024;
@@ -2148,14 +2249,17 @@ export function paintRoomFloor() {
   // A disc inscribed in a square texture, so everything outside the circle is
   // never seen and is not worth drawing.
   const R = S / 2;
-  const GRID = 9;
+  // A finer jittered field than the old nine-cell layout. The reference is
+  // mostly quiet floor, but its quietness comes from many tiny pencil groups
+  // rather than a few large symbols. Broad jitter keeps the grid invisible.
+  const GRID = 13;
   for (let row = 0; row < GRID; row++) {
     for (let col = 0; col < GRID; col++) {
-      if (rand() < 0.25) continue;
-      const x = (col + 0.15 + rand() * 0.7) * (S / GRID);
-      const y = (row + 0.15 + rand() * 0.7) * (S / GRID);
-      if (Math.hypot(x - R, y - R) > R * 0.94) continue;
-      markCluster(g, rand, x, y, ROOM_MARK_FLOOR, FLOOR_MARK_SCALE, 1);
+      if (rand() < 0.40) continue;
+      const x = (col + 0.08 + rand() * 0.84) * (S / GRID);
+      const y = (row + 0.08 + rand() * 0.84) * (S / GRID);
+      if (Math.hypot(x - R, y - R) > R * 0.92) continue;
+      markCluster(g, rand, x, y, ROOM_MARK_FLOOR, 0.78, 1);
     }
   }
   return c;
@@ -2314,15 +2418,32 @@ export function paintHouseSkin() {
 
   const theta = (y) => (y / H) * (Math.PI / 2);
   const yTop = H * (Math.asin(0.40) / (Math.PI / 2));
-  const COLS = 14;
+  // Sparse enough that the front reads mostly as clean plaster, with a few
+  // little stacked strokes like the anime façade rather than an even texture.
+  const COLS = 12;
   const ROWS = 3;
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
-      if (rand() < 0.42) continue;
+      if (rand() < 0.48) continue;
       const x = (col + 0.15 + rand() * 0.7) * (W / COLS);
       const y = yTop + (row + 0.2 + rand() * 0.6) * ((H - 18 - yTop) / ROWS);
-      markCluster(g, rand, x, y, PAL.houseMark, 0.62, 1 / Math.sin(theta(y)));
+      markCluster(g, rand, x, y, PAL.houseMark, 0.54, 1 / Math.sin(theta(y)));
     }
+  }
+
+  // Four composed accents on the front half. A scatter over the whole dome can
+  // leave the façade blank by chance, while the anime always gives the eye a
+  // few little strokes around its openings. Bearings use the same UV chart as
+  // scene.js: the door is zero and positive is its right-hand side.
+  for (const [at, fy, scale] of [
+    [-0.72, 0.43, 0.62],
+    [-0.78, 0.76, 0.56],
+    [0.43, 0.35, 0.56],
+    [0.94, 0.73, 0.60],
+  ]) {
+    const x = ((at + Math.PI / 2) / TAU) * W;
+    const y = H * fy;
+    markCluster(g, rand, x, y, PAL.houseMark, scale, 1 / Math.sin(theta(y)));
   }
   return c;
 }
@@ -2373,6 +2494,32 @@ export function paintHouseDoorFrame() {
 export function paintHouseWindowFrame() {
   const c = makeCanvas(WINDOW_SHEET.s, WINDOW_SHEET.s);
   windowFrame(c.getContext('2d'), PAL.houseInk);
+  return c;
+}
+
+// The small blank mounting block beside Chiikawa's door. It is a separate
+// curved surface patch rather than paint baked into the wall, so the portrait
+// plate can replace or sit over this canvas later without redrawing the house
+// skin. For now its empty outlined face matches the anime reference.
+export function paintHousePlateBlock() {
+  const S = 128;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const m = 18;
+
+  g.fillStyle = PAL.houseWall;
+  g.strokeStyle = PAL.houseInk;
+  g.lineWidth = 8;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(m + 2, m);
+  g.lineTo(S - m - 1, m + 2);
+  g.lineTo(S - m, S - m - 2);
+  g.lineTo(m, S - m);
+  g.closePath();
+  g.fill();
+  g.stroke();
   return c;
 }
 
@@ -2760,8 +2907,885 @@ export function paintRug() {
     markCluster(
       g, rand,
       S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d,
-      ROOM_MARK_FLOOR, 1.1, 1,
+      ROOM_MARK_RUG, 1.1, 1,
     );
   }
   return c;
 }
+
+// ============================================================ stone and cracks
+//
+// Everything Hachiware's place is made of. It is the same two surfaces the
+// house has — a shell you see from outside and a shell you stand inside — plus
+// the hill the whole thing is cut into, and all three are painted out of one
+// motif: PLATES.
+//
+// The reference never draws rock as texture. It draws it as a net of irregular
+// polygons outlined in a soft brown pen, with a scatter of little paired ticks
+// inside the bigger cells and short hairline spurs hanging off some of the
+// edges. That is the entire vocabulary, and it holds at every distance in the
+// source frames — the wall behind the characters, the cliff in the wide shot
+// and the boulder in the manga panel are the same drawing at three scales.
+//
+// So this file gets one function that draws that net and four surfaces that
+// call it with different cell sizes. Nothing here is noise, a filter or a
+// generated texture: it is strokes, in the same hand as markCluster above.
+
+// The net itself.
+//
+// A PERIODIC VORONOI NET. The reference's stones are closed, unequal polygons
+// meeting mostly three at a time; they are not rows of quadrilaterals and none
+// of their boundaries simply stop. A lightly jittered staggered field keeps the
+// sizes calm while Voronoi clipping supplies the five-, six- and seven-sided
+// silhouettes. Copies of the field one canvas-width either side make the result
+// periodic, so the first and last columns meet when this is wrapped on a dome.
+//
+// Edges are QUADRATIC rather than straight, bowed by a fraction of their own
+// length perpendicular to themselves. A straight line between two jittered
+// points still reads as ruled; a bowed one reads as drawn. The bow is signed at
+// random, so a plate is not consistently convex.
+function crackNet(g, W, H, o) {
+  const {
+    rand, cols, rows, ink, width, jitter = 0.84,
+    top = 0, bottom = H, spur = 0.22, alpha = 1,
+    dome = false, apexCells = 5,
+  } = o;
+  const cw = W / cols;
+  const ch = (bottom - top) / rows;
+  const widestCell = dome ? W / apexCells : cw;
+
+  const sites = [];
+  for (let row = 0; row < rows; row++) {
+    // A texel row is a ring round the dome. Its real circumference is
+    // `sin(theta)` of the floor ring, so carrying all `cols` sites into the
+    // crown forces every boundary into one starburst at the UV pole. Tapering
+    // the count with that circumference keeps the stones approximately the
+    // same physical size after wrapping. Five at the apex gives the ordinary
+    // five-way junction of an irregular stone mesh, rather than two dozen
+    // needle-shaped wedges.
+    const theta = ((top + (row + 0.5) * ch) / H) * (Math.PI / 2);
+    const ringCols = dome ? Math.max(apexCells, Math.round(cols * Math.sin(theta))) : cols;
+    const ringCellW = W / ringCols;
+    const rowShift = rand() - 0.5;
+    for (let col = 0; col < ringCols; col++) {
+      const x = ((col + 0.5 + rowShift + (rand() - 0.5) * jitter) * ringCellW + W) % W;
+      const y = top + (row + 0.5 + (rand() - 0.5) * jitter * 0.86) * ch;
+      sites.push({ x, y });
+    }
+  }
+
+  // Half-plane clipping of one polygon against the perpendicular bisector
+  // between two sites. `a*x + b*y <= c` is the side nearer `site`.
+  const clipNearer = (poly, site, other) => {
+    const a = 2 * (other.x - site.x);
+    const b = 2 * (other.y - site.y);
+    const c = other.x * other.x + other.y * other.y
+      - site.x * site.x - site.y * site.y;
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i];
+      const q = poly[(i + 1) % poly.length];
+      const dp = c - a * p.x - b * p.y;
+      const dq = c - a * q.x - b * q.y;
+      const pin = dp >= -1e-5;
+      const qin = dq >= -1e-5;
+      if (pin) out.push(p);
+      if (pin !== qin) {
+        const t = dp / (dp - dq);
+        out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+      }
+    }
+    return out;
+  };
+
+  const periodic = [];
+  for (const site of sites) {
+    for (const shift of [-W, 0, W]) {
+      periodic.push({ x: site.x + shift, y: site.y });
+    }
+  }
+
+  // Store each shared edge once. Stroking complete cell outlines would paint a
+  // common boundary twice and make the net change weight from edge to edge.
+  const edges = new Map();
+  const edgeKey = (a, b) => {
+    const p = `${Math.round(a.x * 10)},${Math.round(a.y * 10)}`;
+    const q = `${Math.round(b.x * 10)},${Math.round(b.y * 10)}`;
+    return p < q ? `${p}|${q}` : `${q}|${p}`;
+  };
+
+  for (const site of periodic) {
+    // Replicas further away than a cell cannot reach the visible strip.
+    if (site.x < -widestCell * 1.5 || site.x > W + widestCell * 1.5) continue;
+    let poly = [
+      { x: 0, y: top }, { x: W, y: top },
+      { x: W, y: bottom }, { x: 0, y: bottom },
+    ];
+    for (const other of periodic) {
+      if (other === site) continue;
+      poly = clipNearer(poly, site, other);
+      if (!poly.length) break;
+    }
+    if (poly.length < 3) continue;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      // Canvas boundaries are crop lines, not cracks. Internal edges that reach
+      // x=0 reappear at x=W through the periodic seed copies.
+      const onLeft = Math.abs(a.x) < 1e-3 && Math.abs(b.x) < 1e-3;
+      const onRight = Math.abs(a.x - W) < 1e-3 && Math.abs(b.x - W) < 1e-3;
+      const onTop = Math.abs(a.y - top) < 1e-3 && Math.abs(b.y - top) < 1e-3;
+      const onBottom = Math.abs(a.y - bottom) < 1e-3 && Math.abs(b.y - bottom) < 1e-3;
+      if (onLeft || onRight || onTop || onBottom) continue;
+      const key = edgeKey(a, b);
+      if (!edges.has(key)) edges.set(key, [a, b]);
+    }
+  }
+
+  g.save();
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.strokeStyle = ink;
+  g.globalAlpha = alpha;
+
+  // One edge, bowed, plus the spurs that hang off it.
+  //
+  // The spur is the detail that does the most work for its cost. The reference
+  // hangs two or three short strokes off the underside of a long crack — it is
+  // how the drawing says a plate has DEPTH, that the stone steps back at this
+  // line — and without them the net is a diagram of cells rather than a rock
+  // face. They only go on the roughly-horizontal edges, because that is the
+  // only orientation the cue means anything in: a spur off a vertical crack is
+  // just a shorter crack.
+  const edge = (a, b) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    if (Math.hypot(dx, dy) < 1e-3) return;
+    const bow = (rand() - 0.5) * 0.22;
+    g.lineWidth = width * (0.88 + rand() * 0.24);
+    g.beginPath();
+    g.moveTo(a.x, a.y);
+    g.quadraticCurveTo(
+      (a.x + b.x) / 2 - dy * bow, (a.y + b.y) / 2 + dx * bow, b.x, b.y,
+    );
+    g.stroke();
+
+    if (Math.abs(dy) > Math.abs(dx) * 0.6) return;
+    const n = rand() < spur ? (rand() < 0.45 ? 3 : 2) : 0;
+    for (let i = 0; i < n; i++) {
+      const t = 0.22 + rand() * 0.56;
+      const px = a.x + dx * t;
+      const py = a.y + dy * t;
+      const drop = ch * (0.10 + rand() * 0.16);
+      g.lineWidth = width * 0.62;
+      g.beginPath();
+      g.moveTo(px, py);
+      g.lineTo(px + (rand() - 0.5) * drop * 0.5, py + drop);
+      g.stroke();
+    }
+  };
+
+  for (const [a, b] of edges.values()) edge(a, b);
+  g.restore();
+}
+
+// The little floating marks inside the plates. Rock uses upright hairline
+// scratches, not the horizontal `=` clusters on Chiikawa's plaster walls.
+function stoneTicks(g, rand, W, H, o) {
+  const { cols, rows, rgb, scale, top = 0, bottom = H, skip = 0.4, squeeze } = o;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      if (rand() < skip) continue;
+      const x = (col + 0.15 + rand() * 0.7) * (W / cols);
+      const y = top + (row + 0.15 + rand() * 0.7) * ((bottom - top) / rows);
+      const xs = squeeze ? squeeze(y) : 1;
+      const n = rand() < 0.18 ? 2 : rand() < 0.78 ? 3 : 4;
+      const gap = (3.0 + rand() * 2.2) * scale * xs;
+      const base = (8 + rand() * 9) * scale;
+      g.save();
+      g.translate(x, y);
+      g.lineCap = 'round';
+      for (let i = 0; i < n; i++) {
+        const ox = (i - (n - 1) / 2) * gap + (rand() - 0.5) * 2.2 * scale;
+        const oy = (rand() - 0.5) * 4 * scale;
+        const len = base * (0.68 + rand() * 0.64);
+        const lean = (rand() - 0.5) * len * 0.20;
+        g.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${(0.55 + rand() * 0.25).toFixed(2)})`;
+        g.lineWidth = (1.15 + rand() * 0.55) * scale;
+        g.beginPath();
+        g.moveTo(ox - lean / 2, oy - len / 2);
+        g.lineTo(ox + lean / 2, oy + len / 2);
+        g.stroke();
+      }
+      g.restore();
+    }
+  }
+}
+
+// A stone net drawn in the dome's OWN polar coordinates, then unwrapped into
+// the rectangular texture three.js expects.
+//
+// Drawing the ceiling directly in UV space cannot work at the apex: every
+// column of that rectangle becomes the same point, so otherwise ordinary cells
+// turn into long petals aimed at the pole. A special cap only trades that star
+// for a circular plug. Here the polygons are made on a disc first, where the
+// apex is an ordinary point surrounded by ordinary Voronoi cells. Sampling that
+// disc by angle and radius produces the strange-looking UV distortion needed
+// for the stones to become natural again when the texture is wrapped on the
+// dome.
+function domeStoneNet(g, W, H, o) {
+  const {
+    rand, ink, mark, width = 3.2, alpha = 0.92,
+    rings = 6, edgeCount = 24, scratchScale = 1,
+    drawEdges = true, tangentialMarks = false,
+    markSkip = 0.48, includeCentreMark = true,
+  } = o;
+  const S = 1024;
+  const R = S * 0.47;
+  const C = S / 2;
+  const p = makeCanvas(S, S);
+  const pg = p.getContext('2d');
+  // One source pixel maps almost 1:1 on the room's 3072-wide texture but about
+  // 3:1 on the mound's 1024-wide skin. Treat widths and scratch sizes as output
+  // texels, then scale them into the polar source so both surfaces keep the same
+  // pen weight.
+  const unwrapScale = (TAU * R) / W;
+  const polarWidth = width * unwrapScale;
+
+  // One centre stone and loose rings. Counts grow with circumference, so cells
+  // stay close to one physical size without creating radial rows.
+  const sites = [{ x: C, y: C }];
+  const nominal = (TAU * R) / edgeCount;
+  for (let ring = 1; ring <= rings; ring++) {
+    const baseR = R * (ring / (rings + 0.15));
+    const count = Math.max(5, Math.round(edgeCount * (baseR / R)));
+    const phase = rand() * TAU;
+    for (let i = 0; i < count; i++) {
+      const a = phase + ((i + (rand() - 0.5) * 0.32) / count) * TAU;
+      const r = baseR + (rand() - 0.5) * nominal * 0.30;
+      sites.push({ x: C + Math.cos(a) * r, y: C + Math.sin(a) * r });
+    }
+  }
+
+  const clipNearer = (poly, site, other) => {
+    const a = 2 * (other.x - site.x);
+    const b = 2 * (other.y - site.y);
+    const c = other.x * other.x + other.y * other.y
+      - site.x * site.x - site.y * site.y;
+    const out = [];
+    for (let i = 0; i < poly.length; i++) {
+      const from = poly[i];
+      const to = poly[(i + 1) % poly.length];
+      const df = c - a * from.x - b * from.y;
+      const dt = c - a * to.x - b * to.y;
+      const fin = df >= -1e-5;
+      const tin = dt >= -1e-5;
+      if (fin) out.push(from);
+      if (fin !== tin) {
+        const t = df / (df - dt);
+        out.push({
+          x: from.x + (to.x - from.x) * t,
+          y: from.y + (to.y - from.y) * t,
+        });
+      }
+    }
+    return out;
+  };
+
+  const edges = new Map();
+  const edgeKey = (a, b) => {
+    const p0 = `${Math.round(a.x * 10)},${Math.round(a.y * 10)}`;
+    const p1 = `${Math.round(b.x * 10)},${Math.round(b.y * 10)}`;
+    return p0 < p1 ? `${p0}|${p1}` : `${p1}|${p0}`;
+  };
+  for (const site of sites) {
+    let poly = [
+      { x: C - R, y: C - R }, { x: C + R, y: C - R },
+      { x: C + R, y: C + R }, { x: C - R, y: C + R },
+    ];
+    for (const other of sites) {
+      if (other === site) continue;
+      poly = clipNearer(poly, site, other);
+      if (!poly.length) break;
+    }
+    if (poly.length < 3) continue;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const key = edgeKey(a, b);
+      if (!edges.has(key)) edges.set(key, [a, b]);
+    }
+  }
+
+  pg.save();
+  pg.beginPath();
+  pg.arc(C, C, R, 0, TAU);
+  pg.clip();
+  pg.lineCap = 'round';
+  pg.lineJoin = 'round';
+  if (drawEdges) {
+    pg.strokeStyle = ink;
+    pg.globalAlpha = alpha;
+    for (const [a, b] of edges.values()) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (Math.hypot(dx, dy) < 1e-3) continue;
+      const bow = (rand() - 0.5) * 0.18;
+      pg.lineWidth = polarWidth * (0.88 + rand() * 0.24);
+      pg.beginPath();
+      pg.moveTo(a.x, a.y);
+      pg.quadraticCurveTo(
+        (a.x + b.x) / 2 - dy * bow,
+        (a.y + b.y) / 2 + dx * bow,
+        b.x, b.y,
+      );
+      pg.stroke();
+    }
+  }
+
+  // Sparse parallel scratches. Rock chooses a free orientation; smooth plaster
+  // uses the local tangent of the polar field, which unwraps to the anime's
+  // horizontal little dash clusters without creating radial lines at the apex.
+  pg.globalAlpha = 1;
+  for (const site of sites) {
+    const radius = Math.hypot(site.x - C, site.y - C);
+    if ((!includeCentreMark && radius < nominal * 0.5)
+      || rand() < markSkip || radius > R * 0.92) continue;
+    const roll = rand();
+    const n = tangentialMarks
+      ? (roll < 0.18 ? 1 : roll < 0.76 ? 2 : 3)
+      : (roll < 0.25 ? 2 : roll < 0.82 ? 3 : 4);
+    const angle = tangentialMarks
+      ? Math.atan2(site.y - C, site.x - C) + Math.PI / 2
+      : rand() * TAU;
+    const alongX = Math.cos(angle);
+    const alongY = Math.sin(angle);
+    const acrossX = -alongY;
+    const acrossY = alongX;
+    const gap = (3.2 + rand() * 2.8) * unwrapScale * scratchScale;
+    // A tangent of fixed length in the polar disc spans an ever larger angle
+    // toward its centre. Plaster marks want a stable drawn size in the
+    // unwrapped texture, so their along-ring length follows the ring radius.
+    // The floor prevents the first ring from collapsing to a dot.
+    const tangentSpan = tangentialMarks ? Math.max(0.34, radius / R) : 1;
+    const base = (10 + rand() * 10) * unwrapScale * scratchScale * tangentSpan;
+    const ox = (rand() - 0.5) * nominal * 0.24;
+    const oy = (rand() - 0.5) * nominal * 0.24;
+    for (let i = 0; i < n; i++) {
+      const sep = (i - (n - 1) / 2) * gap;
+      const len = base * (0.72 + rand() * 0.56);
+      const cx = site.x + ox + acrossX * sep;
+      const cy = site.y + oy + acrossY * sep;
+      pg.strokeStyle = `rgba(${mark[0]},${mark[1]},${mark[2]},${(0.55 + rand() * 0.25).toFixed(2)})`;
+      pg.lineWidth = (1.2 + rand() * 0.55) * unwrapScale * scratchScale;
+      pg.beginPath();
+      pg.moveTo(cx - alongX * len / 2, cy - alongY * len / 2);
+      pg.lineTo(cx + alongX * len / 2, cy + alongY * len / 2);
+      pg.stroke();
+    }
+  }
+  pg.restore();
+
+  // Polar disc -> equirectangular dome texture. Bilinear, premultiplied-alpha
+  // sampling matters here: nearest sampling leaves visible stair steps wherever
+  // a curved polar edge expands across several UV texels near the crown.
+  const src = pg.getImageData(0, 0, S, S).data;
+  const dstImage = g.getImageData(0, 0, W, H);
+  const dst = dstImage.data;
+  const cos = new Float32Array(W);
+  const sin = new Float32Array(W);
+  for (let x = 0; x < W; x++) {
+    const a = (x / W) * TAU - Math.PI / 2;
+    cos[x] = Math.cos(a);
+    sin[x] = Math.sin(a);
+  }
+  for (let y = 0; y < H; y++) {
+    const r = (y / (H - 1)) * R;
+    for (let x = 0; x < W; x++) {
+      const fx = Math.max(0, Math.min(S - 1.001, C + cos[x] * r));
+      const fy = Math.max(0, Math.min(S - 1.001, C + sin[x] * r));
+      const x0 = Math.floor(fx);
+      const y0 = Math.floor(fy);
+      const x1 = x0 + 1;
+      const y1 = y0 + 1;
+      const tx = fx - x0;
+      const ty = fy - y0;
+      const i00 = (y0 * S + x0) * 4;
+      const i10 = (y0 * S + x1) * 4;
+      const i01 = (y1 * S + x0) * 4;
+      const i11 = (y1 * S + x1) * 4;
+      const a00 = (src[i00 + 3] / 255) * (1 - tx) * (1 - ty);
+      const a10 = (src[i10 + 3] / 255) * tx * (1 - ty);
+      const a01 = (src[i01 + 3] / 255) * (1 - tx) * ty;
+      const a11 = (src[i11 + 3] / 255) * tx * ty;
+      const sa = a00 + a10 + a01 + a11;
+      if (sa <= 0) continue;
+      const sr = src[i00] * a00 + src[i10] * a10 + src[i01] * a01 + src[i11] * a11;
+      const sg = src[i00 + 1] * a00 + src[i10 + 1] * a10
+        + src[i01 + 1] * a01 + src[i11 + 1] * a11;
+      const sb = src[i00 + 2] * a00 + src[i10 + 2] * a10
+        + src[i01 + 2] * a01 + src[i11 + 2] * a11;
+      const di = (y * W + x) * 4;
+      const inv = 1 - sa;
+      dst[di] = sr + dst[di] * inv;
+      dst[di + 1] = sg + dst[di + 1] * inv;
+      dst[di + 2] = sb + dst[di + 2] * inv;
+    }
+  }
+  g.putImageData(dstImage, 0, 0);
+}
+
+// ------------------------------------------------------------- the mound
+//
+// Hachiware's place, from outside. It is one shell doing two jobs — the hill
+// and the hollow in it — so this canvas has to carry both: rock plates over
+// most of it, and a cap of meadow over the crown with the grass hanging in
+// lumps over the stone. See CONFIG.cave for why the two are one thing.
+//
+// Same layout as paintHouseSkin: a canvas wrapped round a dome, so a column is
+// a meridian and a row is a ring, canvas top is the apex. The same deliberate
+// lack of any lighting, too — what makes it read round is painted here.
+//
+// The plates are NOT squeeze-corrected the way the room's dashes are, and that
+// is a decision rather than an oversight. A dash stretched by 1/sin near the
+// apex is a dash that stopped being a pen stroke; a NET squeezed toward the
+// apex is what a net of cracks on a dome actually looks like from outside, with
+// the plates foreshortening as they turn away over the top. The ticks are
+// corrected, because they are dashes.
+
+// How far down the dome the turf reaches, as a fraction of the canvas.
+//
+// MEASURED AGAINST WHERE THE EYE IS, not chosen for the proportion. It was a
+// third, which is the proportion the manga panel has and which is also very
+// nearly invisible: a cap around a dome's apex is turned away from anybody
+// standing next to it, so at that value the grass compressed into a sliver at
+// the silhouette and the mound read as bare rock from every spot you can
+// actually stand on.
+//
+// Half was still too high, for the same reason taken further: measured from
+// 7.5 units away, the mound's own skyline IS its near face at about 50 degrees
+// off the apex — everything above that has curved over the crest and out of
+// sight — so a grass line at 57 degrees sat two degrees under the silhouette
+// and came out as a hairline.
+//
+// So it wants to reach as far DOWN the mound as it can — bigger is more grass,
+// and more grass is what you can actually see — and what stops it is the MOUTH.
+// The two are squeezed toward each other from opposite ends and the clearance
+// between them is the whole of this number.
+//
+// It was 0.62 while the shell was 4.8, which put the grass line 71 degrees off
+// the apex against an arch crown at 79. Shrinking the mound to 4.0 without
+// shrinking the mouth — see CONFIG.cave.doorWidth, which the cast set rather
+// than the rock — raised the crown to 69, so the old value would have had the
+// arch biting a chunk out of the turf.
+//
+// 0.60 is the most that still fits: the grass line lands at 66 degrees and its
+// deepest lump at 71, which laps the crown by about two degrees. That overlap
+// is wanted, not tolerated — the punched arch simply takes the turf with it
+// there, so the mouth reads as reaching up into the grass rather than stopping
+// politely under it, which is what the reference frames show. The 4.8 mound
+// overlapped by four and looked right.
+//
+// Re-derive it whenever the shell or the mouth is resized: the ceiling is
+// (crown / span) - FRINGE_DIP[0] - FRINGE_DIP[1], plus whatever overlap is
+// wanted. Going the wrong way is easy and quiet — 0.53 was tried first on the
+// mistaken idea that a smaller number bought clearance, and it bought a green
+// hairline on a bare grey hill.
+//
+// The canvas maps linearly over the shell's whole span, skirt included, so this
+// is a fraction of that rather than of a right angle.
+const TURF = 0.60;
+
+// How far the fringe's lumps hang below the grass line, as a fraction of the
+// canvas — so the turf reaches TURF + FRINGE_DIP at its deepest.
+//
+// Shallower than it was (0.030 to 0.105), and for the same reason TURF moved:
+// the deepest bump is what actually has to clear the mouth, and at the old
+// depth it reached eleven degrees down the mound — past the arch's crown even
+// after the grass line itself had been lifted clear. Halving it buys back that
+// room and reads truer besides: the scallops in the reference are shallow
+// against the landform, and a deep one starts to look like a curtain rather
+// than like turf breaking over an edge.
+const FRINGE_DIP = [0.018, 0.032];
+
+export function paintCaveSkin() {
+  const W = 1024;
+  const H = 320;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const rand = makeRandom(ROOM_SEED + 23);
+
+  g.fillStyle = PAL.cliffFace;
+  g.fillRect(0, 0, W, H);
+
+  // Darker at the foot, which is where a dome darkens: the crown faces the sky
+  // and the skirt faces the ground. Stronger than the house's hand's-worth,
+  // because this mass is half again as big and the outline round it is doing
+  // proportionally less of the work.
+  const shade = g.createLinearGradient(0, 0, 0, H);
+  shade.addColorStop(0.00, 'rgba(104,86,76,0)');
+  shade.addColorStop(0.50, 'rgba(104,86,76,0.07)');
+  shade.addColorStop(1.00, 'rgba(104,86,76,0.22)');
+  g.fillStyle = shade;
+  g.fillRect(0, 0, W, H);
+
+  const theta = (y) => (y / H) * (Math.PI / 2);
+  // The same polar construction as the room, but coarser because the mound is
+  // read from several paces away. It is painted across the whole shell first;
+  // the turf below then covers its crown, leaving a continuous irregular net
+  // in the exposed stone rather than a rectangular grid beginning abruptly at
+  // the grass line.
+  domeStoneNet(g, W, H, {
+    rand, ink: PAL.caveInk, mark: PAL.caveMark,
+    width: 1.8, alpha: 0.90, rings: 8, edgeCount: 24,
+    scratchScale: 0.42,
+  });
+
+  // THE TURF, and its fringe. The whole point of the mound reading as a piece
+  // of landscape rather than as a boulder is this one edge: a band of green
+  // over the top whose lower boundary is a row of soft lumps, hanging over the
+  // rock like a tablecloth. It is what says the green is ON TOP of the grey
+  // rather than beside it.
+  //
+  // It has to close on itself — the canvas wraps the dome — so the last bump is
+  // clamped to the right edge at exactly the height the first one starts at,
+  // or the grass line shows a step running down the mound.
+  const baseY = H * TURF;
+  const bumps = [];
+  let x = 0;
+  while (x < W) {
+    const nx = Math.min(W, x + W * (0.020 + rand() * 0.030));
+    bumps.push([nx, (x + nx) / 2, baseY + H * (FRINGE_DIP[0] + rand() * FRINGE_DIP[1])]);
+    x = nx;
+  }
+  const traceFringe = () => {
+    for (const b of bumps) g.quadraticCurveTo(b[1], b[2], b[0], baseY);
+  };
+  g.beginPath();
+  g.moveTo(0, 0);
+  g.lineTo(0, baseY);
+  traceFringe();
+  g.lineTo(W, 0);
+  g.closePath();
+  g.fillStyle = PAL.cliffGrass;
+  g.fill();
+
+  // The line along its underside, which is what makes the overhang read as an
+  // overhang rather than as a colour change. A shade darker than the grass and
+  // NOT in the rock's pen: it is the edge of the turf, not a crack, and at the
+  // caveInk weight it read as the mound having a lid.
+  g.beginPath();
+  g.moveTo(0, baseY);
+  traceFringe();
+  g.strokeStyle = PAL.cliffGrassEdge;
+  g.lineWidth = 3.2;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.stroke();
+
+  // ...and blades in the turf itself, thinning out toward the apex where the
+  // ring has shrunk and anything drawn at a constant width smears.
+  g.lineWidth = 2.4;
+  for (let i = 0; i < 160; i++) {
+    const bx = rand() * W;
+    const by = baseY * (0.14 + rand() * 0.84);
+    const bh = H * (0.014 + rand() * 0.022);
+    const xs = Math.min(2.4, 1 / Math.sin(Math.max(0.08, theta(by))));
+    g.save();
+    g.translate(bx, by);
+    g.scale(xs, 1);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.quadraticCurveTo((rand() - 0.5) * bh, -bh * 0.6, (rand() - 0.5) * bh * 1.6, -bh);
+    g.stroke();
+    g.restore();
+  }
+  return c;
+}
+
+// ...and from the rug. Paler, because you are two paces from it with the
+// daylight coming in over your shoulder through a mouth as wide as the room —
+// the same reasoning that makes roomWall paler than houseWall.
+//
+// FINER PLATES than the outside, and this is the one number in the pair worth
+// arguing about. The two surfaces are the same wall, so the honest answer is
+// the same cell size on both; what makes them differ is that you stand a good
+// deal closer to this one. At the outside's 9 columns the cells come out over
+// two units across from a viewpoint that is never more than three units from
+// the stone, which fills the whole view with two plates and a crack. 14 puts
+// four or five in the frame, which is what the reference interior has.
+export function paintCaveWall() {
+  const { w: W, h: H } = ROOM_WALL_TEX;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const rand = makeRandom(ROOM_SEED + 24);
+  const scale = ROOM_WALL_TEX.w / 2048;
+
+  g.fillStyle = PAL.caveRoomWall;
+  g.fillRect(0, 0, W, H);
+
+  // Darker toward the crown rather than toward the floor, which is the
+  // opposite of every other shell in the app and is right for exactly one
+  // reason: this room's only light comes in through a mouth at floor level, so
+  // the ceiling is the part of it furthest from the daylight. It is also what
+  // the reference frame shows — the roof of the hollow is where the grey
+  // gathers.
+  const shade = g.createLinearGradient(0, 0, 0, H);
+  shade.addColorStop(0.00, 'rgba(96,84,78,0.22)');
+  shade.addColorStop(0.45, 'rgba(96,84,78,0.07)');
+  shade.addColorStop(1.00, 'rgba(96,84,78,0)');
+  g.fillStyle = shade;
+  g.fillRect(0, 0, W, H);
+
+  // The whole shell, including the apex and its neighbouring plates, comes
+  // from a polar net. This is what prevents both failure modes of a UV-space
+  // drawing: the radial flower of stretched cells and the circular cap used to
+  // hide it.
+  domeStoneNet(g, W, H, {
+    rand, ink: PAL.caveInk, mark: PAL.caveMark,
+    width: 2.6, alpha: 0.86,
+    rings: 6, edgeCount: 24,
+    markSkip: 0.48, scratchScale: 0.86,
+  });
+
+  // The seam where the wall meets the floor, in the rock's own pen and drawn
+  // unbroken. The house lifts its pen five times along this line, and that
+  // gap-dot-gap hand is exactly what should NOT happen here: it is a plastered
+  // wall meeting a boarded floor, a joint somebody made. A hollow has no joint.
+  // What it has is the last crack before the ground, so this is one more edge
+  // of the net rather than a different kind of line.
+  g.strokeStyle = PAL.caveInk;
+  g.lineWidth = 6 * scale;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  const seamY = H - 5 * scale;
+  g.beginPath();
+  g.moveTo(0, seamY);
+  for (let x = 0; x <= W; x += W / 40) g.lineTo(x, seamY + (rand() - 0.5) * 7);
+  g.stroke();
+  return c;
+}
+
+// The floor of the hollow. The anime treats it as an almost blank pale plane:
+// tiny paired pen ticks make the surface readable, while only a few short,
+// gently uneven cracks interrupt it. It deliberately does not repeat the
+// wall's polygon net or carry long grain lines across the room.
+export function paintCaveFloor() {
+  const S = 1024;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const rand = makeRandom(ROOM_SEED + 25);
+
+  g.fillStyle = PAL.caveRoomFloor;
+  g.fillRect(0, 0, S, S);
+
+  const R = S / 2;
+  // Short, mostly horizontal cracks. Each is drawn as several gently wandering
+  // segments so it has the anime's lifted-pen wobble without becoming a long
+  // geological seam.
+  g.strokeStyle = PAL.caveInk;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.globalAlpha = 0.68;
+  for (let i = 0; i < 12; i++) {
+    let x;
+    let y;
+    do {
+      x = R * 0.14 + rand() * R * 1.72;
+      y = R * 0.14 + rand() * R * 1.72;
+    } while (Math.hypot(x - R, y - R) > R * 0.84);
+    const len = 32 + rand() * 38;
+    const angle = (rand() - 0.5) * 0.24;
+    g.lineWidth = 2.0 + rand() * 1.1;
+    g.save();
+    g.translate(x, y);
+    g.rotate(angle);
+    g.beginPath();
+    g.moveTo(-len / 2, (rand() - 0.5) * 2);
+    for (let step = 1; step <= 4; step++) {
+      const px = -len / 2 + len * (step / 4);
+      const py = (rand() - 0.5) * 4;
+      g.lineTo(px, py);
+    }
+    g.stroke();
+    g.restore();
+  }
+  g.globalAlpha = 1;
+
+  // Fine one-to-three stroke clusters, mostly horizontal with the occasional
+  // upright pair found in the reference. They are intentionally much smaller
+  // than the wall scratches: the floor texture is halved before it reaches the
+  // room mesh, and these still need to land as hairline details after that.
+  const GRID = 13;
+  for (let row = 0; row < GRID; row++) {
+    for (let col = 0; col < GRID; col++) {
+      if (rand() < 0.50) continue;
+      const x = (col + 0.15 + rand() * 0.7) * (S / GRID);
+      const y = (row + 0.15 + rand() * 0.7) * (S / GRID);
+      if (Math.hypot(x - R, y - R) > R * 0.90) continue;
+      g.save();
+      g.translate(x, y);
+      g.rotate(rand() < 0.14 ? Math.PI / 2 : (rand() - 0.5) * 0.12);
+      markCluster(g, rand, 0, 0, PAL.caveMark, 0.52, 1);
+      g.restore();
+    }
+  }
+  return c;
+}
+
+// THE MOUTH SHEET, and the proportion that makes a cave a cave.
+//
+// Every opening in this app takes its width from config and its HEIGHT from its
+// sheet's own aspect — that rule is what stopped the house's door being two
+// free numbers that drifted into a flattened arch. So the only way to say "a
+// mouth four units across is not four units tall" is to say it here, in the
+// shape of the canvas: 1.55 times as wide as the door sheet at the same height.
+// Everything downstream follows without knowing anything has changed.
+export const MOUTH_SHEET = {
+  w: Math.round(DOOR_SHEET.w * 1.55), h: DOOR_SHEET.h, arch: DOOR_SHEET.arch,
+};
+
+// The mouth's own ink, and the one drawn thing on the whole building.
+//
+// It is cut with the same archPath the house's door is — one description of the
+// shape, so the hole and the line round it cannot disagree — carrying two
+// differences that are the difference between a doorway and a hollow.
+//
+// The LINE IS DRAWN IN A ROUGHER HAND: a door frame is a made thing with two
+// uprights and a head, and this is where the rock happens to stop. The stroke
+// is walked along the arch as a polyline with the pen wandering off the true
+// path, which is the only way to get a line that reads as hand-drawn at this
+// weight.
+//
+// And it grows STALACTITES. Two of them, hanging inside the crown, which is
+// the detail the reference frame is unmistakable for — a cave with a smooth
+// mouth is a tunnel. They are painted on the outer face rather than modelled or
+// put on the interior wall, because that is where they read: against the dark
+// of the room, seen from the grass, exactly as the source frame stages them.
+export function paintCaveMouth() {
+  const { w: W, h: H } = MOUTH_SHEET;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const rand = makeRandom(ROOM_SEED + 26);
+  const lw = W * 0.030;
+  const r = W * DOOR_SHEET.arch;
+  const top = Math.ceil(lw / 2) + 1;
+  const bottom = H - 6;
+  const cy = top + r;
+
+  // Straight sides and a half circle, walked as one list of points so the pen
+  // can wander along it.
+  const pts = [];
+  const LEG = 9;
+  const ARC = 26;
+  for (let i = 0; i <= LEG; i++) pts.push([W / 2 - r, bottom - (bottom - cy) * (i / LEG)]);
+  for (let i = 1; i <= ARC; i++) {
+    const a = Math.PI - Math.PI * (i / ARC);
+    pts.push([W / 2 + Math.cos(a) * r, cy - Math.sin(a) * r]);
+  }
+  for (let i = 1; i <= LEG; i++) pts.push([W / 2 + r, cy + (bottom - cy) * (i / LEG)]);
+
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.strokeStyle = PAL.caveInk;
+  g.lineWidth = lw;
+  g.beginPath();
+  pts.forEach((p, i) => {
+    const x = p[0] + (rand() - 0.5) * lw * 0.55;
+    const y = p[1] + (rand() - 0.5) * lw * 0.40;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  });
+  g.stroke();
+
+  // The stalactites, hung from the inside of the crown. Two, of different
+  // lengths and neither on the middle — a matched pair either side of centre
+  // would read as teeth. Filled in the interior's own pale stone so they are
+  // lit like the wall they are hanging off rather than reading as silhouette.
+  const tooth = (cx, len, wide) => {
+    g.beginPath();
+    g.moveTo(cx - wide, cy - r + lw * 0.4);
+    g.quadraticCurveTo(cx - wide * 0.35, cy - r + len * 0.7, cx, cy - r + len);
+    g.quadraticCurveTo(cx + wide * 0.35, cy - r + len * 0.7, cx + wide, cy - r + lw * 0.4);
+    g.closePath();
+    g.fillStyle = PAL.caveRoomWall;
+    g.fill();
+    g.lineWidth = lw * 0.62;
+    g.stroke();
+  };
+  tooth(W * 0.425, H * 0.150, W * 0.019);
+  tooth(W * 0.548, H * 0.098, W * 0.016);
+  return c;
+}
+
+// The same opening seen from the rug — the line only, no stalactites, since
+// from in here they are behind you. Its own painter rather than a flag on the
+// one above, because the two faces of an opening are drawn at different
+// weights everywhere else in this file and there is no reason for this to be
+// the exception.
+export function paintCaveMouthInner() {
+  const { w: W, h: H } = MOUTH_SHEET;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.lineWidth = W * 0.020;
+  g.strokeStyle = PAL.caveInk;
+  archPath(g, W, Math.ceil(W * 0.010) + 1, H - 6, W * DOOR_SHEET.arch);
+  g.stroke();
+  return c;
+}
+
+// paintCliffFace and paintCliffTop stood here — the face and the grass top of a
+// separate plateau the cave was going to be cut into. Both are gone with the
+// plateau itself; see the long note on CONFIG.cave for why a hill that stands
+// behind a cave cannot be seen from in front of it on a globe this small, and
+// what replaced it. The crack net and the grass fringe they were built from
+// both survive: the net is used by all three of the mound's surfaces, and the
+// fringe moved into paintCaveSkin, where it is now the mound's own turf line.
+
+// ------------------------------------------------------- the retired cards
+//
+// The cave's day and night sheets. Both are RETIRED the moment they are built
+// — the building is geometry, and neither is ever shown — and they exist for
+// the same reason the house's two do: the sprite, sort, cull and lamp
+// machinery all address a prop through its card, and teaching four systems that
+// some props have none is a great deal more surgery than painting two canvases
+// nobody looks at.
+//
+// The night one is not blank, and must not be: litSpot reads it to find where a
+// building's warm openings are, and a sheet with no warm pixel on it has no
+// answer to give. What it finds here is the mouth, which is where the glow
+// belongs — though scene.js then re-hangs the bloom off the built opening
+// anyway, exactly as it does for the house.
+function caveCard(night) {
+  const W = 420;
+  const H = 230;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const r = W * 0.47;
+  const cx = W / 2;
+  const cy = H - 6;
+  g.fillStyle = PAL.cliffFace;
+  g.beginPath();
+  g.arc(cx, cy, r, Math.PI, 0);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = PAL.caveInk;
+  g.lineWidth = W * 0.018;
+  g.stroke();
+  // The mouth is a third of the mound's width and sits at its foot, which is
+  // where litSpot has to find the warm pixels on the night sheet.
+  const mw = r * 0.90;
+  g.save();
+  g.translate(cx - mw / 2, cy - r * 0.62);
+  g.beginPath();
+  archPath(g, mw, 0, r * 0.62, mw * DOOR_SHEET.arch);
+  g.closePath();
+  g.fillStyle = night ? '#FFD98C' : '#5D5049';
+  g.fill();
+  g.restore();
+  return c;
+}
+
+export function paintCaveDay() { return caveCard(false); }
+export function paintCaveNight() { return caveCard(true); }

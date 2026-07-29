@@ -11,10 +11,12 @@ import {
   paintShadow, SHADOW_ROOM, paintLampGlow, paintItemGlow, litSpot, paintWalkMarker,
   paintBench, paintSheet, sheetBounds, makeRandom, SKY_DESIGN,
   starStamp, STAR_SEED,
-  paintHouseSkin, paintHouseWindowFrame,
+  paintHouseSkin, paintHouseWindowFrame, paintHousePlateBlock,
   paintHouseDoorFrame, paintDoorway,
   paintRoomWall, paintRoomFloor, paintRug, paintTableTop,
   archPath, DOOR_SHEET, WINDOW_SHEET,
+  paintCaveSkin, paintCaveWall, paintCaveFloor, paintCaveMouth, paintCaveMouthInner,
+  paintCaveDay, paintCaveNight, MOUTH_SHEET,
 } from './art.js';
 import { BUILD } from './furniture.js';
 import {
@@ -29,8 +31,8 @@ import { LOOK, PHASES } from './daylight.js';
 import { RENDER_SPAN } from './character.js';
 import {
   UP, orientBillboard, dirFromLatLon, inLake, setBuildings, inBuilding, setScenery,
-  setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, lakeReach,
-  perchAlongRay, perchUnder,
+  setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, growWeight,
+  lakeReach, perchAlongRay, perchUnder,
 } from './sphere.js';
 import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
@@ -72,6 +74,11 @@ const SPRITE_SIZE = {
   // through the door and the windows, lying on the room's floor, in lawn green,
   // wearing the outdoor hour while the room wore its own.
   house: { h: 3.0, shadow: false, small: false },
+  // Hachiware's mound, and the biggest thing standing on the planet. No shadow,
+  // for the same reason the house has none: its disc would be cut from its own
+  // width, so it would lie entirely inside the building and never darken a
+  // blade of grass anybody could see.
+  cave: { h: 4.0, shadow: false, small: false },
   bench: { h: 0.9, shadow: true, small: false },
   // BUILT, and therefore measured here rather than off a drawing.
   //
@@ -111,7 +118,19 @@ const SPRITE_SIZE = {
 // Counted for a globe.radius of 8. It is a count over a fixed area, so shrinking
 // the planet without shrinking this crowds it: scale by the square of the radius
 // change to hold the spacing you already had.
-const SCENERY_COUNT = 58;
+// 100, up from 58, and almost all of the increase is paid straight back out to
+// the biomes. Scenery is now REFUSED on the sand — see `scatter`, and
+// CONFIG.biomes for why nothing stands there — and the two clearings between
+// them weigh a third of the surface, so a spiral counted for a whole planet
+// quietly plants a third fewer things than it says.
+//
+// Measured rather than scaled, because the cull is not uniform: the spiral is
+// fixed, so which spots fall on sand is a fact about this arrangement and not a
+// probability. 100 asked for is 45 standing, against 46 today — the same planet's
+// worth of props, all of them now in the two thirds of the world that wants
+// them, which is about half again the density the meadow ever had. The cost is
+// unchanged: what survives the cull is what becomes a draw call.
+const SCENERY_COUNT = 100;
 const GOLDEN_ANGLE = 2.3999632297;
 
 // Dealt round-robin across the scatter, so the mix is even without needing a
@@ -134,6 +153,12 @@ const GOLDEN_ANGLE = 2.3999632297;
 // Shortening SCENERY_COUNT instead would have been worse again: the spiral is a
 // function of how many points it is asked for, so every prop would have moved.
 const PROP_TYPES = ['tree', 'bush1', null, 'bush2', 'stump'];
+
+// Which entry in a biome's `grows` each slot answers to. Two bush drawings are
+// ONE KIND of thing to a biome — "are there bushes here" is not a question a
+// hillside answers twice — for the same reason a tree's three drawings share a
+// slot below.
+const PROP_KIND = { tree: 'tree', bush1: 'bush', bush2: 'bush', stump: 'stump' };
 
 // Where one kind has several drawings they share a single slot and take turns
 // inside it. Giving each drawing its own slot would mean a second tree drawing
@@ -202,7 +227,284 @@ function solidRadius(type, h, w, canvasFor) {
 // turns a daylight drawing into a night one — it is why the grass goes blue —
 // and this drawing has already been through that by hand. Multiplying it again
 // would bury the very windows it exists for.
-const NIGHT_ART = { house: 'houseNight' };
+const NIGHT_ART = { house: 'houseNight', cave: 'caveNight' };
+
+// WHAT A HOME IS MADE OF, keyed by CONFIG.homes' `style`.
+//
+// Everything that differs between Chiikawa's house and Hachiware's cave, in one
+// table — and the fact that it fits in one table is the whole argument for
+// having built the cave through the house's own code rather than beside it.
+// Two buildings that share a shape, a collision model, a lighting model and a
+// way of cutting holes in themselves, and disagree about six painters, a pen
+// colour and whether they have windows.
+//
+// `sheet` is the opening's own canvas proportions, and it is the one entry that
+// does real geometric work. Every opening in this app takes its width from
+// config and its HEIGHT from its sheet's aspect — the rule that stopped the
+// house's door being two free numbers that drifted into a flattened arch — so
+// a mouth that is much wider than it is tall can only say so by being drawn on
+// a wider canvas. MOUTH_SHEET is DOOR_SHEET stretched half again.
+//
+// `windows` is not a count and not a list: the bearings live in each home's own
+// spec. It only says whether this style HAS the idea, which is what lets the
+// window arithmetic below be skipped rather than run against an empty list.
+const HOME_ART = {
+  house: {
+    skin: paintHouseSkin,
+    wall: paintRoomWall,
+    floor: paintRoomFloor,
+    doorOuter: paintHouseDoorFrame,
+    doorInner: paintDoorway,
+    doorSheet: DOOR_SHEET,
+    ink: PAL.houseInk,
+    windows: true,
+    plate: paintHousePlateBlock,
+  },
+  cave: {
+    skin: paintCaveSkin,
+    wall: paintCaveWall,
+    floor: paintCaveFloor,
+    doorOuter: paintCaveMouth,
+    doorInner: paintCaveMouthInner,
+    doorSheet: MOUTH_SHEET,
+    ink: PAL.caveInk,
+    windows: false,
+  },
+};
+
+// ------------------------------------------------------------ the mound's lumps
+//
+// WHAT MAKES A CAVE NOT A HOUSE IS ITS OUTLINE, and until this the two had the
+// same outline. Both homes are one SphereGeometry — a hemisphere plus a skirt at
+// whatever radius their wall is — and every difference between them was PAINT:
+// the stone net, the turf crown, the wandered arch, the two stalactites. All of
+// it good, and all of it losing to silhouette, which is what the eye reads
+// first and what this drawing style has instead of shading. Hachiware's place
+// read as a stone house because it WAS a house, drawn in rock.
+//
+// So the rock gets pushed about. A short authored list of lobes — a bearing, an
+// elevation, a height, a width — summed into a radial displacement over the
+// dome's own vertices, turning one clean hemisphere into a lumpy mound with its
+// mass rising behind the mouth.
+//
+// OUTWARD ONLY, and that is the rule the whole thing is safe because of.
+// Nothing moves inward, so: the room is untouched, the interior wall a hair
+// inside can never be breached from without, the analytic wall the collision
+// layer holds still agrees with what you can see, and the doorway arithmetic —
+// which was worked out against `rad` a hundred lines before this runs — stays
+// true. This is a drawing change wearing no physics.
+//
+// AUTHORED RATHER THAN NOISE, for the same reason furniture.js keeps a fixed
+// WOBBLE table instead of calling Math.random: a shape that has to be judged
+// against a reference drawing must be the same shape every time it is looked at.
+// Four lobes, and each one is a decision:
+//
+//   the SHOULDER, nearly behind the mouth and high on the flank, is the mass.
+//   A hill you walk up to should be biggest behind the hole, so the hole reads
+//   as cut INTO something rather than as a lid propped over it.
+//
+//   two FLANK humps, at different heights and unequal sizes, because a mound
+//   with symmetrical sides is a roof.
+//
+//   the CROWN, small and deliberately off to one side, so the top of the
+//   silhouette is not the top of a sphere.
+const caveLobe = (at, up, amp, wide) => ({
+  // Bearing to a direction, the same chart the doorway and the furniture use:
+  // bearing 0 is +Z and positive turns toward +X. `up` is the polar angle down
+  // from the crown, so 0 is straight up and PI/2 is the ground line.
+  dir: new THREE.Vector3(
+    Math.sin(up) * Math.sin(at), Math.cos(up), Math.sin(up) * Math.cos(at),
+  ),
+  amp,
+  wide,
+});
+
+// NARROW ENOUGH TO READ SEPARATELY, which took a second pass to get right. The
+// first set was four wide lobes and they summed into one smooth mass: the
+// silhouette leaned over and stayed a single clean curve, which is a dome that
+// has been pushed, not a hill. A lump only reads as a lump if the surface comes
+// back down between it and the next one, so these are half the width and there
+// are nearly twice as many.
+//
+// They also had to come DOWN. The first set all sat high, and with the fade that
+// keeps lumps out of the buried rim it meant every one of them landed in the
+// turf: rendered side by side, the rock band below the grass was identical
+// before and after. All the shape was happening in the grass, and the rock —
+// which is the half that says cave — was still a perfect arc.
+// SPREAD AROUND THE COMPASS, which is the thing that took three passes to
+// understand. What shows on a silhouette is only ever the handful of lobes near
+// the LIMB — the great circle you happen to be looking edge-on at — so a few
+// large lobes give you one broad bulge from every angle and never a lumpy
+// outline. Measured from a three-quarter view, four wide lobes moved the crown
+// twelve pixels and left the profile a single clean curve.
+//
+// The answer is more of them and smaller, at bearings all the way round, so that
+// wherever you stand two or three are on the limb and the outline breaks up.
+// Amplitudes stay modest for the same reason the widths do: this is a mound with
+// weathered lumps, not a bag of boulders.
+const CAVE_LOBES = [
+  // The mass, nearly behind the mouth and high on the flank. A hill should be
+  // biggest behind its hole, so the hole reads as cut INTO something.
+  caveLobe(Math.PI * 0.92, 0.58, 0.92, 0.62),
+  // The crown, deliberately off to one side so the top of the outline is not
+  // the top of a sphere, with a smaller one beside it to break the ridge.
+  caveLobe(1.15, 0.24, 0.46, 0.44),
+  caveLobe(-0.62, 0.40, 0.30, 0.34),
+  // The upper ring: shoulders at unequal sizes and heights, because a mound
+  // with symmetrical sides is a roof.
+  caveLobe(-1.85, 0.86, 0.62, 0.42),
+  caveLobe(2.35, 0.95, 0.48, 0.38),
+  caveLobe(-2.90, 0.72, 0.54, 0.40),
+  caveLobe(1.85, 0.62, 0.34, 0.32),
+  // ...and the lower ring, down in the stone, which is where the eye reads
+  // "rock" rather than "grass over something".
+  caveLobe(-2.55, 1.30, 0.42, 0.34),
+  caveLobe(2.95, 1.24, 0.38, 0.32),
+  caveLobe(-1.05, 1.22, 0.30, 0.30),
+  caveLobe(2.05, 1.32, 0.34, 0.30),
+  caveLobe(-3.05, 1.16, 0.30, 0.28),
+];
+
+// How far the lobes lift the surface in one given direction. THE ONE PLACE THAT
+// KNOWS, so the displacement the mesh actually gets and the bound everything
+// else sizes itself against cannot drift apart.
+const _liftAt = new THREE.Vector3();
+function caveLiftAt(u) {
+  let lift = 0;
+  for (const L of CAVE_LOBES) {
+    const a = Math.acos(Math.max(-1, Math.min(1, u.dot(L.dir))));
+    if (a >= L.wide) continue;
+    const t = 1 - a / L.wide;
+    lift += L.amp * t * t * (3 - 2 * t);
+  }
+  return lift;
+}
+
+// The most the surface is lifted ANYWHERE, for the readers that need to know how
+// big this thing actually got — the roof lid, which sizes itself off the
+// analytic radius and would otherwise whip the rock away while you were still
+// climbing past a crown it did not know about.
+//
+// MEASURED, because it cannot be reasoned about cheaply and both cheap guesses
+// were wrong. The largest single amplitude in the table is 0.92; the surface
+// reaches 1.106, because lobes overlap and add. Evaluating the sum at each
+// lobe's own centre gets 0.968 and is still short, because the true maximum of a
+// sum of overlapping bumps sits BETWEEN their centres, not on one.
+//
+// So: sample the sphere and look. A Fibonacci spiral covers it evenly with no
+// clustering at the poles, two thousand points is far finer than lobes this wide
+// can hide a peak in, and it runs once at module load. The margin is for the
+// gap between the sample and the true continuous maximum.
+const CAVE_LIFT = (() => {
+  const N = 2000;
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  let best = 0;
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i / (N - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = GOLDEN * i;
+    _liftAt.set(Math.cos(th) * r, y, Math.sin(th) * r);
+    const v = caveLiftAt(_liftAt);
+    if (v > best) best = v;
+  }
+  return best * 1.03;
+})();
+
+// How far above the ground line the lumps stop. The shell carries on past the
+// equator and into the hillside — that skirt is what buries the rim — and a lump
+// riding down into it would lift the buried edge back out into daylight, so the
+// displacement has to be exactly zero by the time it gets there.
+//
+// 0.30 rather than the 0.45 it started at, and the difference is the whole rock
+// face. At 0.45 the fade began 26 degrees above the ground line, which is most
+// of the exposed stone, so every lobe that reached it was flattened and the rock
+// came out as untouched as it had ever been. 0.30 lets the outcrops live in the
+// stone and still leaves the rim itself alone.
+const CAVE_GROUND_FADE = 0.30;
+
+const _ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+const _c1 = (x) => Math.max(-1, Math.min(1, x));
+
+// WHERE THE SURFACE ACTUALLY ENDS UP, in one direction: the raw lobe sum, masked
+// at the mouth and faded into the ground.
+//
+// Shared, and it has to be. Two things need this answer and they must agree to
+// the millimetre — the dome's own vertices, and anything planted ON that dome,
+// which is the crown grass. A tuft that used the unmasked lift would float off
+// the rock everywhere near the mouth, by as much as a whole lobe's height.
+function caveSurfaceLift(u, doorDir, guard) {
+  let lift = caveLiftAt(u);
+  if (lift <= 0) return 0;
+  const atDoor = Math.acos(_c1(u.dot(doorDir)));
+  if (atDoor < guard) lift *= _ease(atDoor / guard);
+  const theta = Math.acos(_c1(u.y));
+  const edge = Math.PI / 2;
+  if (theta > edge - CAVE_GROUND_FADE) {
+    lift *= _ease((edge - theta) / CAVE_GROUND_FADE);
+  }
+  return lift;
+}
+
+// Push one dome's vertices out. `doorDir` is the middle of the mouth and
+// `guard` how wide a circle around it to leave alone; the frames and the punched
+// hole are placed on the unbulged sphere, so the surface has to still BE the
+// unbulged sphere everywhere they land.
+function caveBulge(geo, doorDir, guard) {
+  const p = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const r0 = v.length();
+    if (r0 < 1e-6) continue;
+    v.multiplyScalar(1 / r0);
+    // The pad is preserved rather than replaced: the ink hull is built a hair
+    // outside the skin and has to stay a hair outside it, bumps and all, or the
+    // line would sink into the rock exactly where the rock is most interesting.
+    v.multiplyScalar(r0 + caveSurfaceLift(v, doorDir, guard));
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  p.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+}
+
+// WHERE THE PAINTED TURF ENDS, as a polar angle down from the crown.
+//
+// Not a number of its own: paintCaveSkin fills grass from the top of its canvas
+// down to TURF of the way across it, and that canvas is stretched over the
+// shell's whole span — the hemisphere PLUS the skirt that buries the rim. So the
+// grass line is that fraction of that span, and stating it any other way would
+// be a second copy of a number art.js already owns.
+//
+// Pulled in a little, because the painted fringe is scalloped: its bumps dip
+// below the nominal line by up to FRINGE_DIP, and a blade planted in the dip
+// would be standing on rock.
+const CAVE_TURF = 0.60;
+const CAVE_TURF_INSET = 0.06;
+
+// Move whole tufts out onto the bulged surface.
+//
+// Per TUFT, never per vertex. buildGrassBlades lays each tuft down as a known
+// contiguous run — the same fact 草むしり relies on to pull one — so shifting a
+// run bodily along its own normal carries the blades' shape with it. Displacing
+// vertices individually would stretch every blade by the gradient of the lump it
+// was standing on.
+function caveLiftTufts(geo, dirs, doorDir, guard) {
+  const p = geo.attributes.position;
+  const per = p.count / dirs.length;
+  for (let i = 0; i < dirs.length; i++) {
+    const d = caveSurfaceLift(dirs[i], doorDir, guard);
+    if (d === 0) continue;
+    const dx = dirs[i].x * d;
+    const dy = dirs[i].y * d;
+    const dz = dirs[i].z * d;
+    for (let k = i * per; k < (i + 1) * per; k++) {
+      p.setXYZ(k, p.getX(k) + dx, p.getY(k) + dy, p.getZ(k) + dz);
+    }
+  }
+  p.needsUpdate = true;
+  geo.computeBoundingSphere();
+}
 
 // ...and what those lit windows throw onto everything around them. Two layers,
 // because neither can do the other's job.
@@ -573,6 +875,21 @@ function scatter(radius, keepOut) {
     // The margin is set by the widest prop at its biggest scale — a bush spans
     // 0.74 units from its trunk — so leaves keep off the water, not just roots.
     if (CONFIG.lakes.some((l) => inLake(dir, l, 0.10))) continue;
+
+    // NOR WHERE THE GROUND DOES NOT GROW IT. The sand at the two homes grows
+    // nothing standing at all, so this is the line that empties both clearings —
+    // and it is a line about biomes rather than about homes, which matters: the
+    // bare ground is a fact of the ground, and moving a patch in CONFIG.biomes
+    // moves what is bare with it instead of leaving a wood growing over the top
+    // of a beige field.
+    //
+    // The half-way line rather than a roll against the weight, because this loop
+    // has no random stream and a fixed spiral must stay fixed — the whole reason
+    // the empty slot in PROP_TYPES is a hole rather than a shorter list is that
+    // re-dealing this scatter moves every prop on the planet. It costs a hard
+    // edge in the planting where the paint has a soft one, and at three dozen
+    // props spread over a world there is no density gradient to see anyway.
+    if (growWeight(dir, CONFIG.biomes, PROP_KIND[slot]) < 0.5) continue;
 
     // Only the larger props are billboards; grass and flowers come from the
     // merged ground cover instead.
@@ -978,37 +1295,47 @@ export class Globe {
     // comes closer, which is exactly what the reference frames do with it.
     //
     // WHERE THE BAND SITS is the whole of the geometry, and it is worked out
-    // rather than nudged. Stood at eye height on a planet this small the limb is
-    // 34.4 degrees BELOW level — see the note in CONFIG.camera — and on a dome
-    // of this radius, seen from a camera 9.7 out from the middle, that lands at
-    // 121.7 degrees of polar angle. The hills occupy the sky above that;
-    // everything past it is buried behind the planet by the depth test, the way
-    // a real range has its feet cut off by the near hillside.
+    // rather than nudged. Stood at eye height on a planet this small the limb
+    // is 32.3 degrees BELOW level, and on a dome of this radius, seen from a
+    // camera 9.47 out from the middle, that lands at 119.7 degrees of polar
+    // angle. The hills occupy the sky above that; everything past it is buried
+    // behind the planet by the depth test, the way a real range has its feet
+    // cut off by the near hillside.
     //
-    // FROM at 107 puts that limb at row 0.567 of the sheet, which is INSIDE the
-    // treeline — SKYLINE.treeTop is 0.50 — so what you get standing still is a
-    // row of crowns breaking the horizon with the rest of the wood buried, the
-    // way a distant treeline actually reads. It ran at 104 and then 105.1, both
-    // of which held the whole wood above the limb and stood it on a strip of
-    // flat green.
+    // PINNED TO eyeHeight, and re-derived when that moved: these numbers were
+    // 34.4 degrees, a camera at 9.7 and a limb at 121.7 while the eye stood at
+    // 1.7. When the eye came down to the avatar's own 1.47 the limb rose two
+    // degrees, and under the old FROM of 107 its row rose from 0.567 to 0.487
+    // — past treeTop at 0.48, which is the entire wood buried behind the
+    // planet with the crowns going under. If eyeHeight moves again, this
+    // moves: FROM = limb - 0.567 * SPAN.
     //
-    // THE HOP IS WHY IT CAN GO THIS LOW, and the arithmetic belongs here. A hop
-    // is 0.60, which takes the camera to 10.3, the limb to 39.0 degrees down and
-    // 126.3 on the dome — row 0.744. Every one of those 4.6 degrees uncovers
-    // sheet that was behind the planet a moment ago, and moving the band moves
-    // the limb's row with it, so no value of FROM avoids the reveal. What fills
-    // it is SKYLINE.treeBase, which is set past 0.744 for exactly this reason:
-    // the wood goes on being wood for the whole of the hop. See the note on it
-    // in art.js.
+    // FROM at 104.9 puts that limb back at row 0.567 of the sheet, which is
+    // INSIDE the treeline — SKYLINE.treeTop is 0.46 — so what you get standing
+    // still is a row of crowns breaking the horizon with the rest of the wood
+    // buried, the way a distant treeline actually reads. It ran at 104 and
+    // then 105.1 in the 1.7 era, both of which held the whole wood above the
+    // limb and stood it on a strip of flat green.
     //
-    // The band's foot at 133 is the other limit: it clears the hop apex by 6.7
-    // degrees, near enough 0.9 of altitude, so hopping off anything much over
-    // knee height would still run out of sheet and show sky under the range.
+    // THE HOP IS WHY IT CAN GO THIS LOW, and the arithmetic belongs here. A
+    // hop is 0.60, which takes the camera to 10.07, the limb to 37.4 degrees
+    // down and 124.7 on the dome — row 0.761. Every one of those 5 degrees
+    // uncovers sheet that was behind the planet a moment ago, and moving the
+    // band moves the limb's row with it, so no value of FROM avoids the
+    // reveal. What fills it is two rows of crowns before SKYLINE.treeBase,
+    // which is set at 0.90: the wood goes on being illustrated foliage for the
+    // whole hop. The 0.139-sheet margin is deliberate reserve rather than a
+    // last-pixel escape. See the note on it in art.js.
+    //
+    // The band's foot at 130.9 is the other limit: it clears the hop apex by
+    // 6.2 degrees, near enough 0.9 of altitude, so hopping off anything much
+    // over knee height would still run out of sheet and show sky under the
+    // range.
     //
     // Transparent and depth-tested for that reason, and drawn after both sky
     // domes: `skyA` does not depth-test at all, so anything sharing the opaque
     // pass with it would be painted straight over.
-    const HORIZON_FROM = 107.0 * (Math.PI / 180);
+    const HORIZON_FROM = 104.9 * (Math.PI / 180);
     const HORIZON_SPAN = 26 * (Math.PI / 180);
     // Repeat rather than clamp, which is what lets the filter sample ACROSS the
     // wrap. The band's shapes are periodic by construction, but canvas has no
@@ -1225,6 +1552,15 @@ export class Globe {
       // its own — there is one house, wearing one of two faces.
       house: () => paintSheet(IMG.houseDay, false),
       houseNight: () => paintSheet(IMG.houseNight, false),
+      // The cave's pair are PAINTED rather than drawn, and they are the first
+      // sheets in the app with no PNG behind them. That is only possible
+      // because neither is ever seen: the building is geometry, both cards are
+      // retired on the frame they are built, and what they exist for is to keep
+      // the sprite and lamp machinery supplied with the objects it addresses
+      // props through. Painting them costs two small canvases and saves two
+      // drawings of a building nobody will look at.
+      cave: paintCaveDay,
+      caveNight: paintCaveNight,
       // Drawn art. paintSheet only frames it — see art.js. The `false` keeps
       // padding off the bottom edge, which is where these meet the ground.
       //
@@ -1385,9 +1721,20 @@ export class Globe {
     // collected because GLSL sizes an array at compile time and the room does
     // not exist yet — and guarded on there being a house at all, since the
     // whole interior is built only if one got scattered.
-    const roomLights = lampProps.length
-      ? CONFIG.interior.furniture.filter((f) => ROOM_LIGHT[f.art])
-      : [];
+    // Summed over every home rather than read off the one, which is the whole
+    // of what two buildings cost this shader. Each home's own table is filtered
+    // by the same ROOM_LIGHT test and the counts added, so the cave's lantern
+    // gets a slot of its own after the house's lantern and bulb.
+    //
+    // Guarded per home on that home's building actually having been scattered,
+    // for the reason the single-house version was: the interior is only built
+    // if the landmark it belongs to exists, and a slot reserved for a room that
+    // was never built is a divisor of zero waiting in the array.
+    const roomLights = CONFIG.homes.flatMap((home) => (
+      lampProps.some((p) => p.type === home.type)
+        ? home.spec.furniture.filter((f) => ROOM_LIGHT[f.art])
+        : []
+    ));
     const NOUT = lampProps.length;
     const NIN = roomLights.length;
     const N = NOUT + NIN;
@@ -1891,44 +2238,58 @@ export class Globe {
 
     // ------------------------------------------------------------- biomes
     //
-    // The other two readers of CONFIG.biomes — the ground texture is the first,
-    // over in art.js. All three ask `biomesAt`, so a field cannot be blond in
-    // the paint and lush in the planting.
+    // The ground cover's readers of CONFIG.biomes. The ground texture is the
+    // first, over in art.js, and the scenery spiral the fourth; all of them ask
+    // `biomesAt`, so a field cannot be blond in the paint and lush in the
+    // planting.
     const _mix = [];
-    // How readily anything grows here: 1 on the open meadow, and the biome's own
-    // `cover` in the middle of one.
+    // How readily what grows here bothers to. A plain weighted average now that
+    // the mix always includes the base biome and always sums to one — it used to
+    // start at 1 and accumulate each biome's departure from it, because the
+    // meadow was a default living outside the table rather than an entry in it.
     const coverAt = (d) => {
-      let k = 1;
-      for (const { biome, w } of biomesAt(d, CONFIG.biomes, _mix)) {
-        k += (biome.cover - 1) * w;
-      }
+      let k = 0;
+      for (const { biome, w } of biomesAt(d, CONFIG.biomes, _mix)) k += biome.cover * w;
       return k;
     };
     // Thinning by REJECTION, folded in beside the lake and footprint rules so
     // there is one predicate deciding whether a spot is available.
     //
+    // `kind` is the second half of it and the half that empties the sand: a spot
+    // is refused outright where the ground does not grow that kind of thing at
+    // all, and softly in proportion where it half does. Rolling against the
+    // weight rather than taking the strongest biome — which is what the scenery
+    // spiral has to do — is affordable here because there IS a random stream,
+    // and it is worth spending: ground cover is dense enough that a hard line
+    // through it would be a visible circle of flowers stopping dead.
+    //
     // Worth being clear about what rejection does to the totals: it does not
-    // reduce them. A tuft turned away in the dry field is retried somewhere
-    // else, so the count asked for is the count planted and the planet's cost
-    // does not wander with the config — what changes is WHERE they land, which
-    // is the whole point.
-    const plantable = (margin) => {
+    // reduce them. A tuft turned away on the sand is retried somewhere else, so
+    // the count asked for is the count planted and the planet's cost does not
+    // wander with the config — what changes is WHERE they land, which is the
+    // whole point. It does mean a kind no biome grows would spin the guard in
+    // `scatterPoints` to its limit and plant nothing, which is the right
+    // failure: nothing asked for is nothing built.
+    const plantable = (margin, kind) => {
       const busy = occupied(margin);
-      return (d) => busy(d) || rand() > coverAt(d);
+      return (d) => busy(d)
+        || rand() > growWeight(d, CONFIG.biomes, kind)
+        || rand() > coverAt(d);
     };
 
-    // ...and the colour of what does grow. Two greens per tuft, blended off the
-    // meadow's pair toward whatever biome it is standing in.
+    // ...and the colour of what does grow. Two greens per tuft, averaged over
+    // whatever biomes the tuft is standing in — the meadow's own pair among
+    // them, from the table, rather than as a starting colour read out of PAL.
     const _bLow = new THREE.Color();
     const _bHigh = new THREE.Color();
-    const meadowLow = new THREE.Color(PAL.grassBladeLow);
-    const meadowHigh = new THREE.Color(PAL.grassBladeHigh);
     const bladeShade = (d, low, high) => {
-      low.copy(meadowLow);
-      high.copy(meadowHigh);
+      low.setRGB(0, 0, 0);
+      high.setRGB(0, 0, 0);
       for (const { biome, w } of biomesAt(d, CONFIG.biomes, _mix)) {
-        low.lerp(_bLow.set(biome.blade[0]), w);
-        high.lerp(_bHigh.set(biome.blade[1]), w);
+        _bLow.set(biome.blade[0]);
+        _bHigh.set(biome.blade[1]);
+        low.r += _bLow.r * w; low.g += _bLow.g * w; low.b += _bLow.b * w;
+        high.r += _bHigh.r * w; high.g += _bHigh.g * w; high.b += _bHigh.b * w;
       }
     };
 
@@ -1948,7 +2309,26 @@ export class Globe {
     // blades in a clump half that wide. Matching the two numbers left the
     // planet looking mown.
     const grassH = 0.30;
-    const BLADE_TUFTS = 620;
+    // 1000, up from 620. The planet read thin: random scatter clumps, and
+    // clumping is exactly what leaves the bald patches an even spread never
+    // would, so the count has to overshoot what an evenly-spread lawn would need
+    // before the gaps close. Six hundred was the number that made a built tuft
+    // stop looking like a mown lawn; a thousand is the number that stops the
+    // ground between them reading as bare.
+    //
+    // It is one merged mesh and one draw call whatever this says. What it does
+    // cost is the untouched copy 草むしり keeps to regrow from — 81 vertices a
+    // tuft, three floats each — which is about a megabyte here, paid once at
+    // build.
+    //
+    // 1400 now, and the extra four hundred are the meadow's. Nearly all of this
+    // count lands there — the sand's `cover` turns most of what tries away — so
+    // a number counted for a planet of uniform grass was going to leave the one
+    // biome that is supposed to be thick with it no thicker than before, while
+    // the sand got its thinning for free. Spread over the three-quarters of the
+    // surface that grows grass properly this is about twice the density the
+    // planet had, which is what "the most green" costs.
+    const BLADE_TUFTS = 1400;
 
     // Blades, in ONE mesh — see buildGrassBlades. The whole count goes in at
     // once, because there are no variants to split it between: a blade's
@@ -1963,7 +2343,7 @@ export class Globe {
     // out from under a code path that went on claiming to work. See the note in
     // assets.js about what that cost.
     const covers = [];
-    const tuftDirs = scatterPoints(BLADE_TUFTS, rand, plantable(0.045));
+    const tuftDirs = scatterPoints(BLADE_TUFTS, rand, plantable(0.045, 'grass'));
     const blades = buildGrassBlades(R, tuftDirs, rand, grassH, bladeShade);
 
     // 草むしり. The blades are one merged mesh, but they were built tuft by
@@ -2009,14 +2389,21 @@ export class Globe {
     // was then read as a flowerbed with some grass in it. A quarter of that was
     // about where they went back to being something you notice rather than the
     // ground, and 75 has held through the move to blades.
-    const FLOWER_COUNT = 75;
+    //
+    // 90, for the same reason the grass went up and in the same proportion: they
+    // are a meadow flower now rather than a planet one, and seventy-five of them
+    // confined to three-quarters of the world and standing in grass twice as
+    // thick would have been a quieter meadow than the one they came from.
+    const FLOWER_COUNT = 90;
     const flowerH = 0.34;
     for (let v = 1; v <= FLOWER_VARIANTS; v++) {
       const key = `flower${v}`;
       const cv = canvasFor(key);
       covers.push(buildGroundCover(
         R,
-        scatterPoints(Math.round(FLOWER_COUNT / FLOWER_VARIANTS), rand, plantable(0.04)),
+        scatterPoints(
+          Math.round(FLOWER_COUNT / FLOWER_VARIANTS), rand, plantable(0.04, 'flower'),
+        ),
         tex(key),
         flowerH * (cv.width / cv.height),
         flowerH,
@@ -2039,7 +2426,7 @@ export class Globe {
       const key = `mushroom${v}`;
       const cv = canvasFor(key);
       const dirs = scatterPoints(
-        Math.round(MUSHROOM_COUNT / MUSHROOM_VARIANTS), rand, plantable(0.04),
+        Math.round(MUSHROOM_COUNT / MUSHROOM_VARIANTS), rand, plantable(0.04, 'mushroom'),
       );
       const mesh = buildGroundCover(
         R, dirs, tex(key), mushroomH * (cv.width / cv.height), mushroomH, rand,
@@ -2457,12 +2844,23 @@ export class Globe {
     setScenery(scenery);
     setSolids(solid);
 
-    // The house is the one prop you can go INSIDE, so it is the one prop
-    // anything outside this file needs a handle on. Its drawn pixels come along
-    // for the tap test — the sheet is a dome on a rectangular card, so a quarter
-    // of that card is transparent corner, and without the readback a tap on the
-    // sky beside the roof would walk you indoors.
-    this.house = this.sprites.find((s) => s.type === 'house') || null;
+    // THE BUILDINGS YOU CAN GO INSIDE, one record each — see CONFIG.homes.
+    //
+    // It was a single `this.house` for a long time and the day the cave went in
+    // is the day that stopped being a description of the world. What made the
+    // change survivable is that only a handful of things ever genuinely cared
+    // WHICH building: the wall arcs the tinting and the controls read, the glow
+    // on the openings, the lid the camera lifts when it climbs out through a
+    // roof, and the horizon cull. Everything else — the tint lists, the seats,
+    // the loose furniture, the room lamps — is a list of things that are
+    // INDOORS, and indoors is one condition rather than one place. Those stayed
+    // shared, and that is why this is a modest record rather than a second copy
+    // of the Globe.
+    this.homes = [];
+    // ...and the first of them, which is still a field of its own because it is
+    // where you ARRIVE. main.js spawns you on its doorstep and the camera looks
+    // at it; neither of those is a question about buildings in general.
+    this.house = null;
 
     // What the inside of the house owns: its own tint list (the interior wears
     // its own hour — see tintIn in daylight.js), the seats a guest may take,
@@ -2473,11 +2871,6 @@ export class Globe {
     // The painted patches of shade under the furniture, kept with the opacity
     // each was BUILT at so dimming them is a multiply — see _syncRoomShade.
     this.interiorShade = [];
-    // The OUTSIDE of the building, as a list of meshes rather than materials:
-    // the skin, its ink hull, and the openings' outward faces. Kept apart from
-    // the inner wall because the two want opposite things when the camera
-    // climbs out through the roof — see the lid in update().
-    this.houseOuter = [];
     this.seats = [];
     // Furniture that is not where it was put — see nudgeLoose. Empty unless
     // something in CONFIG.interior.furniture asks to be an `item`.
@@ -2490,7 +2883,6 @@ export class Globe {
     // is also what stops a walk resumed after a flight counting as one enormous
     // step across the room.
     this._looseWas = null;
-    this.interior = null;
     this.tintIn = new THREE.Color('#FFFFFF');
     this._tintInBase = new THREE.Color('#FFFFFF');
     // The room's colour as the CAST wear it, which is not the room's colour —
@@ -2501,29 +2893,45 @@ export class Globe {
     // off a different dark — see CAST_LIFT.
     this.tintCastOut = new THREE.Color('#FFFFFF');
 
-    // ------------------------------------------------------------ the house
+    // ---------------------------------------------------------- the homes
     //
-    // Real geometry, and the only prop out here that is. Everything else you
-    // pass by; this is the one you walk AROUND, and a billboard cannot survive
-    // that — it turns with you, so circling the building gives no sign you are
-    // moving relative to it and the drawn door faces you from every bearing.
-    // A door everywhere is a door nowhere, which left the house with no front
-    // and you with no way to tell where to walk to find the way in.
+    // Real geometry, and the only props out here that are. Everything else you
+    // pass by; these are the ones you walk AROUND, and a billboard cannot
+    // survive that — it turns with you, so circling a building gives no sign
+    // you are moving relative to it and the drawn door faces you from every
+    // bearing. A door everywhere is a door nowhere, which left the house with
+    // no front and you with no way to tell where to walk to find the way in.
     //
-    // Its two drawn sheets are retired rather than deleted: the day card and
-    // the night card are still built, still cross-faded, and simply never
+    // Each one's two drawn sheets are retired rather than deleted: the day card
+    // and the night card are still built, still cross-faded, and simply never
     // shown. That keeps the whole lamp machinery — the pool on the grass, the
     // bloom in the air, the dusk curve — working untouched while the shape
-    // changes underneath it. Lit windows are the follow-up.
-    if (this.house) {
+    // changes underneath it.
+    //
+    // THE LOOP IS THE WHOLE OF WHAT MAKES TWO HOMES POSSIBLE, and it is worth
+    // saying why it is a loop over config rather than a method taking a spec.
+    // Everything in here reads a dozen things from the surrounding scope — the
+    // planet's radius, the measured footprints, the texture cache, the four
+    // ways a material can be told about light, the running lamp-slot counter —
+    // and threading those through a signature would have been a far bigger
+    // change to a far larger surface than the one actually being made. What
+    // differs between a house and a cave is a handful of numbers and a set of
+    // painters, so that is all that varies here.
+    for (const home of CONFIG.homes) {
+      const sprite = this.sprites.find((s) => s.type === home.type);
+      // A home whose landmark was never scattered simply does not exist. Same
+      // guard the single-house version had, and it is what lets CONFIG.homes be
+      // edited without CONFIG.landmarks having to keep up in the same commit.
+      if (!sprite) continue;
+      const spec = home.spec;
+      const art = HOME_ART[home.style];
+      const doorSheet = art.doorSheet;
+
       // The same wall the lamplight above was cut to, through the same reader.
       // These were two separate lookups and that is a pairing that only ever
       // breaks silently: a house built to one radius with its halo cut to
       // another is a house with a ring of light sat inside its own front room.
-      const rad = wallAt(this.house.normal) || 2.45;
-      // Half a circle: the height IS the radius, so there is no second number
-      // and no way for the two to drift apart.
-      const tall = rad;
+      const rad = wallAt(sprite.normal) || 2.45;
 
       // Stood on the hill, and then TURNED to face where it is meant to face.
       //
@@ -2535,15 +2943,19 @@ export class Globe {
       // the shell is placed through `tangentAt` off this one quaternion, so
       // the door, the windows, the furniture, the collision gap and the
       // doorstep all turn together and stay agreeing with each other.
+      //
+      // For the cave that bearing is not a decision so much as a consequence:
+      // it is the hill's own bearing turned a half circle, so the hollow opens
+      // away from the rock it is cut into. See CONFIG.cave.doorFacing.
       const shell = new THREE.Group();
-      shell.quaternion.setFromUnitVectors(UP, this.house.normal);
+      shell.quaternion.setFromUnitVectors(UP, sprite.normal);
       {
-        const N = this.house.normal;
+        const N = sprite.normal;
         // Where bearing 0 currently points, as a tangent...
         const cur = new THREE.Vector3(0, 0, 1).applyQuaternion(shell.quaternion);
         // ...and where it should: the local compass, turned by doorFacing.
         localFrame(N, _pw, _pw2);            // _pw east, _pw2 north
-        const f = CONFIG.interior.doorFacing || 0;
+        const f = spec.doorFacing || 0;
         const want = _pw2.clone().multiplyScalar(Math.cos(f)).addScaledVector(_pw, Math.sin(f));
         // The signed turn from one to the other about the normal. Signed via
         // the triple product, because acos alone cannot tell east from west.
@@ -2552,8 +2964,62 @@ export class Globe {
         // first rotation has already laid onto the normal.
         shell.quaternion.multiply(_q.setFromAxisAngle(UP, spin));
       }
-      this.house.anchor.add(shell);
-      this.houseGlow = [];
+      sprite.anchor.add(shell);
+      // This building's own warm-at-night materials and its own outward faces.
+      // Per home rather than shared, because the two things that read them ask
+      // a question about ONE building: how much light is escaping from this
+      // room, and is the camera over this roof.
+      const houseGlow = [];
+      const houseOuter = [];
+
+      // THE RECORD, made now and filled in as the building goes up.
+      //
+      // It exists this early because the wall registration two hundred lines
+      // down writes into it, and threading four separate locals down to there
+      // and back is exactly the sort of bookkeeping that goes stale. Everything
+      // on it is something a reader OUTSIDE this loop needs, and nothing that
+      // is only wanted while building is on it.
+      const rec = {
+        sprite,
+        spec,
+        style: home.style,
+        owner: home.owner,
+        // The shell's radius, which is also its height — half a circle, so the
+        // two are one number and cannot drift apart.
+        rad,
+        shell,
+        // Filled in below, as each is made.
+        interior: null,
+        door: null,
+        plate: null,
+        glow: houseGlow,
+        outer: houseOuter,
+        // The wall arcs the tinting and the controls read, and the footprint
+        // object the collision layer holds. Left undefined until the wall is
+        // registered, which is also the guard every reader tests.
+        wallCos: undefined,
+        wallInnerCos: undefined,
+        building: null,
+        // How much light is escaping from THIS room, 0 to 1. Its own value per
+        // home, because the whole point of it is that a lit house and a dark
+        // cave should not advertise each other.
+        lit: 0,
+        // ...and the total reach of the lamps in it, which is what that share
+        // is measured against.
+        reach: 0,
+        // Whether the camera is currently over this roof — see the lid in
+        // update(). Per home for the obvious reason: you can only be over one.
+        overRoof: false,
+        // How full this house is, 0 to 1, and the evening as it sees it — see
+        // setOccupancy and _lampsIn. Starts full so a home built before
+        // household.js has said anything is a lit one rather than a derelict.
+        occupancy: 1,
+        lamps: 0,
+        // Scratch for _syncHouseLit, which totals each room's burning lamps in
+        // one pass over the shared list.
+        _burning: 0,
+      };
+      this.homes.push(rec);
 
       // Past the equator and into the ground, not stopped at it. A hemisphere
       // ends on a flat rim, and the planet is not flat: it falls away beneath
@@ -2591,18 +3057,20 @@ export class Globe {
       // punched holes and the drawn frames cannot disagree about where the
       // openings are.
       const GROUND = Math.acos(clampUnit(-(drop + 0.05) / rad)) - Math.PI / 2;
-      const doorW = CONFIG.interior.doorWidth;
-      const doorH = doorW * (DOOR_SHEET.h / DOOR_SHEET.w);
+      const doorW = spec.doorWidth;
+      const doorH = doorW * (doorSheet.h / doorSheet.w);
       const dThetaLen = doorH / rad;
       const dThetaStart = (Math.PI / 2 + GROUND) - dThetaLen;
       const dRing = rad * Math.sin(dThetaStart + dThetaLen / 2);
       const dPhiLen = doorW / Math.max(dRing, 0.5);
       // ...and the same for a window, which is square and hangs at a height
       // rather than standing on the ground — the `grounded` false branch.
-      const winW = CONFIG.interior.windowSize;
+      // Worked out even for a style with no windows, since it costs four lines
+      // of arithmetic and the alternative is two branches to keep in step.
+      const winW = spec.windowSize;
       const wThetaLen = winW / rad;
       const wThetaStart = Math.max(0.05,
-        Math.acos(clampUnit(CONFIG.interior.windowHeight / rad)) - wThetaLen / 2);
+        Math.acos(clampUnit(spec.windowHeight / rad)) - wThetaLen / 2);
       const wRing = rad * Math.sin(wThetaStart + wThetaLen / 2);
       const wPhiLen = winW / Math.max(wRing, 0.5);
 
@@ -2656,7 +3124,7 @@ export class Globe {
       const archCut = (g, w, h, toBottom) => {
         const iw = w * 0.94;
         g.translate((w - iw) / 2, 0);
-        archPath(g, iw, 0, toBottom, iw * DOOR_SHEET.arch);
+        archPath(g, iw, 0, toBottom, iw * doorSheet.arch);
         g.closePath();
       };
       // ...and the window's glass, at the same inset its frame is drawn on so
@@ -2671,8 +3139,10 @@ export class Globe {
       // Every opening, out of one layer. The layers differ; the holes do not.
       const punchAll = (canvas) => {
         punch(canvas, 0, dPhiLen, dThetaStart, dThetaLen, archCut);
-        for (const at of CONFIG.interior.windowsAt) {
-          punch(canvas, at, wPhiLen, wThetaStart, wThetaLen, paneCut);
+        if (art.windows) {
+          for (const at of spec.windowsAt) {
+            punch(canvas, at, wPhiLen, wThetaStart, wThetaLen, paneCut);
+          }
         }
         return canvas;
       };
@@ -2694,7 +3164,7 @@ export class Globe {
       // paintHouseSkin — where it is under the artist's control rather than the
       // sun's.
       const skin = new THREE.MeshBasicMaterial({
-        map: texFrom(punchAll(paintHouseSkin())), alphaTest: 0.5,
+        map: texFrom(punchAll(art.skin())), alphaTest: 0.5,
       });
       // The same inverted-hull line the furniture wears, at the weight this
       // needs to still be a line from across a field. Its hole comes from an
@@ -2709,13 +3179,94 @@ export class Globe {
       hm.fillRect(0, 0, hullMask.width, hullMask.height);
       const line = dome(0.055, THREE.BackSide);
       line.material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(PAL.houseInk), side: THREE.BackSide,
+        color: new THREE.Color(art.ink), side: THREE.BackSide,
         alphaMap: texFrom(punchAll(hullMask)), alphaTest: 0.5,
       });
       shell.add(line);
       const body = dome(0, THREE.FrontSide);
       body.material = skin;
       shell.add(body);
+
+      // ...and for a cave, the two OUTER layers stop being a sphere.
+      //
+      // Only these two. The interior wall below is built from the same helper
+      // and is deliberately left alone, which is the whole separation: what you
+      // see from the grass is a lumpy hill, what you stand in is a clean dome,
+      // and neither has to compromise for the other. A house wants those to be
+      // the same object and gets to keep them so.
+      //
+      // Both layers take the SAME displacement, so the ink hull goes on hugging
+      // the skin — a line that did not follow the bumps would come apart from
+      // the shape exactly where the shape got interesting.
+      if (home.style === 'cave') {
+        // The middle of the mouth, as a direction on the unbulged sphere, and a
+        // circle around it big enough to hold the drawn frame and its own ink.
+        const dMid = dThetaStart + dThetaLen / 2;
+        const doorDir = new THREE.Vector3(0, Math.cos(dMid), Math.sin(dMid));
+        const guard = Math.min(1.15, (doorW / rad) * 0.9);
+        caveBulge(line.geometry, doorDir, guard);
+        caveBulge(body.geometry, doorDir, guard);
+
+        // ...AND GRASS GROWS ON THE GRASS.
+        //
+        // The crown was turf that had been PAINTED — a scalloped green band in
+        // the skin with blades drawn into it — while every other green thing on
+        // this planet is nine real blades in a clump that bends in the wind. Up
+        // close that reads as a photograph of a lawn laid over the rock: the
+        // meadow around your feet moves and the hilltop does not.
+        //
+        // The painting stays. It is what gives the fringe its scalloped overhang
+        // and its underline, which is the "cut into a hill" cue, and it is what
+        // the blades are standing IN rather than instead of — the same
+        // arrangement the meadow has, where drawn ground cover and built tufts
+        // are both there.
+        //
+        // AS MANY AS THE MEADOW WOULD PUT HERE, worked out from area rather than
+        // chosen, so this follows BLADE_TUFTS instead of quietly disagreeing
+        // with it the next time somebody decides the planet looks thin.
+        const crown = CAVE_TURF * (Math.PI / 2 + SKIRT) - CAVE_TURF_INSET;
+        const capA = 2 * Math.PI * rad * rad * (1 - Math.cos(crown));
+        const n = Math.round(BLADE_TUFTS * (capA / (4 * Math.PI * R * R)));
+        const crownDirs = [];
+        for (let k = 0; k < n; k++) {
+          // Uniform over the cap: y is flat in cos(theta), which is what stops a
+          // naive angle roll piling every tuft onto the summit.
+          const y = 1 - rand() * (1 - Math.cos(crown));
+          const rr = Math.sqrt(Math.max(0, 1 - y * y));
+          const th = rand() * Math.PI * 2;
+          crownDirs.push(new THREE.Vector3(Math.cos(th) * rr, y, Math.sin(th) * rr));
+        }
+        if (crownDirs.length) {
+          // Shaded off the hill's OWN spot rather than each blade's, because
+          // every one of them is standing in the same few metres and asking per
+          // tuft would just be the same answer a hundred times.
+          const _cl = new THREE.Color();
+          const _ch = new THREE.Color();
+          bladeShade(sprite.normal, _cl, _ch);
+          const crop = buildGrassBlades(
+            rad, crownDirs, rand, grassH * 0.92,
+            (d, low, high) => { low.copy(_cl); high.copy(_ch); },
+          );
+          // Onto the lumps, by the same masked displacement the rock took.
+          caveLiftTufts(crop.geometry, crownDirs, doorDir, guard);
+          // THE MEADOW'S OWN MATERIAL, not a second one. It carries the wind
+          // patch and sits in `tintables`, so sharing it is what gets the hill's
+          // grass moving with everybody else's and wearing the same hour — and
+          // a private clone would need its own uTime driven every frame and
+          // would silently stop moving the day somebody forgot.
+          crop.material = blades.material;
+          // A child of the shell, so it turns and stands with the hill. That
+          // does mean the wind axis reaches the vertex shader in the shell's
+          // frame rather than the world's, so the breeze crosses the crown at
+          // its own angle — which is a thing hills do, and cheaper than a second
+          // material to say it.
+          shell.add(crop);
+          // ...and it goes off with the rock when you fly over the top, or you
+          // would be looking down into the room through a hovering lawn.
+          houseOuter.push(crop);
+        }
+      }
+
       this.tintables.push(skin);
       // ...and it takes the sun, which is the one thing the note above was
       // wrong to give up on. Everything it says about Lambert still holds — the
@@ -2730,7 +3281,7 @@ export class Globe {
       // under: a house is not lit by its own windows. What you see of those
       // from out here is the bloom, put exactly where they are.
       litBySun(skin, 0);
-      this.houseOuter.push(line, body);
+      houseOuter.push(line, body);
 
       // The wall you see from the rug: the same dome a hair inside the skin,
       // drawn from its back faces, wearing the room's own wall art. It is what
@@ -2741,7 +3292,7 @@ export class Globe {
       // at night, which is the story the lit windows have always told.
       const wallIn = dome(-0.06, THREE.BackSide);
       wallIn.material = new THREE.MeshBasicMaterial({
-        map: texFrom(punchAll(paintRoomWall())), side: THREE.BackSide,
+        map: texFrom(punchAll(art.wall())), side: THREE.BackSide,
         alphaTest: 0.5,
       });
       // The wall wraps the whole way around, so its left edge IS its right
@@ -2870,7 +3421,13 @@ export class Globe {
         // is worked out in _syncGlow instead, from the tint AND the lamps
         // together.
         if (opts.sink === 'interior') this.interiorTintables.push(m.material);
-        else { this.houseGlow.push(m.material); this.houseOuter.push(m); }
+        else if (opts.outdoorTint) {
+          this.tintables.push(m.material);
+          houseOuter.push(m);
+        } else {
+          houseGlow.push(m.material);
+          houseOuter.push(m);
+        }
         // An anchor at the opening's centre, facing outward, for anything that
         // hangs in the air in front of it — the door's bloom does.
         const y = rad * Math.cos(thetaMid);
@@ -2893,12 +3450,22 @@ export class Globe {
       // frame is what makes a hole read as a doorway, and its stroke also
       // covers the punched edge's jaggies from both sides.
       const doorFrame = face(
-        paintHouseDoorFrame(), 0, doorW, { grounded: true, proud: 0.035 },
+        art.doorOuter(), 0, doorW, { grounded: true, proud: 0.035 },
       );
-      this.houseDoor = doorFrame.grp;
-      face(paintDoorway(), 0, doorW, {
+      const houseDoor = doorFrame.grp;
+      rec.door = houseDoor;
+      face(art.doorInner(), 0, doorW, {
         grounded: true, proud: -0.10, side: THREE.BackSide, sink: 'interior',
       });
+      // A blank mounting block for Chiikawa's portrait plate. It follows the
+      // shell just like an opening frame but does not punch the wall; keeping
+      // its returned group gives a future image plate an exact façade anchor.
+      if (art.plate && Number.isFinite(spec.plateAt)) {
+        const plateBlock = face(art.plate(), spec.plateAt, spec.plateSize, {
+          y: spec.plateHeight, proud: 0.045, outdoorTint: true,
+        });
+        rec.plate = plateBlock.grp;
+      }
       // ...and the windows exactly the same way, because they are the same
       // kind of thing: a hole with its ink drawn round it, once per face of
       // the wall. They were the last painted pretence on the building — a pale
@@ -2914,12 +3481,20 @@ export class Globe {
       // What the room gains is the other direction: from the rug, the window
       // is a piece of the real sky, which is a better answer to "what hour is
       // it out there" than a pane painted the sky's colour ever was.
-      for (const at of CONFIG.interior.windowsAt) {
-        face(paintHouseWindowFrame(), at, winW, { y: CONFIG.interior.windowHeight });
-        face(paintHouseWindowFrame(), at, winW, {
-          y: CONFIG.interior.windowHeight, proud: -0.10,
-          side: THREE.BackSide, sink: 'interior',
-        });
+      //
+      // The cave has none, and skips the lot. That is the one place where "a
+      // cave is a house with different numbers" stops being true and it is
+      // worth naming: a hole in the side of a rock is a second entrance, not a
+      // window, and a hollow whose only opening is its mouth is the whole
+      // reason its one lantern matters after dark.
+      if (art.windows) {
+        for (const at of spec.windowsAt) {
+          face(paintHouseWindowFrame(), at, winW, { y: spec.windowHeight });
+          face(paintHouseWindowFrame(), at, winW, {
+            y: spec.windowHeight, proud: -0.10,
+            side: THREE.BackSide, sink: 'interior',
+          });
+        }
       }
 
 
@@ -2931,9 +3506,13 @@ export class Globe {
       // (sphere.js) and the question the tinting asks (_applyBlend). One
       // group, so the horizon cull can put the whole interior away with the
       // building that contains it.
-      this.interior = new THREE.Group();
-      this.world.add(this.interior);
-      const N = this.house.normal;
+      // One group PER HOME, which is what the cull needs: each room has to be
+      // able to sink behind the curve with the building that contains it, and a
+      // shared group would take the far room away with the near one.
+      const interior = new THREE.Group();
+      this.world.add(interior);
+      rec.interior = interior;
+      const N = sprite.normal;
 
       // A bearing around the house, as a world tangent at its middle — and a
       // spot on the ground `out` units along one. The same two moves door.js
@@ -2990,17 +3569,24 @@ export class Globe {
       // inscribed circle, so the corners are invisible — and a canvas with no
       // transparent pixel anywhere means no fringe of it can be filtered in
       // at the rim.
-      fg.drawImage(paintRoomFloor(), 0, 0, floorCv.width, floorCv.height);
-      const rugPx = (CONFIG.interior.rug / (rad * 0.99)) * (floorCv.width / 2);
-      fg.drawImage(
-        paintRug(),
-        floorCv.width / 2 - rugPx, floorCv.height / 2 - rugPx, rugPx * 2, rugPx * 2,
-      );
+      fg.drawImage(art.floor(), 0, 0, floorCv.width, floorCv.height);
+      // ...and the rug drawn into it, for a home that has one. The cave does
+      // not: its floor is stone and stays stone, and what warms it is the mat
+      // under the table, which is furniture rather than a stain in the texture.
+      // Guarded rather than left to draw at zero size — a drawImage of nothing
+      // is not obviously harmless, and `rug: 0` should mean "no rug" outright.
+      if (spec.rug > 0) {
+        const rugPx = (spec.rug / (rad * 0.99)) * (floorCv.width / 2);
+        fg.drawImage(
+          paintRug(),
+          floorCv.width / 2 - rugPx, floorCv.height / 2 - rugPx, rugPx * 2, rugPx * 2,
+        );
+      }
       const floorMesh = new THREE.Mesh(floorGeo, new THREE.MeshBasicMaterial({
         map: texFrom(floorCv),
       }));
       floorMesh.quaternion.setFromUnitVectors(UP, N);
-      this.interior.add(floorMesh);
+      interior.add(floorMesh);
       this.interiorTintables.push(floorMesh.material);
       // DELIBERATELY NOT GIVEN THE LAMP TERM, and it is the one surface in here
       // that is not. The boards are already lit, by the pool each lamp lays on
@@ -3028,7 +3614,7 @@ export class Globe {
       // grey floor and a cream rug, and the grass-green one every prop outside
       // wears read in here as a patch of lawn that had got under the roof.
       const shadowTex = texFrom(paintShadow(SHADOW_ROOM));
-      for (const f of CONFIG.interior.furniture) {
+      for (const f of spec.furniture) {
         const built = BUILD[f.art](f.h);
         const dir = spotDir(f.at, f.out);
         const anchor = new THREE.Group();
@@ -3039,8 +3625,9 @@ export class Globe {
           // ceiling has no bearing to have.
           //
           // Its up is the room's up, so a piece built downward from y = 0
-          // hangs. No `spin` either: a bulb is round.
-          anchor.position.copy(N).multiplyScalar(R + rad);
+          // hangs. `hang` lowers the mounting point without scaling up the
+          // fitting itself; no `spin` is needed because a bulb is round.
+          anchor.position.copy(N).multiplyScalar(R + rad - (f.hang || 0));
           const right = new THREE.Vector3().crossVectors(N, tangentAt(0)).normalize();
           const fwd = new THREE.Vector3().crossVectors(right, N);
           anchor.quaternion.setFromRotationMatrix(
@@ -3072,9 +3659,13 @@ export class Globe {
             new THREE.Matrix4().makeBasis(right, N.clone(), fwd));
         } else {
           standAt(anchor, dir, f.spin !== undefined ? f.spin : f.at + Math.PI);
+          // An item may begin on top of another piece of furniture. The lift
+          // is measured along the floor normal, exactly as putDownUnique lifts
+          // a piece onto a surface later.
+          if (f.lift) anchor.position.addScaledVector(dir, f.lift);
         }
         anchor.add(built.group);
-        this.interior.add(anchor);
+        interior.add(anchor);
         // A LOOSE piece joins NEITHER of the two lists below, and that is the
         // whole of its lighting being different. Both of them decide a thing's
         // side of the wall once, at build — which is right for a table and
@@ -3096,7 +3687,9 @@ export class Globe {
         // `fills` and not everything on the anchor: the ink hull is left out
         // of that list on purpose, and a pen line that brightened near a lamp
         // would be a drawing whose outline fades where the light is.
-        if (!f.item && !ROOM_LIGHT[f.art]) for (const m of built.fills) litByRoom(m);
+        if (!f.item && !ROOM_LIGHT[f.art]) {
+          for (const m of built.fills) litByRoom(m);
+        }
 
         // What somebody left on it, lying on the surface it was left on.
         if (f.clutter) {
@@ -3154,6 +3747,14 @@ export class Globe {
         // floor takes its own light with it and nothing has to remember to move
         // it.
         if (built.glow) {
+          // WHETHER IT STARTS ON, and nothing else. It used to be read twice as
+          // two different things — whether the switch begins up, and whether
+          // this light is capable of lighting anything at all — and the second
+          // reading is what made `lit: false` unusable: the level was baked to
+          // zero at build, so a lantern that started off could be switched on
+          // for the rest of time and light nothing. A capability decided once
+          // cannot be switched; that is the same trap the note below the pool
+          // records for the glass, one field along.
           const lit = f.lit !== false;
           const pool = new THREE.Mesh(
             groundCap(R, built.glow.reach * 2, built.glow.reach * 2,
@@ -3179,7 +3780,9 @@ export class Globe {
           // A hung light's anchor is on the CEILING, and its pool belongs on
           // the boards. `rad` down puts the cap's own origin back on the
           // planet's surface, which is the radius groundCap shaped it for.
-          if (f.ceiling) pool.position.y = -rad;
+          // A lowered fitting needs the inverse correction so its pool still
+          // lies on the floor rather than following the mount downward.
+          if (f.ceiling) pool.position.y = -(rad - (f.hang || 0));
           anchor.add(pool);
 
           // ...and the same light for when the lamp is standing on SOMETHING.
@@ -3234,16 +3837,18 @@ export class Globe {
           // them. Its colour is the lamp's, its brightness is the switch, and
           // the hour has no say in either.
 
-          // EVERY LIGHT IS COLLECTED NOW, not only the wired one.
+          // EVERY LIGHT IS COLLECTED, and the gate is gone entirely.
           //
-          // This used to read `if (f.night)`, and the lantern's glass was
-          // instead written once, just above, on the reasoning that "nothing
+          // It read `if (f.night)` once, and the lantern's glass was instead
+          // written a single time, just above, on the reasoning that "nothing
           // turns this on and off yet". Something does: both lights have a
-          // switch. A piece whose look is set once at build cannot be switched,
-          // so the one-off write is gone and the lantern joins the list — what
-          // separates the two is now only `night`, which says what a light
-          // follows once it is ON rather than whether it is written at all.
-          if (f.night || lit) {
+          // switch. Then it read `if (f.night || lit)`, which had the same
+          // shape of bug one step further in — a lamp that started OFF got no
+          // record, so it was a lamp with a switch that nothing was listening
+          // to. Having a glow at all is the whole test: if the builder handed
+          // back something that can shine, it belongs on the list, and what
+          // separates the two lights is `night` alone.
+          {
             // A piece may hand back one halo or a nest of them — the bulb's
             // bloom is three shells, because a sphere has no axis to fade
             // along. Kept with the alpha each was BUILT at, so dimming is a
@@ -3265,7 +3870,11 @@ export class Globe {
               // note beside roomLights.push below. `night` here says the same
               // thing it says there: what the light follows once it is on.
               art: f.art,
-              switchedOn: true,
+              // Where the switch starts, from the table's `lit`. Not `true`
+              // flat, which is what had a lantern the config called unlit
+              // sitting there with its glass alight and its pool on the floor,
+              // and 「けす」 offered for a lamp nobody had lit.
+              switchedOn: lit,
               night: !!f.night,
               on: new THREE.Color(built.glow.on || PAL.lampLit),
               off: new THREE.Color(built.glow.off || PAL.lampGlass),
@@ -3309,27 +3918,42 @@ export class Globe {
             // though — update() asks the light where it actually is on every
             // frame, which is what lets it be picked up and taken outside.
             this.lampUniforms.uLampIn.value[slot] = 1;
-            const level = lit ? ROOM_LIT.strength : 0;
-            this.lampUniforms.uLampLevel.value[slot] = level;
-            // `night` is the switch, and it is the difference between the two
-            // lights in this room: the bulb is wired in and follows the hour,
-            // the lantern is lit because somebody lit it and burns at all of
-            // them. The slot is taken either way — and by a lamp switched off
-            // entirely, which simply sits at level 0. The arrays were sized
-            // off this same config, so skipping one here would slide every
-            // later light a place along and hand the bulb the lantern's reach.
-            // `on` is the SWITCH, and it is a third thing on top of the two
-            // above. `night` says what the light follows when it is on; `lit`
-            // said what it was doing at build time; this says whether it is
-            // working at all, and it is the only one of the three anybody can
-            // change from inside the world. Both lists carry it and both read
-            // it the same way — see _syncItemLights.
+            // WHAT IT BURNS AT WHEN IT IS ON, which is a property of the lamp
+            // and not of how it happens to be standing right now. It read
+            // `lit ? strength : 0` — the initial switch position baked into the
+            // fitting — so a lamp that started off had a level of zero and went
+            // on having one however many times it was switched. How brightly it
+            // is burning THIS frame is `_burn` times this, written every frame
+            // by _syncItemLights.
+            const level = ROOM_LIT.strength;
+            this.lampUniforms.uLampLevel.value[slot] = lit ? level : 0;
+            // `night` is what a light FOLLOWS, and it is the difference between
+            // the two lights in this room: the bulb is wired in and the evening
+            // brings it up, the lantern is lit because somebody lit it and
+            // burns at whatever hour they did. The slot is taken either way —
+            // and by a lamp switched off entirely, which simply sits at level
+            // 0. The arrays were sized off this same config, so skipping one
+            // here would slide every later light a place along and hand the
+            // bulb the lantern's reach.
+            //
+            // `on` is the SWITCH, the one thing here anybody in the world can
+            // change, and it starts where the table's `lit` puts it. Both lists
+            // carry it and both read it the same way — see _burn.
+            //
             // Its share of the room's total light, for working out how much of
             // it escapes to the windows — see _syncHouseLit.
-            this._roomReach += built.glow.reach;
+            rec.reach += built.glow.reach;
             this.roomLights.push({
-              at, slot, level, night: !!f.night, art: f.art, on: true,
+              at, slot, level, night: !!f.night, art: f.art, on: lit,
               reach: built.glow.reach,
+              // Which room this one is in. Its share of that room's light is
+              // what reaches that room's windows, and only that room's — a
+              // lantern burning in the cave has nothing to say about whether
+              // Chiikawa's house looks occupied.
+              home: rec,
+              // What says whether this lamp is in the world at all — see the
+              // presence check in _syncItemLights.
+              anchor,
               // A hung light has no bearing — see `ceiling` in the furniture
               // table — so nothing can stand near it or far from it, and
               // `lightNear` treats being in the room as being under it.
@@ -3340,7 +3964,10 @@ export class Globe {
 
         // Somewhere to sit. `top` comes back from the builder, so a redrawn
         // or resized piece moves its own seat without a number following it.
-        if (f.seat) this.seats.push({ dir, y: built.top, taken: null });
+        // Somewhere to sit, tagged with whose room it is in: a guest walking
+        // home should be offered a cushion in the house they are walking to,
+        // and the seat list is shared across both.
+        if (f.seat) this.seats.push({ dir, y: built.top, taken: null, home: rec });
 
         // ...and the one piece that is not nailed down. It keeps its own copy
         // of where it is, because `dir` above is shared with the seat list and
@@ -3379,7 +4006,7 @@ export class Globe {
           const loose = {
             dir: dir.clone(),
             vel: new THREE.Vector3(),
-            reach: CONFIG.interior.nudgeReach,
+            reach: spec.nudgeReach,
             place: null,
             // What the carrying system needs to know about it — see the
             // uniques wiring in main.js. `art` is its identity in ITEMS,
@@ -3387,11 +4014,33 @@ export class Globe {
             // is the built group so it can be hidden while carried and
             // raycast to be picked up.
             art: f.art,
+            // Explicit when more than one unique wears the same art. Older
+            // boolean item entries continue to resolve by art as before.
+            item: typeof f.item === 'string' ? f.item : null,
             home: dir.clone(),
+            homeLift: f.lift || 0,
+            atHome: true,
             anchor,
+            // The piece's own BODY, kept apart from the anchor it hangs on —
+            // and the difference is the whole of a bug. Carrying a piece used
+            // to hide the anchor, which hides everything under it including
+            // the pool of light a lamp lays on the ground; and stowing one did
+            // the same thing, which hid the lamp and left its light burning at
+            // the spot it was last stood. One flag was being asked to mean two
+            // things. This is the one that means "you can see it".
+            body: built.group,
+            // ...and this is the one that means "it is here at all". See
+            // placeLoose, carryLoose and stowLoose, which are the only three
+            // things that can happen to a loose piece.
+            state: 'world',
           };
           const facing = f.spin !== undefined ? f.spin : f.at + Math.PI;
-          loose.place = () => standAt(anchor, loose.dir, facing);
+          loose.place = () => {
+            standAt(anchor, loose.dir, facing);
+            if (loose.atHome && loose.homeLift) {
+              anchor.position.addScaledVector(loose.dir, loose.homeLift);
+            }
+          };
           this.loose.push(loose);
 
           // What it wears and what it can see, both of which have to follow it
@@ -3421,9 +4070,9 @@ export class Globe {
       // See sphere.js for what these three fields mean.
       const wallB = footprints.find((f) => f.solid && f.dir.dot(N) > 0.9999);
       if (wallB) {
-        wallB.inner = CONFIG.interior.walk / R;
+        wallB.inner = spec.walk / R;
         wallB.gapDir = tangentAt(0);
-        wallB.gapCos = Math.cos((doorW / 2 - CONFIG.interior.gapInset) / dRing);
+        wallB.gapCos = Math.cos((doorW / 2 - spec.gapInset) / dRing);
         // How high the building stands, for anything that has to get over it —
         // the camera taking off indoors is the one that does. Written down
         // rather than left as the identity `roof === r * R`, which is only
@@ -3431,16 +4080,39 @@ export class Globe {
         wallB.roof = rad;
         // ...and the same arc for isInside, which is the tinting's and the
         // controls' idea of "under the roof".
-        this._wallCos = Math.cos(wallB.r);
+        //
+        // ON THE HOME RECORD, not on the Globe. These two used to be `this.`
+        // fields and with one building that was honest; with two, a shared pair
+        // would have the cave's wall arc overwrite the house's and every
+        // question about being indoors would be answered about whichever
+        // building was built last. See isInside and insideAmount, which now ask
+        // each home in turn.
+        rec.wallCos = Math.cos(wallB.r);
+        // ...and the INNER face of the same wall, which is where the lighting's
+        // idea of it begins. Between the two is the masonry's own thickness —
+        // just under a unit of it — and that band is the doorway you walk
+        // through. See insideAmount, which fades across it.
+        //
+        // No separate test for "am I at the door" is needed, and that is worth
+        // saying because the obvious worry is a body pressed against the far
+        // wall INSIDE reading as half outdoors. It cannot: the band is solid
+        // everywhere but the gap, so the only place anybody or anything can be
+        // standing in it is the one hole in it. The wall does the gating by
+        // being a wall.
+        rec.wallInnerCos = Math.cos(wallB.inner);
+        rec.building = wallB;
       }
 
       // The card, and its lit twin, stop being drawn. Left in the scene so
       // everything that walks `sprites` and `litProps` still finds what it
       // expects to find.
-      this.house.mesh.visible = false;
-      this.house.retired = true;
-      this.houseRad = rad;
-      this.house.shell = shell;
+      sprite.mesh.visible = false;
+      sprite.retired = true;
+      sprite.shell = shell;
+      // Which home this sprite belongs to, so the per-frame lamp sync can get
+      // from a lit prop back to the room whose lights it is advertising without
+      // searching a list.
+      sprite.home = rec;
 
       // ...and its cull allowance, which the prop loop had to take off the CARD
       // because the building did not exist yet when that loop ran. Same idea as
@@ -3481,23 +4153,48 @@ export class Globe {
         );
         const L = corner.length();
         if (L < R) continue;
-        const a = Math.acos(clampUnit(corner.dot(this.house.normal) / L));
+        const a = Math.acos(clampUnit(corner.dot(sprite.normal) / L));
         far = Math.max(far, a + Math.acos(clampUnit(R / L)));
       }
-      if (far > this.house.horizon) this.house.horizon = far;
-      if (this.house.lit) {
-        this.house.lit.night.visible = false;
+      if (far > sprite.horizon) sprite.horizon = far;
+      if (sprite.lit) {
+        sprite.lit.night.visible = false;
         // The light in the air, moved onto the doorway it is supposed to be
         // coming out of. It was placed by litSpot, which finds the bright warm
         // pixels in the night DRAWING — a drawing that is no longer shown, so
         // the glow was hanging wherever those pixels used to be. Hung off the
         // door now, so it follows the door if the door ever moves.
-        const bloom = this.house.lit.bloom;
+        const bloom = sprite.lit.bloom;
         bloom.position.set(0, 0, 0.06);
         bloom.scale.setScalar((rad * 1.5) / (bloom.geometry.parameters.width || 1));
-        this.houseDoor.add(bloom);
+        // AND IT IS NOT A THING A RAY CAN HIT. A raycast reads geometry, never
+        // alpha, so this quad — 1.5 shell radii across, which is 4.8 at the
+        // house and 6.0 at the cave — answers for its whole rectangle including
+        // the air out to either side of the doorway where its own soft edges
+        // have faded to nothing.
+        //
+        // Nothing rays a building any more, so this stops nothing today; it is
+        // here because a glow is not a surface and should never be picked as
+        // one, and the day something does reach for the shell it will be right
+        // by default rather than wrong until somebody notices.
+        bloom.raycast = () => {};
+        houseDoor.add(bloom);
       }
     }
+    // The first home is the one you arrive at, and the one field outside this
+    // file still asks for by name.
+    this.house = this.homes.length ? this.homes[0].sprite : null;
+
+    // The plateau stood here — a cone frustum for the cliff face and a spherical
+    // cap of grass on top, with Hachiware's cave cut into its rim. It is gone,
+    // and the reason is worth keeping because it is a fact about this planet
+    // rather than about that code: a hill that a cave is cut into must stand
+    // BEHIND the cave, far enough back that its solid ground clears the room,
+    // and on a globe of radius 8 that is already over the horizon. Measured
+    // from the cave's own doorstep, the cliff top sat 21 degrees below eye
+    // level — lower on screen than the cave in front of it, and completely
+    // hidden by it. The mound is the cave's own shell now; see CONFIG.cave.
+
     this.smallProps = this.sprites.filter((s) => s.small).map((s) => s.anchor);
     this.litProps = this.sprites.filter((s) => s.lit);
 
@@ -3512,7 +4209,7 @@ export class Globe {
       const at = this.lampUniforms.uLampAt.value[L.slot];
       L.at.getWorldPosition(at);
       _lightDir.copy(at).sub(this.world.position).normalize();
-      this.lampUniforms.uLampIn.value[L.slot] = this.isInside(_lightDir) ? 1 : 0;
+      this.lampUniforms.uLampIn.value[L.slot] = this.insideAmount(_lightDir);
     }
 
     // A lamplit prop takes three slots rather than one. Its night card and its
@@ -3537,21 +4234,18 @@ export class Globe {
     this.resize();
   }
 
-  // Whether a tap landed on the house, and where it stands if it did — the
-  // surface direction, which is all anybody needs to walk to it or to aim a
-  // doorway at it.
+  // `pickHouse` and `nearestHome` stood here, and they are gone rather than
+  // kept. Between them they answered one question — which building did this tap
+  // land on, and where is its doorstep — for one caller, the teleport in
+  // main.js, and that has been removed outright. Nothing else on this planet has
+  // ever needed to raycast a building: the only rays left are the ground, a
+  // character's own body, and a loose piece's drawing.
   //
-  // Only while it is actually in view: over the horizon its card is hidden, and
-  // a ray can still reach a hidden mesh.
-  pickHouse(raycaster) {
-    const s = this.house;
-    if (!s || !s.seen || !s.shell || !s.shell.visible) return null;
-    // The ray does not know about the punched doorway — raycasting reads
-    // geometry, not alpha — so a tap through the open arch still reports the
-    // building. That is the right answer: a tap on the doorway means "go
-    // there", and going there is what a tap on the house does.
-    return raycaster.intersectObject(s.shell, true).length ? s.normal.clone() : null;
-  }
+  // Not tombstoned as live-but-unused the way `walkTo` and `setWalkMarker` are.
+  // Those are complete, correct, general machinery waiting on a verb. This was
+  // the wrong shape for its job — a raycast against a whole dome cannot tell a
+  // doorway from a hillside, which is exactly the bug it shipped — so keeping it
+  // would be keeping an answer nobody should ask again.
 
   // Show where a tap-to-walk is heading, or fade the mark away once there is no
   // walk to mark. `dir` is the destination as a unit surface direction, or null.
@@ -3611,14 +4305,20 @@ export class Globe {
   // the same line further back — one bearing, two distances along it, so where
   // you spawn and where a tap sets you down can never end up facing different
   // walls.
-  doorstepDir(out, dist = CONFIG.interior.doorstep) {
-    const s = this.house;
-    if (!s || !this.houseDoor) return null;
-    this.houseDoor.getWorldPosition(out).sub(this.world.position);
+  //
+  // `home` picks WHICH doorstep, defaulting to the first — which is the one you
+  // arrive at and the one a tap on nothing in particular means. The distance
+  // comes off that home's own spec when it is not given, so the cave's shallower
+  // doorstep follows its shallower shell without a second call site knowing.
+  doorstepDir(out, dist, home = this.homes[0]) {
+    if (!home || !home.door) return null;
+    const s = home.sprite;
+    const at = dist === undefined ? home.spec.doorstep : dist;
+    home.door.getWorldPosition(out).sub(this.world.position);
     out.addScaledVector(s.normal, -out.dot(s.normal));
     if (out.lengthSq() < 1e-9) return null;
     out.normalize();
-    const arc = dist / CONFIG.globe.radius;
+    const arc = at / CONFIG.globe.radius;
     return out.multiplyScalar(Math.sin(arc))
       .addScaledVector(s.normal, Math.cos(arc)).normalize();
   }
@@ -4140,10 +4840,11 @@ export class Globe {
     // Whoever is stood outside wears the sky's tint. The interior lists and
     // whoever is under the roof are written by _syncInterior, which _setLamps
     // below calls — the lamps are an input to the interior's colour.
-    for (const ch of this.cast) {
-      if (this.isInside(ch.dir)) continue;
-      for (const m of ch.tintables) m.color.copy(this.tintCastOut);
-    }
+    // The cast are NOT written here any more. Their colour is a blend of this
+    // hour and the room's — see the lerp in _syncInterior — and the room's half
+    // is not worked out until _setLamps has run, a few lines below. Writing
+    // them from here as well left whoever was in the doorway wearing the sky
+    // for a frame, then correcting.
 
     this._setLamps(a.lamps + (b.lamps - a.lamps) * t);
 
@@ -4191,9 +4892,52 @@ export class Globe {
     // apart: how deep into the evening it is, without the occupancy already
     // multiplied in. See _syncInterior.
     this._lampShape = shape;
-    const k = shape * this._occupancy;
-    if (k !== this._lamps) {
-      this._lamps = k;
+    // The hour times HOW FULL EACH HOUSE IS, one per home. It was a single
+    // number and with two buildings that number is a lie in the visible
+    // direction: at `atOnce: 1` somebody being home in the cave would have
+    // brought the lights up in Chiikawa's empty house, twenty units away,
+    // while she stood next to you on the grass.
+    //
+    // `_lamps` survives as the strongest of them, for the handful of readers
+    // that are asking about the evening in general rather than about a
+    // particular room.
+    // DUSK AND DAWN HAND THE WIRED LIGHTS BACK TO THE HOUR.
+    //
+    // An override that never expired would be worse than none: switch the bulb
+    // off one evening and it is off for the rest of the session, so the house
+    // you come home to at midnight tomorrow is dark and nothing you did that
+    // morning explains it. Handing it back at each turn of the day gives the
+    // behaviour a wall switch actually has — yours until the day next changes
+    // its mind, and the room lights itself again the following evening.
+    //
+    // The switch is restored WITH the override, and it has to be: `manual`
+    // cleared while `on` stayed false would leave the hour holding a switch
+    // that is already off, and dusk would find nothing to turn up.
+    //
+    // Against the HOUR alone — `shape`, not `h.lamps` — because the second has
+    // occupancy folded in, and the last friend leaving the house is not a turn
+    // of the day. It would have taken a bulb you had just switched on with them.
+    const evening = shape > 0;
+    if (evening !== this._eveningWas) {
+      this._eveningWas = evening;
+      for (const L of this.itemLights) {
+        if (!L.night) continue;
+        L.manual = false;
+        L.switchedOn = true;
+      }
+      for (const L of this.roomLights) {
+        if (!L.night) continue;
+        L.manual = false;
+        L.on = true;
+      }
+    }
+    let strongest = 0;
+    for (const h of this.homes) {
+      h.lamps = shape * h.occupancy;
+      if (h.lamps > strongest) strongest = h.lamps;
+    }
+    if (strongest !== this._lamps) {
+      this._lamps = strongest;
       for (const s of this.litProps) this._syncLamp(s);
     }
     // Always, even when the lamps have not moved: the glass also follows the
@@ -4209,7 +4953,7 @@ export class Globe {
     // lamps: _syncHouseLit only re-applies it when what is burning has changed,
     // and a fade that moves only the sky's colour would otherwise leave the
     // window frames wearing yesterday's.
-    this._syncGlow();
+    for (const h of this.homes) this._syncGlow(h);
     this._syncInterior();
   }
 
@@ -4233,9 +4977,43 @@ export class Globe {
   // A lantern somebody lit burns at every hour and goes out when switched off.
   // The bulb is wired in and follows the evening — and switched off it stays
   // dark through the evening too, which is the whole point of a switch.
+  // HOW BRIGHTLY ONE LIGHT IS BURNING, 0 to 1, and the only place that decides.
+  //
+  // It was three places — the glass and its halo here, the light the room gets
+  // below, and the share that escapes to the windows in _syncHouseLit — each
+  // with its own copy of the same expression. Three copies of a rule is three
+  // chances for a lamp to be alight in one of them and out in the others, and
+  // that had already happened once: the windows went on glowing for a lantern
+  // that was in somebody's bag.
+  //
+  //   present   a lamp that is not IN the world does not light it. The anchor
+  //             answers this — see carryLoose and stowLoose, which are what
+  //             make it mean "present" rather than "you can see it". A piece
+  //             with no loose record, like the bulb wired to the ceiling, is
+  //             always present. A lamp in your HAND is present, and lights the
+  //             ground you are standing on, which is the point of it.
+  //   on        the switch
+  //   night     whether the HOUR is allowed to drive this one
+  //   manual    whether somebody has taken it off the hour — see toggleLight
+  //
+  // A LIGHT THAT SOMEBODY HAS TOUCHED OBEYS THEM, at any hour. That is the fix
+  // for a real complaint and it is worth stating plainly: `night` used to mean
+  // the hour was a MULTIPLIER on the bulb, so at noon its brightness was the
+  // hour's 0 however the switch stood — the switch worked, did nothing you
+  // could see, and read as broken. `night` now means the hour holds the switch
+  // UNTIL somebody else takes it, which is what a wired light in a room with a
+  // wall switch actually does. Nobody has to touch it for the house to light
+  // itself at dusk, and touching it wins for as long as that evening lasts.
+  _burn(L, on) {
+    if (L.anchor && !L.anchor.visible) return 0;
+    if (!on) return 0;
+    if (!L.night || L.manual) return 1;
+    return this._lampsIn(L.home);
+  }
+
   _syncItemLights() {
     for (const L of this.itemLights) {
-      const k = L.switchedOn ? (L.night ? this._lamps : 1) : 0;
+      const k = this._burn(L, L.switchedOn);
       L.pool.material.opacity = k * L.poolAlpha;
       // The same switch reaches the flat stamp, because it is the same light —
       // which of the two is being SHOWN is _syncPerch's business, and this is
@@ -4271,8 +5049,7 @@ export class Globe {
     // above use — a lantern's slot used to be written once at build, which was
     // fine while nothing could switch it and is exactly what a switch breaks.
     for (const L of this.roomLights) {
-      const k = L.on ? (L.night ? this._lamps : 1) : 0;
-      this.lampUniforms.uLampLevel.value[L.slot] = k * L.level;
+      this.lampUniforms.uLampLevel.value[L.slot] = this._burn(L, L.on) * L.level;
     }
     // ...and what the house shows to the world, which is downstream of every
     // switch just written. Here rather than at the call sites so that flipping
@@ -4288,40 +5065,76 @@ export class Globe {
   // A ceiling light has no bearing of its own (see `ceiling` in the furniture
   // table), so it is reachable from anywhere in the room: you do not walk over
   // to a pull cord on a dome, you are simply under it.
+  //
+  // SCOPED TO THE ROOM YOU ARE IN, which stopped being free the moment a second
+  // room owned a lantern too. The old version walked every room light on the
+  // planet and returned the first ceiling fitting it found — so standing in the
+  // cave, which has no wired bulb at all, offered you the switch for the bulb in
+  // Chiikawa's house twenty units away.
   lightNear(playerDir) {
-    if (!this.isInside(playerDir)) return null;
+    const room = this.homeAt(playerDir);
+    if (!room) return null;
     for (const L of this.roomLights) {
-      if (L.ceiling) return L.art;
+      if (L.home === room && L.ceiling) return L;
     }
     const reach = Math.cos(CONFIG.uniques.reach / CONFIG.globe.radius);
     for (const l of this.loose) {
       if (!l.anchor.visible) continue;
-      if (!this.roomLights.some((L) => L.art === l.art)) continue;
-      if (playerDir.dot(l.dir) > reach) return l.art;
+      const L = this.lightAt(l.anchor);
+      if (L && L.home === room && playerDir.dot(l.dir) > reach) return L;
     }
     return null;
   }
 
-  // Flip a light. Both lists carry the piece's `art`, so one call moves the
-  // glass, the pool, the halo and the light it casts on the room together —
-  // and a light and its own glow can never disagree about being on.
-  toggleLight(art) {
-    let on = null;
-    for (const L of this.itemLights) {
-      if (L.art !== art) continue;
-      L.switchedOn = !L.switchedOn;
-      on = L.switchedOn;
+  // WHICH LIGHT A PIECE IS, given the group it hangs on.
+  //
+  // The anchor is the identity, and it had to become one. Every one of these
+  // used to be found by its `art`, which was a perfectly good name while no two
+  // pieces in the world shared one — and Hachiware's cave has a lantern in it,
+  // so the house's lantern and his are now two objects called `lantern`.
+  // Keying on the string meant flipping the switch on Chiikawa's table also put
+  // out a lamp on the far side of the planet. An anchor is one group in one
+  // room and can never be two.
+  lightAt(anchor) {
+    return this.roomLights.find((L) => L.anchor === anchor) || null;
+  }
+
+  // Flip a light, named by its room-light record. Both lists carry the same
+  // anchor, so one call moves the glass, the pool, the halo and the light it
+  // casts on the room together — and a light and its own glow can never
+  // disagree about being on.
+  // SET FROM WHAT THE BUTTON SAYS, not flipped from the field underneath it,
+  // and those came apart the moment the hour was allowed to hold a switch. The
+  // bulb by day sat with `switchedOn` true and burning nothing: the label read
+  // 「けす」 over a light that was visibly out, and pressing it flipped the
+  // field to false — still out, still nothing to see. Press again and it went
+  // back to true, still out. That is the whole of "I cannot turn the bulb on
+  // except at night", and it was never the light refusing; it was two truths
+  // called `on` disagreeing about which one the button was for.
+  //
+  // So the verb decides: pressing means "make it the other of what it looks
+  // like", and `manual` records that a person rather than the hour last spoke.
+  toggleLight(L) {
+    if (!L) return null;
+    const on = !this.lightIsOn(L);
+    for (const x of this.itemLights) {
+      if (x.anchor !== L.anchor) continue;
+      x.switchedOn = on;
+      x.manual = true;
     }
-    for (const L of this.roomLights) {
-      if (L.art === art) L.on = on === null ? !L.on : on;
-    }
+    L.on = on;
+    L.manual = true;
     this._syncItemLights();
     return on;
   }
 
-  lightIsOn(art) {
-    const L = this.itemLights.find((x) => x.art === art);
-    return L ? L.switchedOn : false;
+  // Whether it is GIVING LIGHT, which is the question the button is asking on
+  // behalf of somebody standing in the room looking at it — not the state of a
+  // field. See toggleLight for what went wrong while these were the same thing.
+  lightIsOn(L) {
+    if (!L) return false;
+    const x = this.itemLights.find((y) => y.anchor === L.anchor);
+    return (x ? this._burn(x, x.switchedOn) : this._burn(L, L.on)) > 0.001;
   }
 
   // The interior's colour, written to everything under the roof: the wall you
@@ -4337,21 +5150,15 @@ export class Globe {
   _syncInterior() {
     if (!this._tintInBase) return;
     this.tintIn.copy(this._tintInBase);
-    // Softened from 0.7, because the room it is dimming is no longer bright.
-    // This lean and the occupancy both used to be needed to say "nobody home";
-    // now the lamps themselves already come up scaled by occupancy — see
-    // _setLamps, where `k` is the hour TIMES how full the house is — so an empty
-    // room is dim before this is applied at all. At the old weight, on the new
-    // tint, the two dimmings stacked and the empty room went to a hole in the
-    // hillside rather than to a dark room.
-    const lean = (this._lampShape || 0) * (1 - this._occupancy);
+    // The shared room tint follows the emptiest home. This is deliberately one
+    // value: every interior material lives on the same tint list.
+    const occupancy = this.homes.reduce((least, h) => Math.min(least, h.occupancy), 1);
+    const lean = (this._lampShape || 0) * (1 - occupancy);
     if (lean > 0) this.tintIn.lerp(_cB.set('#5A5450'), lean * 0.45);
     for (const m of this.interiorTintables) {
       const base = m.userData.baseColor;
       // What a lamp's own glass wears, which is less of the room's dark the
-      // more of it is alight — see the note where `emits` is written. Lifted
-      // toward white rather than skipped outright, so a half-lit lamp mid-dusk
-      // is half in the room and half out of it instead of snapping between.
+      // more of it is alight — see the note where `emits` is written.
       const emits = m.userData.emits;
       if (emits > 0) {
         _cC.copy(this.tintIn).lerp(WHITE, emits);
@@ -4372,13 +5179,12 @@ export class Globe {
     // that has gone the colour of the wall behind it has stopped being a face.
     // Anime lights a cast by what matters rather than by where the lamps are.
     //
-    // Held apart in `tintCast` rather than applied here, because the crossing
-    // in update() writes the same colour when somebody steps through the door
-    // and the two must not drift.
     this.tintCast.copy(this.tintIn).lerp(WHITE, CAST_LIFT.in);
     for (const ch of this.cast) {
-      if (!this.isInside(ch.dir)) continue;
-      for (const m of ch.tintables) m.color.copy(this.tintCast);
+      const amt = this.insideAmount(ch.dir);
+      _cC.copy(this.tintCastOut).lerp(this.tintCast, amt);
+      for (const m of ch.tintables) m.color.copy(_cC);
+      ch._wasInside = amt;
     }
     // ...and whatever is lying about, which wears whichever of the two hours it
     // is standing in. Here at the tail of the tinting because that is what it
@@ -4476,7 +5282,10 @@ export class Globe {
   // lit one — which is the whole point of the lamp being something you carry.
   _syncLoose() {
     for (const L of this.looseLit) {
-      const tint = L.side.value > 0.5 ? this.tintIn : this.tint;
+      // The same fraction its lamp mask reads, so a bear carried through the
+      // door changes hour at the rate it changes rooms.
+      _cB.copy(this.tint).lerp(this.tintIn, L.side.value);
+      const tint = _cB;
       for (const m of L.mats) {
         const base = m.userData.baseColor;
         // A lamp's own glass is exempt in proportion to how lit it is, exactly
@@ -4517,12 +5326,16 @@ export class Globe {
   // the other hand is what it is for.
   _syncHeld(anchor) {
     if (!this.hand) return;
-    const inside = !!anchor && this.isInside(anchor);
-    const tint = inside ? this.tintIn : this.tint;
+    // Blended by how far through the door you are, so the thing in your hand
+    // changes with the walk rather than on one frame of it. It is the closest
+    // object to the eye and the largest on screen, which makes it the single
+    // worst place in the app for a colour to jump.
+    const amt = anchor ? this.insideAmount(anchor) : 0;
+    _cC.copy(this.tint).lerp(this.tintIn, amt);
     for (const m of this.hand.heldMats) {
-      m.color.copy(m.userData.baseColor).multiply(tint);
+      m.color.copy(m.userData.baseColor).multiply(_cC);
     }
-    this.hand.mat.color.copy(tint);
+    this.hand.mat.color.copy(_cC);
   }
 
   // Which set of lamps one of the cast is standing among: the house's, seen
@@ -4534,17 +5347,68 @@ export class Globe {
   // lights to give — a planet with no house patches nothing at all.
   _castSide(ch) {
     const side = ch.bodyMesh.material.userData.lampSide;
-    if (side) side.value = this.isInside(ch.dir) ? 1 : 0;
+    if (side) side.value = this.insideAmount(ch.dir);
   }
 
-  // Whether a surface direction is under the house's roof — the one question
-  // that now separates indoors from out, asked by the tinting here and by the
-  // controls in main.js. There is no stage flag and no mode: being inside is
-  // where you are standing, nothing more.
+  // WHICH ROOF a surface direction is under, or null — the one question that
+  // separates indoors from out, asked by the tinting here and by the controls
+  // in main.js. There is no stage flag and no mode: being inside is where you
+  // are standing, nothing more.
+  //
+  // It answers with the HOME rather than with a boolean because callers that
+  // care almost always then want to know which one — whose interior group to
+  // parent a dropped bear to, whose door a guest should leave by. isInside
+  // keeps the boolean for the many callers that genuinely only want yes or no.
+  //
+  // Two buildings is not a loop worth worrying about: it is one dot product
+  // each, on a list of two, and the alternative — caching the nearest home per
+  // frame — would be a second thing to keep in step for no measurable gain.
+  homeAt(dir) {
+    for (const h of this.homes) {
+      if (h.wallCos === undefined) continue;
+      if (dir.dot(h.sprite.normal) > h.wallCos) return h;
+    }
+    return null;
+  }
+
   isInside(dir) {
-    const s = this.house;
-    if (!s || this._wallCos === undefined) return false;
-    return dir.dot(s.normal) > this._wallCos;
+    return this.homeAt(dir) !== null;
+  }
+
+  // ...and the same question as a FRACTION, which is what the lighting asks.
+  //
+  // 0 out on the grass, 1 in the room, and the wall's own thickness in between.
+  // Everything above this is a threshold and rightly so — a step through a
+  // doorway either happened or it did not, and the collision, the controls and
+  // which group an anchor is parented to all want a yes or a no. Light does
+  // not. A lamp in a doorway is genuinely lighting both the room and the lawn,
+  // and a body in a doorway is genuinely half in each.
+  //
+  // Asked for because the door was a light switch you walked through: on the
+  // one frame the arc crossed, a carried lamp changed which world it lit, the
+  // thing in your hand changed which hour it wore, and the room's near-white
+  // walls arrived all at once. Three step functions on the same frame, which is
+  // most of what "the house is another area" was describing.
+  //
+  // Smoothstepped rather than linear so it leaves and arrives at rest — a
+  // linear ramp has a corner at each end, and a corner in a brightness is a
+  // thing the eye finds even when it cannot say what it found.
+  // The STRONGEST answer over every home, which with two buildings twenty units
+  // apart is the only sensible reading: their wall bands cannot overlap, so at
+  // most one of them is ever nonzero and the max is simply "whichever room you
+  // are in or at the door of".
+  insideAmount(dir) {
+    let best = 0;
+    for (const h of this.homes) {
+      if (h.wallInnerCos === undefined) continue;
+      const along = dir.dot(h.sprite.normal);
+      if (along <= h.wallCos) continue;
+      if (along >= h.wallInnerCos) return 1;
+      const t = (along - h.wallCos) / (h.wallInnerCos - h.wallCos);
+      const v = t * t * (3 - 2 * t);
+      if (v > best) best = v;
+    }
+    return best;
   }
 
   // The glass, which is the only thing on the building that is lit from the
@@ -4569,13 +5433,18 @@ export class Globe {
   // dark walls, and that is a better signal than a blown-out frame — at 1.28
   // the frame was the brightest thing on the building and the light it promised
   // was brighter than the light inside it.
-  _syncGlow() {
-    if (!this.houseGlow) return;
+  //
+  // PER HOME, because the two of them are lit by different lamps. Sharing one
+  // value was invisible while there was one building and would be plainly
+  // wrong with two: Hachiware's lantern burning in the cave would put a warm
+  // glow round Chiikawa's empty doorway, twenty units away and across the
+  // terminator.
+  _syncGlow(h) {
     const over = 1.10;
     _cA.copy(this.tint);
     _cB.set(LAMP_COLOR).multiplyScalar(over);
-    _cA.lerp(_cB, this._houseLit);
-    for (const m of this.houseGlow) m.color.copy(_cA);
+    _cA.lerp(_cB, h.lit);
+    for (const m of h.glow) m.color.copy(_cA);
   }
 
   // How much light is getting OUT of the house — which is what every warm thing
@@ -4605,19 +5474,31 @@ export class Globe {
   // house should still show at the window — that is a house with a light on,
   // whoever is or is not home.
   _syncHouseLit() {
-    let lit = 0;
-    if (this._roomReach > 0) {
-      for (const L of this.roomLights) {
-        if (!L.on) continue;
-        if (this.lampUniforms.uLampIn.value[L.slot] < 0.5) continue;
-        lit += (L.night ? this._lamps : 1) * (L.reach / this._roomReach);
-      }
+    // One pass over the lamps, totalled into the room each belongs to, rather
+    // than a pass per home over all of them. Two rooms and three lamps makes
+    // that a matter of taste; it is written this way because it stays right
+    // however many of either there are.
+    for (const h of this.homes) h._burning = 0;
+    for (const L of this.roomLights) {
+      if (!L.home || L.home.reach <= 0) continue;
+      // The switch, the hour and being present are all `_burn`'s business now
+      // — see there. It is worth keeping why the last of those three is in it,
+      // because it is easy to leave out: it reads as covered by the other two
+      // — the lamp is switched on, and its last known position is indoors, so
+      // surely the room is lit by it. It is in somebody's bag. Measured: with
+      // the bulb off and the lantern stowed, the room's own term correctly
+      // fell to 0 while the windows went on showing 0.418 of warm to the whole
+      // planet, because this loop asked the switch rather than the world.
+      if (this.lampUniforms.uLampIn.value[L.slot] < 0.5) continue;
+      L.home._burning += this._burn(L, L.on) * (L.reach / L.home.reach);
     }
-    const v = (this._lampShape || 0) * Math.min(1, lit);
-    if (v === this._houseLit) return;
-    this._houseLit = v;
-    this._syncGlow();
-    for (const s of this.litProps) this._syncLamp(s);
+    for (const h of this.homes) {
+      const v = (this._lampShape || 0) * Math.min(1, h._burning);
+      if (v === h.lit) continue;
+      h.lit = v;
+      this._syncGlow(h);
+      if (h.sprite.lit) this._syncLamp(h.sprite);
+    }
   }
 
   // How lit the windows are for a reason that has nothing to do with the hour:
@@ -4627,10 +5508,28 @@ export class Globe {
   // It multiplies the hour's own curve rather than replacing it, so an empty
   // house at noon is still an unlit house — occupancy decides how bright the
   // lamps are, never whether it is dark enough to want them.
+  //
+  // `f` is a map from home style to how full that home is, or a bare number
+  // meaning all of them. household.js sends the map; anything simpler that
+  // wants to dim every window at once can still send a number.
   setOccupancy(f) {
-    if (f === this._occupancy) return;
-    this._occupancy = f;
+    let moved = false;
+    for (const h of this.homes) {
+      const v = typeof f === 'number' ? f : (f[h.style] !== undefined ? f[h.style] : h.occupancy);
+      if (v === h.occupancy) continue;
+      h.occupancy = v;
+      moved = true;
+    }
+    if (!moved) return;
     this._setLamps(this._lampAt);
+  }
+
+  // The evening as one room sees it: how late it is, times how full that room
+  // is. A lamp with no home — which cannot currently happen — falls back to the
+  // strongest, so an orphan light is at worst as bright as the brightest room
+  // rather than permanently dark.
+  _lampsIn(home) {
+    return home ? home.lamps : this._lamps;
   }
 
   // The lit half of one prop. Both the things that can hide it run through
@@ -4639,14 +5538,19 @@ export class Globe {
   // eventually gets stuck on.
   _syncLamp(s) {
     const { night, bloom, pool, slot } = s.lit;
-    // Everything here is what ESCAPES the building, so all of it reads
-    // `_houseLit` — what is burning inside — rather than `_lamps`, which is
-    // only the hour. See _syncHouseLit.
-    const on = s.seen && this._houseLit > 0;
+    // Everything here is what ESCAPES the building, so all of it reads the
+    // home's own `lit` — what is burning inside THIS one — rather than
+    // `_lamps`, which is only the hour. See _syncHouseLit.
+    //
+    // A lit prop with no home cannot currently happen (NIGHT_ART and
+    // CONFIG.homes name the same two types), but the fallback is 0 rather than
+    // a throw: an unclaimed lamp should go dark, not take the frame with it.
+    const houseLit = s.home ? s.home.lit : 0;
+    const on = s.seen && houseLit > 0;
     // What this lamp adds to everything standing in it. Not gated on `seen`:
     // that flag is about the card for this house having gone over the horizon,
     // and a bush a few paces the near side of it is still stood in the light.
-    this.lampUniforms.uLampLevel.value[slot] = this._houseLit * LAMP_LIT.strength;
+    this.lampUniforms.uLampLevel.value[slot] = houseLit * LAMP_LIT.strength;
     // A retired card never comes back, whatever the hour does. The house is
     // geometry now and its night sheet is kept only so this machinery still has
     // the object it expects to find; showing it would hang the old drawing in
@@ -4655,12 +5559,12 @@ export class Globe {
     bloom.visible = on;
     pool.visible = on;
     if (!on) return;
-    night.material.opacity = this._houseLit;
-    pool.material.opacity = this._houseLit * LAMP_POOL.alpha;
+    night.material.opacity = houseLit;
+    pool.material.opacity = houseLit * LAMP_POOL.alpha;
     // The bloom's own brightness is not the lamps alone any more — it also
     // depends on how far off you are standing. Written in one place so the
     // per-frame fade and this cannot disagree.
-    this._syncBloom();
+    this._syncBloom(s);
   }
 
   // The glow in the air over the door, faded out as you walk up to it.
@@ -4682,14 +5586,13 @@ export class Globe {
   // cruder and a good deal steadier: the door's own group swings round the
   // shell as the building is placed, and a fade that moved with it would
   // brighten and dim as you circled the house at a constant distance.
-  _syncBloom() {
-    const s = this.house;
+  _syncBloom(s) {
     if (!s || !s.lit) return;
     const b = LAMP_BLOOM;
     _bloomAt.copy(s.anchor.position).add(this.world.position);
     const d = this.camera.position.distanceTo(_bloomAt);
     const f = Math.max(0, Math.min(1, (d - b.near) / (b.far - b.near)));
-    s.lit.bloom.material.opacity = this._houseLit * b.alpha * f;
+    s.lit.bloom.material.opacity = (s.home ? s.home.lit : 0) * b.alpha * f;
   }
 
   // Shove the loose furniture about with your feet. `at` is where you are
@@ -4726,7 +5629,12 @@ export class Globe {
       return;
     }
     const R = CONFIG.globe.radius;
-    const cfg = CONFIG.interior;
+    // The shove's own feel — reach, speed and damping — is the same in both
+    // rooms and is read off the first, since a toy on a stone floor and a toy
+    // on boards are not different physics. What is NOT shared is the wall the
+    // clamp below measures against, which is asked of whichever room the piece
+    // is actually in.
+    const cfg = CONFIG.homes[0].spec;
     const dt = Math.min(dtMs, 100) / 1000;      // a long frame must not teleport it
 
     // How you moved since last frame, as a tangent. Derived rather than handed
@@ -4745,9 +5653,17 @@ export class Globe {
     for (const n of this.loose) {
       // Not while it is in somebody's hands or on loan — an invisible bear
       // being shoved about the floor is a haunting, not a feature.
-      if (!n.anchor.visible) continue;
+      //
+      // The BODY rather than the anchor, now that a carried piece keeps its
+      // anchor so its light can follow you. What you may kick is what you can
+      // see, which is the honest reading of this test and always was.
+      if (!n.anchor.visible || (n.body && !n.body.visible)) continue;
       const gap = at.angleTo(n.dir) * R;
       if (gap < n.reach) {
+        // A perched item's authored home lift belongs only to its home spot.
+        // Once it is actually shoved, it has left that arrangement and falls
+        // back to the floor like any other loose piece.
+        n.atHome = false;
         // Out from under your feet, in the tangent plane where it is lying.
         _looseOut.copy(n.dir).addScaledVector(at, -n.dir.dot(at));
         if (_looseOut.lengthSq() < 1e-12) {
@@ -4791,17 +5707,25 @@ export class Globe {
       // isInside, not a band of distances, so a piece stood just past the
       // doorstep cannot be caught by the clamp and pulled in through the
       // masonry.
-      const out = this.house.normal.angleTo(n.dir) * R;
-      const rim = cfg.walk - n.reach;
-      if (out > rim && this.isInside(n.dir)) {
-        _looseOut.copy(n.dir).addScaledVector(this.house.normal, -n.dir.dot(this.house.normal));
-        if (_looseOut.lengthSq() > 1e-12) {
-          _looseOut.normalize();
-          const arc = rim / R;
-          n.dir.copy(this.house.normal).multiplyScalar(Math.cos(arc))
-            .addScaledVector(_looseOut, Math.sin(arc)).normalize();
-          const into = n.vel.dot(_looseOut);
-          if (into > 0) n.vel.addScaledVector(_looseOut, -into);
+      //
+      // Measured against WHICHEVER room it is in — `homeAt` answers with the
+      // building or with null, which is the same wall-arc test isInside makes
+      // and folds the "is it indoors at all" guard into the same lookup.
+      const room = this.homeAt(n.dir);
+      if (room) {
+        const N = room.sprite.normal;
+        const out = N.angleTo(n.dir) * R;
+        const rim = room.spec.walk - n.reach;
+        if (out > rim) {
+          _looseOut.copy(n.dir).addScaledVector(N, -n.dir.dot(N));
+          if (_looseOut.lengthSq() > 1e-12) {
+            _looseOut.normalize();
+            const arc = rim / R;
+            n.dir.copy(N).multiplyScalar(Math.cos(arc))
+              .addScaledVector(_looseOut, Math.sin(arc)).normalize();
+            const into = n.vel.dot(_looseOut);
+            if (into > 0) n.vel.addScaledVector(_looseOut, -into);
+          }
         }
       }
 
@@ -5050,10 +5974,31 @@ export class Globe {
   pickLoose(raycaster, playerDir, arts) {
     const reach = Math.cos(CONFIG.uniques.reach / CONFIG.globe.radius);
     for (const loose of this.loose) {
-      if (!loose.anchor.visible) continue;
+      // ...and the same reading here: you pick up what you can see, not what
+      // is merely present. A carried piece is present — its light is over your
+      // feet — and picking it up again would be picking up your own hand.
+      if (!loose.anchor.visible || (loose.body && !loose.body.visible)) continue;
       if (arts && !arts.includes(loose.art)) continue;
       if (playerDir.dot(loose.dir) < reach) continue;
-      if (raycaster.intersectObject(loose.anchor, true).length) return loose;
+      // THE BODY, NOT THE ANCHOR, and for the lantern that is the difference
+      // between picking up a lamp and picking up its light.
+      //
+      // The anchor carries more than the drawing: a lit piece hangs its POOL off
+      // it too, so that shoving the lantern across the floor takes its light with
+      // it and nothing has to remember to move it. Right for the light, ruinous
+      // here — the pool is a ground cap of radius `glow.reach`, which is 4.6
+      // times the lamp's own height, so a recursive raycast made the lantern
+      // tappable anywhere inside a pool several units across while the bear and
+      // the teapot, which cast no light, were tappable only where they are.
+      // Worse when the lamp is OFF: the pool drops to zero opacity but stays
+      // `visible`, and the raycast reads visibility, not alpha — so the oversized
+      // target was there even with nothing lit to explain it.
+      //
+      // `body` is the built group: the piece as drawn, its own halo included.
+      // That is what "you pick up what you can see" has always meant here, and
+      // the test two lines up already reads `body` for exactly that reason.
+      const hit = loose.body || loose.anchor;
+      if (raycaster.intersectObject(hit, true).length) return loose;
     }
     return null;
   }
@@ -5064,10 +6009,19 @@ export class Globe {
   // down on the meadow is stood up by the exact code that stood it on the
   // room's floor.
   placeLoose(loose, spot) {
+    loose.atHome = !spot;
     loose.dir.copy(spot || loose.home).normalize();
     loose.vel.set(0, 0, 0);
     loose.place();
     loose.anchor.visible = true;
+    // Back in the world and visible in it. The body has to be restored as well
+    // as the anchor, because carrying is what hid it — see carryLoose.
+    //
+    // NOT applied while it is being carried, and that exception is the whole
+    // reason carrying works: main.js calls this every frame to keep a held
+    // lamp's light over your feet, so an unconditional restore here would draw
+    // the lantern on the ground under you as well as in your hand.
+    if (loose.state !== 'carried') this._setLooseState(loose, 'world');
     // WHOSE CHILD IT IS follows where it stands. The anchors are born children
     // of `interior`, and the horizon cull hides that whole group with the
     // house — which is right for the futon and wrong for a bear set down half
@@ -5082,12 +6036,71 @@ export class Globe {
   }
 
   _parentLoose(loose) {
-    const home = this.isInside(loose.dir) ? this.interior : this.world;
-    if (home && loose.anchor.parent !== home) home.add(loose.anchor);
+    // WHICH room, not merely whether it is in one: a bear carried from the
+    // house to the cave has to join the cave's group, or it would be culled by
+    // a building on the far side of the planet.
+    const h = this.homeAt(loose.dir);
+    const group = h && h.interior ? h.interior : this.world;
+    if (loose.anchor.parent !== group) group.add(loose.anchor);
+  }
+
+  // The other two things that can happen to a loose piece, and the distinction
+  // between them is one the world used to miss entirely.
+  //
+  // A piece in your HANDS is still in the world. It is over your feet, main.js
+  // keeps it there every frame, and if it is a lamp it is lighting the ground
+  // you are standing on — which is the entire point of a lamp you can carry.
+  // What must not happen is SEEING it there, because you are already looking at
+  // the copy in your hand.
+  //
+  // A piece in your BAG is not in the world at all. It lights nothing, because
+  // it is nowhere.
+  //
+  // Both used to be `anchor.visible = false`, and that is exactly why a stowed
+  // lantern went on lighting the spot it was last put down at: the flag hid the
+  // lamp and said nothing whatever about the lamp's light. Measured with the
+  // lantern in the pack, the room's term still reading 0.72 and its last
+  // position still in the uniforms.
+  carryLoose(loose) {
+    this._setLooseState(loose, 'carried');
+  }
+
+  stowLoose(loose) {
+    this._setLooseState(loose, 'away');
+  }
+
+  // One door for all three, because every one of them has to do the same last
+  // thing: tell the lights. A lamp's level is not written per frame — it is
+  // written when something about it changes — so a piece going into a bag has
+  // to say so, or the term goes on burning at the spot it left. That was the
+  // whole bug, and putting the re-sync anywhere but here would leave one of the
+  // three states able to forget it.
+  //
+  // Guarded on an actual change, because carrying calls this every frame.
+  _setLooseState(loose, state) {
+    if (loose.state === state) return;
+    loose.state = state;
+    const away = state === 'away';
+    loose.anchor.visible = !away;
+    if (loose.body) loose.body.visible = state !== 'carried';
+    this._syncItemLights();
+  }
+
+  // Whether a piece is in somebody's hands rather than lying about. The one
+  // question main.js cannot answer for itself once the hand has been emptied by
+  // something that did not say where the thing went — see syncPouch.
+  isCarried(loose) {
+    return loose.state === 'carried';
   }
 
   looseByArt(art) {
     return this.loose.find((l) => l.art === art) || null;
+  }
+
+  looseByItem(item, art) {
+    return this.loose.find((l) => l.item === item)
+      || this.loose.find((l) => !l.item && l.art === art)
+      || null;
   }
 
   // Pull the tuft nearest `spot`, if there is one within snapping distance and
@@ -5321,7 +6334,10 @@ export class Globe {
       // the roof or it is not. Nothing has to tell the lighting that an item
       // was picked up, and nothing can forget to.
       _lightDir.copy(at).sub(this.world.position).normalize();
-      this.lampUniforms.uLampIn.value[L.slot] = this.isInside(_lightDir) ? 1 : 0;
+      // A FRACTION, not a flag — see insideAmount. A lantern halfway through
+      // the door lights the room and the grass at half strength each, which is
+      // what a lantern in a doorway does.
+      this.lampUniforms.uLampIn.value[L.slot] = this.insideAmount(_lightDir);
     }
     // ...and the house's own glow, which the line above can change: carrying
     // the lantern out through the door takes its light out of the room, and a
@@ -5336,10 +6352,10 @@ export class Globe {
     // frame it changes — the colours behind it are a handful of writes, but
     // there is no sense making them sixty times a second to say the same thing.
     for (const L of this.looseLit) {
-      const inside = this.isInside(L.loose.dir);
-      if (inside === L.was) continue;
+      const inside = this.insideAmount(L.loose.dir);
+      if (Math.abs(inside - (L.was === null ? -1 : L.was)) < 0.004) continue;
       L.was = inside;
-      L.side.value = inside ? 1 : 0;
+      L.side.value = inside;
       this._syncLoose();
     }
     // ...and whether a lamp is standing on the floor or on the furniture, which
@@ -5350,8 +6366,9 @@ export class Globe {
     // _syncBloom. Driven from here rather than from _syncLamp because it
     // follows the CAMERA, and the camera moves on frames when the hour and the
     // horizon both have nothing to say.
-    if (this.house && this.house.lit && this.house.lit.bloom.visible) {
-      this._syncBloom();
+    for (const h of this.homes) {
+      const s = h.sprite;
+      if (s.lit && s.lit.bloom.visible) this._syncBloom(s);
     }
 
     // Which lamps whatever you are holding reads, which is simply which lamps
@@ -5363,7 +6380,7 @@ export class Globe {
     // already been put away. Outdoors is the honest answer for that: the room's
     // lamps should not reach you a hundred units up over your own roof.
     if (this._handSide) {
-      this._handSide.value = anchor && this.isInside(anchor) ? 1 : 0;
+      this._handSide.value = anchor ? this.insideAmount(anchor) : 0;
     }
     // ...and what that thing WEARS, which is the same question again and was
     // being answered for only half of what the hand can hold. See _syncHeld.
@@ -5402,23 +6419,33 @@ export class Globe {
     // and the house is a house again. Climbing on, the camera swings off the
     // overhead line — measured 20 units of offset by the time it is 17 up — so
     // the far view has the building solid, as it always was.
-    if (this.house && this.house.shell) {
+    //
+    // Asked of every home rather than of the one, and each keeps its own flag:
+    // you can only be over one roof at a time, but the OTHER building has to be
+    // put back together when you leave the first, and a shared flag cannot say
+    // which one is currently open.
+    for (const h of this.homes) {
       const c = CONFIG.camera;
-      const rad = this.houseRad;
-      this.house.anchor.getWorldPosition(_pw);
+      h.sprite.anchor.getWorldPosition(_pw);
       _pw2.copy(this.camera.position).sub(_pw);
-      const up = _pw2.dot(this.house.normal);
+      const up = _pw2.dot(h.sprite.normal);
       const off = Math.sqrt(Math.max(0, _pw2.lengthSq() - up * up));
       // AIRBORNE, and not merely higher than the wall beside you. The dome
       // curls down to nothing at its rim, so the roof over the doorway is only
       // 1.64 — below a 1.7 eye. Without this the building took its own skin
       // off while you stood on its threshold, which is the one place you are
       // most certainly looking at it.
+      // ...and measured against the SHELL YOU CAN SEE rather than the analytic
+      // wall, which for the cave are no longer the same number. Its outer layers
+      // are pushed out into lumps — see caveBulge — so its crown stands a good
+      // unit proud of `rad`, and a lid sized off `rad` alone would take the rock
+      // away while you were still climbing up past it.
+      const lid = h.rad + (h.style === 'cave' ? CAVE_LIFT : 0);
       const over = up > c.eyeHeight + c.groundBand
-        && off < rad && up > Math.sqrt(Math.max(0, rad * rad - off * off));
-      if (over !== this._overRoof) {
-        this._overRoof = over;
-        for (const m of this.houseOuter) m.visible = !over;
+        && off < lid && up > Math.sqrt(Math.max(0, lid * lid - off * off));
+      if (over !== h.overRoof) {
+        h.overRoof = over;
+        for (const m of h.outer) m.visible = !over;
       }
     }
 
@@ -5426,21 +6453,22 @@ export class Globe {
     // writes colours while a fade is running, and walking through the door is
     // not a fade — without this, a guest stepping in at midnight would stand
     // in the warm room still wearing moonlight until the next hour change.
+    // A FRACTION of the way in rather than a side of a line, so somebody in the
+    // doorway is half lit by each. `_wasInside` used to hold a boolean and this
+    // loop used to skip unless it flipped; it holds the fraction now and skips
+    // unless it has moved enough to see, which keeps a room full of standing
+    // characters from being re-tinted sixty times a second for nothing.
     for (const ch of this.cast) {
-      const inside = this.isInside(ch.dir);
-      if (inside === ch._wasInside) continue;
+      const inside = this.insideAmount(ch.dir);
+      if (Math.abs(inside - (ch._wasInside || 0)) < 0.004
+        && ch._wasInside !== undefined) continue;
       ch._wasInside = inside;
-      // `tintCast` and not `tintIn`: indoors the cast are lifted clear of the
-      // room's dark — see CAST_LIFT. Outdoors there is no such cheat, because
-      // the night out there is moonlight rather than the absence of a lamp and
-      // nobody is being lost in it.
-      const c = inside ? this.tintCast : this.tintCastOut;
-      for (const m of ch.tintables) m.color.copy(c);
-      // Which set of lamps they read, switched on the same crossing and for the
-      // same reason the colour is. A hard switch, matching the tint above: the
-      // threshold is already a line where the world changes for them, and a
-      // lamp fading across it while the wall's colour snapped would read as two
-      // different doorways.
+      _cC.copy(this.tintCastOut).lerp(this.tintCast, inside);
+      for (const m of ch.tintables) m.color.copy(_cC);
+      // Which set of lamps they read, moving on the same crossing and by the
+      // same fraction as the colour. The two were a matched pair of hard
+      // switches and are now a matched pair of fades — a lamp that faded while
+      // the wall's colour snapped would read as two different doorways.
       this._castSide(ch);
     }
 
@@ -5586,7 +6614,10 @@ export class Globe {
         // THE HOUSE rather than on merely having a shell, which was the same
         // test until the trees grew shells of their own — at which point the
         // last tree to cross the horizon was taking the front room with it.
-        if (s === this.house && this.interior) this.interior.visible = seen;
+        // ...and the room goes with the building it is inside. Keyed on the
+        // sprite's own home record rather than on being THE house, which was
+        // the same test until there were two of them.
+        if (s.home && s.home.interior) s.home.interior.visible = seen;
         if (s.lit) this._syncLamp(s);
       }
       if (seen) orientBillboard(s.holder, s.anchor.position, s.normal, this.camera, s.standoff, true);

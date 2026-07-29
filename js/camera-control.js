@@ -495,6 +495,15 @@ export class PlanetCamera {
     return yaw === 0 ? out : out.applyAxisAngle(this.anchor, -yaw);
   }
 
+  // The same answer, for anything outside this class that has to agree with the
+  // camera about what is in front of you — which the interaction focus in
+  // main.js does, since "am I facing that" is a question about what is on the
+  // player's screen. `forward` is the wrong one to read from out there: with the
+  // gyro live it differs from the view by exactly the offset above, and a focus
+  // picked off the frame while the camera showed something else would be the
+  // same disagreement this method was written to end.
+  facing(out) { return this._viewTangent(out); }
+
   // The camera is yours alone: walking never turns it. This app is about
   // looking at somebody, and sidestepping to frame them better only to have
   // the view swing away to face your direction of travel fights the very
@@ -826,22 +835,16 @@ export class PlanetCamera {
     this.focus = ch;
   }
 
-  // The same move without a person on the end of it: stand `standoff` units
-  // short of a spot on the surface, facing it. Split out of teleportTo when the
-  // house needed it — going indoors sets you down on a doorstep, which is the
-  // identical arrival at a different distance, and the distance is the only
-  // thing about it that differs.
-  // Stand somewhere named exactly, facing something named exactly, on the
-  // same eased glide goStand rides. goStand's whole job is picking WHICH side
-  // to arrive on; this exists for the one arrival with no choice in it — the
-  // doorstep is where the door is, whichever side you came from.
-  glideTo(spot, look) {
-    setFrame(this.frameT, spot, look);
-    this._lift = 1;
-    this.altT = CONFIG.camera.eyeHeight;
-    this.lookPitchT = CONFIG.camera.faceLookPitch;
-  }
+  // `glideTo` stood here — stand somewhere named exactly, facing something named
+  // exactly, for the one arrival with no choice of side in it: a doorstep is
+  // where the door is, whichever way you came. Its only caller was the tap that
+  // teleported you to a building, and that feature is gone, so this went with it
+  // rather than sitting here as a method nothing calls.
 
+  // The same move as teleportTo without a person on the end of it: stand
+  // `standoff` units short of a spot on the surface, facing it. Its whole job is
+  // picking WHICH side to arrive on, which is the question every visit to a
+  // character asks — and the reason the doorstep arrival could never use it.
   goStand(to, standoff) {
     const c = CONFIG.camera;
     const R = CONFIG.globe.radius;

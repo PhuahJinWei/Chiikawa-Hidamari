@@ -590,35 +590,66 @@ clusters were a third kind here and are retired — see further down.
 
 ## Biomes
 
-`CONFIG.biomes`, read through `biomesAt` in `sphere.js`, and it is one rule with
-three readers: the ground's colour where it is painted, the grass blade greens
-where the blades are built, and how thickly anything sprouts at all. Adding one
-is a single config entry — a centre in lat/lon, a radius, a fade, a ground
-colour, two blade greens, a cover multiplier.
+`CONFIG.biomes`, read through `biomesAt` in `sphere.js`. **There are exactly two,
+and both are written down:**
 
-There are two against a default meadow: a **dry clearing** (pale straw ground,
-olive blades, slightly thinner cover) and a **deep wood** (richer green, dark
-blades, half again the cover).
+- **meadow** — the base. Bright green ground (`#B4DC8E`), green-brown ticks,
+  white and yellow blossom specks, full `cover`, and it grows everything: grass,
+  flowers, mushrooms, trees, bushes, stumps. About two thirds of the surface.
+- **sand** — the pale cream ground (`#F4EBD1`) both of them live on. Brown hatch
+  marks instead of green ticks, green blots instead of blossom, `cover` 0.045,
+  and it grows **grass only**. Two patches, one at each home.
 
-`biomeWeight` is a smoothstep over the arc past `r`, and `biomesAt` normalises so
-overlapping biomes never sum past 1 — without that, two overlapping entries
-would drive the colour lerp past its endpoint and produce a colour neither
-biome asked for. It returns the mix sorted by weight into a caller-supplied
-array, because it is called per 16-pixel cell while painting a 3072×1536 canvas
-and per tuft while building the grass; allocating there is the difference
-between a paint that takes 160ms and one you notice.
+A biome is a *kind of ground*; `patches` is the list of where it turns up. That
+is the shape the table changed to and it is the point of the rework: sand can be
+at two homes on opposite sides of the world without being two biomes, and the
+meadow can be an ordinary entry by having no patches at all. `biomesAt` gives the
+base whatever weight the patches have not claimed, so the mix always sums to
+exactly 1 and no reader has to keep its own copy of "what the planet is when
+nothing else is happening".
+
+Within one biome the patches take a **max**, not a sum — two overlapping
+clearings of the same sand are still sand. Across biomes the weights normalise
+down if they would total more than 1. `patchWeight` is a smoothstep over the arc
+past `r`, because a linear ramp has a corner at each end and a corner in a border
+is a rim you can see from the air.
+
+It returns the mix sorted by weight into a caller-supplied array, because it is
+called per 16-pixel cell while painting a 3072×1536 canvas and per tuft while
+building the grass; allocating there is the difference between a paint that takes
+160ms and one you notice.
+
+**Four readers, one table.** The ground texture in `art.js`; the blade greens and
+the ground-cover density in `scene.js`; and the scenery spiral, which is the new
+one — `growWeight` is what empties both clearings of trees, bushes and stumps.
 
 **`cover` is a multiplier on a rejection test, not a count.** The scatter asks
-`plantable(margin)`, which fails a candidate if it is already taken *or* if
-`rand() > coverAt(dir)` — so a biome above 1 keeps everything and a biome below
-1 thins it. That means changing `cover` does not change how many things exist,
-only where they end up, and the total count stays the number in `scene.js`.
+`plantable(margin, kind)`, which fails a candidate if it is already taken, *or*
+if `rand() > growWeight(dir, kind)`, *or* if `rand() > coverAt(dir)`. Changing
+either number does not change how many things exist, only where they end up: a
+tuft turned away on the sand is retried elsewhere, and the total stays the number
+in `scene.js`.
 
-The dry clearing was set to 0.55 at first and it was wrong: half-density read as
-scorched earth rather than as a dry clearing, and the near ground had nothing on
-it at all. The reference frames put a pale field and a green meadow side by side
-with much the same scatter on both — what changes is the ground under them. It
-is 0.85 now, and the *colour* does the work.
+**`cover` and the painted marks are deliberately separate numbers.** `ticks`,
+`blooms` and `bloomScale` say how heavily the *paint* marks a biome; `cover` says
+how much *grows* there. One number cannot do both jobs — the sand grows almost
+nothing and is still the more heavily hatched of the two, and asking `cover` to
+thin its hatching too left it a blank cream fill, which is the one thing the
+reference frames never show.
+
+**Soft edges everywhere except the spiral.** Ground cover rolls against
+`growWeight`, so flowers and mushrooms thin out gradually across a border rather
+than stopping along a circle; nothing can appear in the solid middle of a
+clearing, where the weight is exactly 0. The scenery spiral has no random stream
+and must stay fixed — re-dealing it moves every prop on the planet — so it takes
+the half-way line instead. At three dozen props spread over a world there is no
+density gradient to see anyway.
+
+Counts moved with the biomes rather than staying put, because confining things to
+two thirds of the world would otherwise have made the meadow *thinner* than the
+uniform planet it replaced: grass 1000 → 1400, flowers 75 → 90, and the scenery
+spiral 58 → 100 spots, which after the cull is 45 props standing against 46
+before — the same planet's worth, all of it now where it is wanted.
 
 ## The range on the horizon
 
@@ -849,7 +880,9 @@ Only the height, 0.30, is a decision — the width follows whatever was drawn.
 `BLADE_TUFTS` is the number of grass clumps and is the knob for bald versus
 overgrown. Like `SCENERY_COUNT` it is a count over a fixed area, so it has to
 move with `globe.radius`: halve the radius and a quarter as many holds the same
-thickness.
+thickness. Both are also counted against the biomes now — most of what they ask
+for lands in the meadow, since the sand thins grass to 0.045 and refuses scenery
+outright. See Biomes.
 
 **The house is drawn twice**, `house-day-1.png` and `house-night-1.png` — the
 same dome by day and with its lamps lit. It is the only prop with a second face,
@@ -999,10 +1032,15 @@ file cannot do:
   The stretch is clamped at 10× — the last few rows before a pole want infinity,
   and nobody stands there.
 
-What it paints, in order: a base colour per 16px cell from `biomesAt`, then
-`TICKS` short bowed strokes (6000 of them, 1–3 per mark, round caps) in the
-biome's own tick green, then `BLOOMS` four-dot flower clusters (1600, white
-weighted twice against yellow and pink). The counts were arrived at by measuring
+What it paints, in order: a base colour per 16px cell — a weighted mean over the
+whole `biomesAt` mix, which sums to 1 — then `TICKS` short bowed strokes (6000,
+1–3 per mark, round caps), then `BLOOMS` four-dot clusters (1600). Both take
+their colour, size and number from **whichever biome won the spot**, so on the
+meadow that is green-brown ticks with white-yellow-pink blossom, and on the sand
+it is brown hatching with green blots at nearly twice the size. Strongest-wins
+rather than a blend because a mark is discrete — there is no half-brown stroke —
+and along a border the two kinds interleave in proportion to their weights, which
+dithers one texture into the other. The counts were arrived at by measuring
 coverage — 22000 ticks read as 55% ink and turned the field grey.
 
 **The one thing painting cannot fix is near-field sharpness.** At a walking eye
@@ -1403,24 +1441,52 @@ a render-from camera can float outside the graph, but children of an orphan
 are never drawn. The hand ducks away past the same `groundBand` threshold that
 separates standing from flying everywhere else, and comes back on landing.
 
-**The pouch** is the clock's own UI arrangement one pill down: the pill stays
-in the stack, the panel grows out of its corner, an ignored panel folds itself
-away on the same timer. The pill is two verbs with the current one written on
-it — もちもの opens the pouch, しまう puts the held thing away. Chips show the
-same canvas the hand shows — for a fish, the crop `paintFishCard` made, which is
-also the texture the one in the lake is wearing — so the thing you chose and the
-thing you are holding cannot be two drawings.
+**The pouch is a sheet in the middle of the screen**, not a drawer in the
+corner. It used to be the clock's own arrangement one pill down — panel growing
+out of the pill, folding itself away on the same ignored-for-a-while timer — and
+that shape is right for the clock, which you GLANCE at, and wrong for this,
+which you go INTO. Three things followed from the corner: a 230px cap, 44px
+slots, and a bag that shut itself while you were still deciding. So: one card at
+`min(92vw, 420px)` over a scrim, staying open until the cross, the scrim or
+escape puts it away, with the slots at about 70px. The 図鑑 shares the same card,
+because the two are never both wanted and a second scrim would only be a second
+thing to keep in step with the first.
 
-The panel is **capped and scrolls** now, which twelve species bought: twelve
-図鑑 rows plus the chips run to about 700px, taller than the phone this is played
-on, and the bottom of the list would have hung off the screen with nothing to say
-so. Capped against the viewport rather than at a fixed height, with
-`overscroll-behavior: contain` — the page sets `touch-action: none` for the
-world's own drag handling, so without it a flick off the end of the list would
-carry on as a swipe at the planet behind it. Every direct child takes
-`flex: none`, because a flex column shrinks its children to fit before it agrees
-to scroll, and without it a full pouch is a list of slivers rather than a
-scrollbar.
+The sheet is **modal, and the document's tidy-away handler returns early while
+it is up**. That handler folds the clock and the drawer for any press outside
+them, and the 図鑑's pill lives in the drawer — so without the guard, tapping a
+row of the 図鑑 folded the drawer, and the drawer took the 図鑑 down with it.
+
+`overscroll-behavior: contain` on the body carries over from the drawer for the
+same reason it was there: the page sets `touch-action: none` for the world's own
+drags, so without it a flick off the end of the 図鑑 keeps going as a swipe at
+the planet behind the scrim. `min-height: 0` on the body is what lets the card's
+`max-height` actually cap it — a flex child's default min-height is its content,
+so a long 図鑑 would otherwise push the card past the bottom of the screen
+instead of scrolling inside it.
+
+**Slots are squared before they are shown.** The drawings arrive on canvases of
+their own shape and their own margins — a fish cropped tight to its pixels by
+`paintFishCard`, a mushroom padded for its mipmap by `paintSheet`, grass tall and
+thin on a mostly empty card — so `object-fit: contain` fits each CANVAS to its
+slot rather than each DRAWING, and four slots come out filled to four different
+fractions. `squareIcon` measures the ink with `sheetBounds` and redraws it
+centred on a square at one fixed fraction. Nothing about the drawing changes,
+only how much of its slot it is given.
+
+**The held slot wears a ring, not a fill.** Solid ink is this app's word for
+"on" everywhere else and it was wrong here for one reason: everything else
+wearing it is TEXT, which flips to paper and stays legible, and a drawing
+cannot. The items are outlined in that same ink, so a filled slot ate the very
+picture it was pointing at.
+
+**A long press lifts a slot; the next one you touch is where it goes.** See
+`moveSlot` in items.js — it swaps, or merges when the two are the same stackable
+kind. Long press rather than drag, because dragging across a grid on a phone
+means tracking a finger over nodes it did not start on and guessing which one it
+is above; two taps say the same thing with none of that. THE HAND FOLLOWS THE
+THING: `held` is an index, so a swap that did not carry it would leave you
+holding whatever was moved into the slot you were holding.
 
 **Gifting** is what holding is for: a tap on a friend with something in your
 hand is a delivery, not a visit — the item changes what the gesture means,
@@ -1486,10 +1552,11 @@ grows, it does not arrive. The original positions are kept whole (~600KB, paid
 once) because regrowth needs somewhere to grow back to. Nothing is saved: a
 plucked patch is cosmetic, like a footprint.
 
-**The 図鑑** is the pouch's bottom half, not a screen of its own — twelve species
-is still a list you glance at rather than a screen you visit, and what it cost
-instead was the cap and scroll on the panel above, which is the cheaper of the
-two. Uncaught species show as silhouettes (`brightness(0)` on the same card the
+**The 図鑑** shares the pack's sheet rather than having a card of its own: they
+are never both wanted, opening either closes the other, and one scrim is one
+thing to keep in step instead of two. It is the reason that sheet's body scrolls
+at all — twelve species is the one thing in this app that is a LIST rather than
+a handful. Uncaught species show as silhouettes (`brightness(0)` on the same card the
 hand uses) with 「？？？」; caught ones show name and times-ever-caught, which
 gifting can never lower. The silhouettes do more work at twelve than they ever
 did at three: cropped to their own drawings, a round one and a long one are
@@ -1874,12 +1941,14 @@ Constraints worth knowing before you change things:
   arriving as the resting face — plus `surprise` for Chiikawa, the one of the
   three without it. `happy` is drawn for everybody, `surprise` for Hachiware and
   Usagi, and `delight` for Chiikawa's greeting.
-- **More biomes.** There are two — a dry clearing and a deep wood — against a
-  default meadow, and adding a third is one entry in `CONFIG.biomes`: a centre,
-  a radius, a fade, a ground colour, two blade greens and a cover multiplier.
-  What is *not* there yet is anything a biome changes beyond colour and density:
-  no biome picks different props, and a dry clearing grows the same trees as
-  everywhere else.
+- **More biomes.** There are two — a green meadow and the pale sand both of them
+  live on — and a third is one entry in `CONFIG.biomes`: a ground colour, a tick
+  colour and a bloom palette, two blade greens, a cover multiplier, a `grows`
+  list and a `patches` list. A biome picks its own props now, which is what the
+  sand's empty `grows` uses. What is still *not* there is anything a biome
+  changes beyond ground, planting and density — no biome has its own weather,
+  its own sound, or its own kind of tree, and the meadow's wood is the same wood
+  everywhere in it.
 - **Draw the bench.** It is the last thing on the planet still painted in code,
   and it sits next to drawn art without an outline, which shows.
 - **Decide how far the built rule goes.** The trees and the stumps are geometry

@@ -112,37 +112,80 @@ const _lc = new THREE.Vector3();
 
 const _bc = new THREE.Vector3();
 
-// How much of a biome is in force at a spot: 1 in its middle, 0 out on the open
-// meadow, and a long smooth wash between. Its own function, and the ONLY reader
-// of `CONFIG.biomes`, so the ground texture, the grass and the ground cover
-// cannot end up disagreeing about where a field ends — which is the same reason
-// `inLake` exists and every rule about water goes through it.
+// How much one PATCH is in force at a spot: 1 in its middle, 0 outside its wash,
+// and a long smooth ramp between. Private, because a patch is not a biome — it
+// is one place a biome shows up, and a biome may have several.
 //
 // Smoothstepped rather than ramped linearly. A linear fade has a corner at each
 // end, and a corner in a border is a rim you can see from the air.
-export function biomeWeight(dir, biome) {
-  dirFromLatLon(biome.lat, biome.lon, _bc);
+function patchWeight(dir, patch) {
+  dirFromLatLon(patch.lat, patch.lon, _bc);
   const arc = Math.acos(Math.max(-1, Math.min(1, dir.dot(_bc))));
-  if (arc <= biome.r) return 1;
-  const t = 1 - (arc - biome.r) / biome.fade;
+  if (arc <= patch.r) return 1;
+  const t = 1 - (arc - patch.r) / patch.fade;
   if (t <= 0) return 0;
   return t * t * (3 - 2 * t);
 }
 
-// Every biome touching a spot, strongest first, with the weights ALREADY
-// normalised so they never sum past one. Two patches whose washes overlap would
-// otherwise both claim the ground there and paint it twice as far from meadow as
-// either asked for.
+// WHICH BIOMES ARE IN FORCE AT A SPOT, strongest first, with weights that always
+// sum to EXACTLY ONE. The only reader of `CONFIG.biomes`, so the ground texture,
+// the grass, the ground cover and the scenery cannot end up disagreeing about
+// where one country underfoot ends and the next begins — the same reason
+// `inLake` exists and every rule about water goes through it.
+//
+// The base biome — the entry with no `patches`, the thing the planet IS — takes
+// whatever weight the patches have not claimed, so it arrives in the mix like
+// anything else instead of being a starting colour each caller has to know about
+// separately. That is what makes "two biomes" true rather than "one default with
+// exceptions painted on it".
+//
+// THE TABLE MUST HAVE ONE. Callers read `mix[0]` for a strongest-wins decision
+// and rely on the weights summing to 1; a table of nothing but patches would
+// hand back an empty mix over open ground, and the planet would paint as black
+// where it painted at all. It is one entry rather than a guard here because a
+// world with no default ground is a broken config, not a case to handle.
+//
+// Within one biome the patches take a MAX rather than a sum: two clearings of
+// the same sand that happened to overlap are still sand, not twice as sandy.
+// Across biomes the weights are normalised down if they would total more than
+// one, or two overlapping washes would both claim the ground and drag it twice
+// as far from base as either asked for.
 export function biomesAt(dir, biomes, out = []) {
   out.length = 0;
-  let total = 0;
+  let base = null;
+  let claimed = 0;
   for (const b of biomes) {
-    const w = biomeWeight(dir, b);
-    if (w > 0) { out.push({ biome: b, w }); total += w; }
+    if (!b.patches) { base = b; continue; }
+    let w = 0;
+    for (const p of b.patches) w = Math.max(w, patchWeight(dir, p));
+    if (w > 0) { out.push({ biome: b, w }); claimed += w; }
   }
-  if (total > 1) for (const e of out) e.w /= total;
+  if (claimed > 1) {
+    for (const e of out) e.w /= claimed;
+    claimed = 1;
+  }
+  if (base && claimed < 1) out.push({ biome: base, w: 1 - claimed });
   out.sort((a, b) => b.w - a.w);
   return out;
+}
+
+const _grow = [];
+
+// HOW MUCH OF THE GROUND HERE GROWS `kind` AT ALL — 1 where every biome in force
+// lists it, 0 where none does, and a fraction across a border.
+//
+// It is a weight rather than a yes/no on purpose. A hard test against whichever
+// biome happens to be winning would put a circular edge in the planting exactly
+// where the paint has none, and a ring of trees stopping dead along a line is
+// the one thing the smoothstepped fade above exists to avoid. Callers with a
+// random stream roll against this; the scenery spiral, which has none and only
+// places a few dozen things, takes the half-way line.
+export function growWeight(dir, biomes, kind) {
+  let w = 0;
+  for (const e of biomesAt(dir, biomes, _grow)) {
+    if (e.biome.grows.includes(kind)) w += e.w;
+  }
+  return w;
 }
 
 const _le = new THREE.Vector3();
@@ -295,6 +338,23 @@ export function lakeReach(lake, away, margin = 0) {
 // in scene.js, the same measurement the ground cover already uses to keep
 // flowers from sprouting through the floor. One source of truth, so a redrawn
 // house is a differently shaped wall without a number being touched.
+// HOW FAR PAST THE RIM an ejected spot is put, in radians.
+//
+// It exists because "outside" and "not inside" were not the same thing, and the
+// gap between them was costing the world its household. keepOutside and
+// keepOffSolids both used to land a spot at exactly `r + margin`, which is the
+// boundary itself — and inBuilding and inSolid ask `dot > cos(r + margin)`, a
+// test the boundary passes or fails on the last bit of a cosine. Measured on a
+// guest walking to a cushion: the seat was pushed to the rim, the walk's own
+// path check then read that same point as still inside the cushion, refused the
+// last leg of the trip, and the guest stood a unit away from the seat until
+// they gave up and went home. Every arrival in the game was landing on a line
+// that half the code called clear and the other half called solid.
+//
+// A tenth of a millimetre at this radius, which is nothing to anything that
+// looks at it and everything to a strict inequality.
+const EJECT = 1e-5;
+
 const BUILDINGS = [];
 
 export function setBuildings(list) {
@@ -375,7 +435,9 @@ export function keepOutside(spot, margin = 0) {
     // buildingNormal already turned _bOut toward the nearer side; the edge to
     // land on follows the same choice.
     const inward = b.inner !== undefined && along > Math.cos((b.inner + b.r) / 2);
-    const edge = inward ? b.inner : b.r + margin;
+    // Away from the wall in whichever direction we are leaving it, and never
+    // exactly ON it — see EJECT.
+    const edge = inward ? b.inner - EJECT : b.r + margin + EJECT;
     if (inward) _bOut.negate();
     spot.copy(b.dir).multiplyScalar(Math.cos(edge))
       .addScaledVector(_bOut, Math.sin(edge)).normalize();
@@ -615,15 +677,22 @@ export function solidNormal(dir, s, out) {
 // That cannot currently happen: the scatter gives every prop a berth of at least
 // 1.3 units from the landmarks and lays the rest on a golden-angle spiral over a
 // radius-8 sphere, so no two footprints here overlap or come near it.
-export function keepOffSolids(spot, margin = 0) {
+// `except` is one prop the spot is allowed to be standing in — the thing it was
+// SENT to, if that thing happens to be solid. A guest walking to a cushion is
+// the case: the cushion is a prop, the seat is its middle, and a fence that
+// pushes every destination off every prop pushes them off the one they were
+// asked to sit on. See _pickTarget, which is the only caller that has a goal to
+// name.
+export function keepOffSolids(spot, margin = 0, except = null) {
   for (const s of SOLIDS) {
+    if (s === except) continue;
     if (spot.dot(s.dir) <= Math.cos(s.r + margin)) continue;
     if (!solidNormal(spot, s, _bOut)) {
       // Dead centre, so no bearing to keep; any will do.
       localFrame(s.dir, _le, _ln);
       _bOut.copy(_ln);
     }
-    const edge = s.r + margin;
+    const edge = s.r + margin + EJECT;
     spot.copy(s.dir).multiplyScalar(Math.cos(edge))
       .addScaledVector(_bOut, Math.sin(edge)).normalize();
   }

@@ -26,9 +26,16 @@
 // route threads it deliberately — doorstep, then just inside the door, then
 // the seat. Their own path-trimming (see _pickTarget) respects the wall band
 // the whole way, so even a leg that gets interrupted never clips masonry.
+//
+// TWO HOMES NOW, and the change that made is smaller than it looks. Every
+// question this file asks — where is the door, how far out is the doorstep,
+// which way round the wall do I walk — was already asked of a `building`
+// record rather than of "the house". What changed is that there are two of
+// those records and each character is pointed at one of them. Nobody is sealed
+// to their own: any of them may wander into either place on their own, and
+// being indoors is still only a question of where you are stood.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { buildings } from './sphere.js';
 
 const _spot = new THREE.Vector3();
 const _tan = new THREE.Vector3();
@@ -40,18 +47,29 @@ export class Household {
   constructor({ globe, bots }) {
     this.globe = globe;
     this.bots = bots;
-    // Where the house is and where its wall opens, taken from the same
-    // registration the wall itself uses — so the door they thread is the door
-    // that is actually open, and a moved door moves their route with it.
-    this.building = buildings().find((b) => b.gapDir) || buildings()[0] || null;
-    this.house = this.building ? this.building.dir : null;
 
-    // How far out the doorstep they walk to sits, in world units: THEIR OWN
-    // WANDER BERTH on top of the wall, never the doorstep a tap sets you down
-    // on. This is a lesson the file has already learned once and I broke on the
-    // way past — the original said it plainly, "or they would arrive at a spot
-    // they are already refusing to take the last step toward", and the rewrite
-    // replaced it with interior.doorstep, which is 3.8 against a berth of 3.92.
+    // The places somebody can go home to, taken from the same registration the
+    // walls themselves use — so the door they thread is the door that is
+    // actually open, and a moved door moves their route with it.
+    //
+    // A home with no `building` never got its wall registered, which means its
+    // landmark was never scattered. It is not a place you can walk into, so it
+    // is not a place anybody walks to.
+    this.places = globe.homes.filter((h) => h.building).map((h) => ({
+      home: h,
+      dir: h.sprite.normal,
+      building: h.building,
+      style: h.style,
+      walk: h.spec.walk,
+      doorAt: (h.building.r + CONFIG.wander.wallKeep) * CONFIG.globe.radius + 0.4,
+    }));
+
+    // `doorAt` above is THEIR OWN WANDER BERTH on top of the wall, never the
+    // doorstep a tap sets you down on. This is a lesson the file has already
+    // learned once — the original said it plainly, "or they would arrive at a
+    // spot they are already refusing to take the last step toward", and a
+    // rewrite replaced it with interior.doorstep, which is 3.8 against a berth
+    // of 3.92.
     //
     // Four hundredths inside the fence is enough to hang the whole errand. A
     // walk is planned by stepping toward the target and stopping at the first
@@ -62,9 +80,6 @@ export class Household {
     // character stood 4.6 out never moved for the full 150 seconds of
     // headingMax, and because heading counts against `atOnce` nobody else
     // could go home either. It read as the house being shut, not as a bug.
-    this.doorAt = this.building
-      ? (this.building.r + CONFIG.wander.wallKeep) * CONFIG.globe.radius + 0.4
-      : CONFIG.interior.doorstep;
 
     const h = CONFIG.household;
     this.state = new Map();
@@ -75,15 +90,27 @@ export class Household {
         seat: null,      // the seat they are holding, or null
         until: 0,        // when a stay ends
         giveUpAt: 0,
+        // WHOSE DOOR. Matched on the `owner` written beside each home in
+        // config, falling back to the first — so a fourth character added to
+        // CAST without a place of their own goes to Chiikawa's, which is the
+        // friendly reading rather than an error.
+        //
+        // Fixed for the life of the session rather than picked per visit. It is
+        // where they LIVE: Hachiware turning up at Chiikawa's some evenings and
+        // at his own cave on others would read as him not having one.
+        place: this.places.find((pl) => pl.home.owner === b.spec.key)
+          || this.places[0] || null,
         // Staggered, and the first is further out than the rest, so arriving
         // does not coincide with somebody leaving.
         due: between(h.firstGapMin, h.firstGapMax),
       });
     }
 
-    // Eased, never switched. The windows coming up should read as somebody
-    // crossing a room to a switch.
-    this._lit = h.emptyLamps;
+    // Eased, never switched, and ONE PER PLACE: the windows coming up should
+    // read as somebody crossing a room to a switch, and Chiikawa's house should
+    // not light up because Hachiware got home to a cave twenty units away.
+    this._lit = new Map();
+    for (const pl of this.places) this._lit.set(pl, h.emptyLamps);
   }
 
   get anyoneHome() {
@@ -101,17 +128,17 @@ export class Household {
   // house. Positive reaches out the door onto the grass; small values are
   // inside. This is the axis every route threads, because it is the one line
   // that passes through the gap.
-  _onDoorAxis(units, out) {
+  _onDoorAxis(pl, units, out) {
     const arc = units / CONFIG.globe.radius;
-    return out.copy(this.house).multiplyScalar(Math.cos(arc))
-      .addScaledVector(this.building.gapDir, Math.sin(arc)).normalize();
+    return out.copy(pl.dir).multiplyScalar(Math.cos(arc))
+      .addScaledVector(pl.building.gapDir, Math.sin(arc)).normalize();
   }
 
   // The same, at any bearing round the house rather than the door's own.
-  _onRing(bearing, units, out) {
+  _onRing(pl, bearing, units, out) {
     const arc = units / CONFIG.globe.radius;
-    _tan.copy(this.building.gapDir).applyAxisAngle(this.house, bearing);
-    return out.copy(this.house).multiplyScalar(Math.cos(arc))
+    _tan.copy(pl.building.gapDir).applyAxisAngle(pl.dir, bearing);
+    return out.copy(pl.dir).multiplyScalar(Math.cos(arc))
       .addScaledVector(_tan, Math.sin(arc)).normalize();
   }
 
@@ -119,19 +146,19 @@ export class Household {
   // as a fraction of the walkable radius — the shape household.spots take.
   // Bearings are measured from the door, so rotating the door's own tangent
   // is what keeps them agreeing with the furniture about where "the front" is.
-  _insideSpot(at, outFrac, out) {
-    return this._onRing(at, outFrac * CONFIG.interior.walk, out);
+  _insideSpot(pl, at, outFrac, out) {
+    return this._onRing(pl, at, outFrac * pl.walk, out);
   }
 
   // Where somebody is standing, as a signed bearing round the house measured
   // from the door: 0 is straight out of the front, and the sign says which way
   // round is shorter.
-  _bearingOf(dir) {
-    _tan.copy(dir).addScaledVector(this.house, -dir.dot(this.house));
+  _bearingOf(pl, dir) {
+    _tan.copy(dir).addScaledVector(pl.dir, -dir.dot(pl.dir));
     if (_tan.lengthSq() < 1e-12) return 0;
     _tan.normalize();
-    const g = this.building.gapDir;
-    return Math.atan2(this.house.dot(_cross.crossVectors(g, _tan)), g.dot(_tan));
+    const g = pl.building.gapDir;
+    return Math.atan2(pl.dir.dot(_cross.crossVectors(g, _tan)), g.dot(_tan));
   }
 
   // The route in: round to the front, onto the doorstep, through the gap, and
@@ -161,29 +188,29 @@ export class Household {
   // approaches in six never arrived. Ending on bearing 0 makes the last two
   // legs purely RADIAL — straight down the line the gap is cut along, the one
   // heading that cannot graze the wall on either side.
-  _routeIn(destDir, fromDir) {
+  _routeIn(pl, destDir, fromDir) {
     const RING_STEP = 0.8;
-    const RING_OUT = Math.max(this.doorAt + 1.2, 5.5);
+    const RING_OUT = Math.max(pl.doorAt + 1.2, 5.5);
     const legs = [];
-    const b = fromDir ? this._bearingOf(fromDir) : 0;
+    const b = fromDir ? this._bearingOf(pl, fromDir) : 0;
     if (Math.abs(b) > 1e-3) {
       const hops = Math.ceil(Math.abs(b) / RING_STEP);
       for (let i = 0; i <= hops; i++) {
-        legs.push(this._onRing(b * (1 - i / hops), RING_OUT, new THREE.Vector3()));
+        legs.push(this._onRing(pl, b * (1 - i / hops), RING_OUT, new THREE.Vector3()));
       }
     } else {
-      legs.push(this._onRing(0, RING_OUT, new THREE.Vector3()));
+      legs.push(this._onRing(pl, 0, RING_OUT, new THREE.Vector3()));
     }
-    legs.push(this._onDoorAxis(this.doorAt, new THREE.Vector3()));
-    legs.push(this._onDoorAxis(CONFIG.interior.walk * 0.7, new THREE.Vector3()));
+    legs.push(this._onDoorAxis(pl, pl.doorAt, new THREE.Vector3()));
+    legs.push(this._onDoorAxis(pl, pl.walk * 0.7, new THREE.Vector3()));
     legs.push(destDir.clone());
     return legs;
   }
 
-  _routeOut() {
+  _routeOut(pl) {
     return [
-      this._onDoorAxis(CONFIG.interior.walk * 0.7, new THREE.Vector3()),
-      this._onDoorAxis(this.doorAt, new THREE.Vector3()),
+      this._onDoorAxis(pl, pl.walk * 0.7, new THREE.Vector3()),
+      this._onDoorAxis(pl, pl.doorAt, new THREE.Vector3()),
     ];
   }
 
@@ -191,8 +218,13 @@ export class Household {
   // is most of why the room reads as somewhere they live: three characters
   // stood to attention on a floor is a waiting room, one of them sat down is
   // a home.
-  _freeSeat() {
-    return this.globe.seats.find((s) => !s.taken) || null;
+  //
+  // In THIS home, which is what stops somebody walking across the planet to sit
+  // on a cushion in a room they were not going to. The seat list is shared
+  // across both interiors — every seat knows which home it is in, and this is
+  // the one reader that has to care.
+  _freeSeat(pl) {
+    return this.globe.seats.find((s) => !s.taken && s.home === pl.home) || null;
   }
 
   _releaseSeat(bot, s) {
@@ -210,6 +242,7 @@ export class Household {
   _walkRoute(s, ch, tMs) {
     const R = CONFIG.globe.radius;
     const h = CONFIG.household;
+    const pl = s.place;
     const head = s.route[0];
     ch.errand = ch.errand || head.clone();
     ch.errand.copy(head);
@@ -219,7 +252,7 @@ export class Household {
     // doorstep is still arriving at it. Indoors it has to be tight: the whole
     // room is four and a half units across, so the outdoor tolerance would
     // call the far wall "here" and sit somebody down in the doorway.
-    const inside = head.dot(this.house) > Math.cos(this.building.r);
+    const inside = head.dot(pl.dir) > Math.cos(pl.building.r);
     const arrive = inside ? h.homeArrive : h.arriveArc;
     if (ch.dir.angleTo(head) * R > arrive) return false;
     s.route.shift();
@@ -236,13 +269,15 @@ export class Household {
   }
 
   update(dtMs, tMs, indoors, playerDir) {
-    if (!this.house) return;
+    if (!this.places.length) return;
     const h = CONFIG.household;
     const R = CONFIG.globe.radius;
 
     for (const bot of this.bots) {
       const s = this.state.get(bot);
       const ch = bot.ch;
+      const pl = s.place;
+      if (!pl) continue;
 
       if (s.phase === 'away') {
         if (tMs < s.due) continue;
@@ -266,13 +301,13 @@ export class Household {
         // Sit if a seat is free, stand at a spot if not — decided now, and the
         // seat held from now, so nobody crosses the planet for a cushion that
         // was taken while they walked.
-        s.seat = this._freeSeat();
+        s.seat = this._freeSeat(pl);
         if (s.seat) {
           s.seat.taken = ch;
-          s.route = this._routeIn(s.seat.dir, ch.dir);
+          s.route = this._routeIn(pl, s.seat.dir, ch.dir);
         } else {
           const spot = h.spots[0] || { at: Math.PI, out: 0.5 };
-          s.route = this._routeIn(this._insideSpot(spot.at, spot.out, _spot), ch.dir);
+          s.route = this._routeIn(pl, this._insideSpot(pl, spot.at, spot.out, _spot), ch.dir);
         }
         s.phase = 'going';
         s.giveUpAt = tMs + h.headingMax;
@@ -289,10 +324,10 @@ export class Household {
         // the errand mid-room would strand them pacing a floor whose only way
         // out is a gap their random strolls rarely thread.
         if (tMs > s.giveUpAt) {
-          const inside = ch.dir.dot(this.house) > Math.cos(this.building.r);
+          const inside = ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
           this._releaseSeat(bot, s);
           if (inside) {
-            s.route = this._routeOut();
+            s.route = this._routeOut(pl);
             s.phase = 'leaving';
             s.giveUpAt = tMs + h.headingMax;
           } else {
@@ -322,7 +357,7 @@ export class Household {
         // unfriendliest thing in the app.
         if (tMs < s.until || indoors) continue;
         this._releaseSeat(bot, s);
-        s.route = this._routeOut();
+        s.route = this._routeOut(pl);
         s.phase = 'leaving';
         s.giveUpAt = tMs + h.headingMax;
         continue;
@@ -349,19 +384,42 @@ export class Household {
       }
     }
 
-    // The windows. Eased against the clock rather than a fraction per frame,
-    // the way everything else here is.
-    const want = this.anyoneHome ? 1 : h.emptyLamps;
-    this._lit += (want - this._lit) * (1 - Math.exp(-dtMs / h.lampEaseMs));
-    this.globe.setOccupancy(this._lit);
+    // The windows, one house at a time. Eased against the clock rather than a
+    // fraction per frame, the way everything else here is.
+    //
+    // Sent as a map keyed by style rather than as one number, which is the
+    // whole of what two homes changed here: `anyoneHome` is still a useful
+    // question about the world, and a hopeless one to light a particular
+    // building by.
+    const by = {};
+    for (const place of this.places) {
+      let here = false;
+      for (const st of this.state.values()) {
+        if (st.phase === 'home' && st.place === place) { here = true; break; }
+      }
+      const want = here ? 1 : h.emptyLamps;
+      const was = this._lit.get(place);
+      const now = was + (want - was) * (1 - Math.exp(-dtMs / h.lampEaseMs));
+      this._lit.set(place, now);
+      by[place.style] = now;
+    }
+    this.globe.setOccupancy(by);
   }
 
   // Whoever is under the roof, for the dialogue to pick from. Asked of the
   // world rather than of the state machine, so somebody who wandered in on
   // their own counts too.
-  guests() {
-    if (!this.building) return [];
-    const lim = Math.cos(this.building.r);
-    return this.bots.filter((b) => b.ch.dir.dot(this.house) > lim);
+  //
+  // `where` is a surface direction naming which room is being asked about —
+  // normally the player's own, since the only caller is the dialogue and what
+  // it wants is who is in HERE with you. Without one it answers for the first
+  // home, which is what it always did.
+  guests(where) {
+    const pl = where
+      ? this.places.find((p) => p.dir.dot(where) > Math.cos(p.building.r))
+      : this.places[0];
+    if (!pl) return [];
+    const lim = Math.cos(pl.building.r);
+    return this.bots.filter((b) => b.ch.dir.dot(pl.dir) > lim);
   }
 }

@@ -274,6 +274,46 @@ html, body {
   gap: 10px;
 }
 
+/* The drawer's handle, and the only round control up here. Round because it is
+   neither of the two things this screen has shapes for — it is not a verb you
+   press to make something happen in the world, and it is not a reading you
+   glance at — and three dots is the one glyph that can say "there is more"
+   without having to say more of what. Filled when it is open, which is the word
+   じどう and an armed sprint already use for a state that is on. */
+.ctl-more {
+  width: 46px;
+  min-width: 0;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ctl-more svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.ctl-more[aria-expanded="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Away by default, AND TAKING THEIR ROOM WITH THEM. `display` rather than
+   opacity or a transform, because a pill that is merely invisible still holds
+   46px of the stack open, and the room is the entire point of folding them. */
+.ctl-stack:not(.is-more) #time,
+.ctl-stack:not(.is-more) #zukan { display: none; }
+
+/* Out of the button they live behind, which is directly above them. */
+.ctl-stack.is-more #time,
+.ctl-stack.is-more #zukan {
+  transform-origin: top right;
+  animation: act-pop 0.2s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
 /* ---------------------------------------------------------- action buttons
 
    Jump and sprint, drawn the way game controls are drawn: translucent circles
@@ -334,93 +374,158 @@ html, body {
 
 /* The arc a right thumb actually sweeps: the primary in the corner where the
    thumb rests, the secondary up and inboard along the same curve. Their centres
-   sit 78px apart with 16px of clear air between the rims — close enough to be
+   sit 87px apart with 15px of clear air between the rims — close enough to be
    one cluster, far enough that a thumb aiming at one cannot catch the other.
-   Nothing else is in this corner any more, so neither is dodging anything. */
+   Nothing else is in this corner any more, so neither is dodging anything.
+
+   BOTH GREW. They are the two buttons pressed most and they were the two
+   smallest things on the screen, sized back when they were sharing this corner
+   with three context controls that have since moved into a stack of their own.
+   80 and 64 is roughly a fingerpad and a comfortable second, and the arc did
+   not have to give anything up to fit them. */
 .act-jump {
   right: 20px;
   bottom: calc(26px + env(safe-area-inset-bottom));
-  width: 68px;
-  height: 68px;
+  width: 80px;
+  height: 80px;
 }
 
-.act-jump svg { width: 32px; height: 32px; }
+.act-jump svg { width: 38px; height: 38px; }
 
 .act-sprint {
-  right: 100px;
-  bottom: calc(48px + env(safe-area-inset-bottom));
-  width: 56px;
-  height: 56px;
+  right: 112px;
+  bottom: calc(56px + env(safe-area-inset-bottom));
+  width: 64px;
+  height: 64px;
 }
 
-.act-sprint svg { width: 24px; height: 24px; }
+.act-sprint svg { width: 28px; height: 28px; }
 
-/* The context verb. Above the round pair, right-aligned with the jump button
-   so the three read as one cluster in the thumb's arc. Filled with the ink
-   rather than outlined, because unlike jump and run it is not always there —
-   when it appears it should be the thing you notice. */
-.act-do {
+/* ----------------------------------------------------- the interaction stack
+
+   Every verb the world is offering right now, one pill each, growing UPWARD out
+   of the thumb's arc from just above the jump button.
+
+   It replaced three separately-positioned controls — a verb pill, a しまう pill
+   and a light circle — that each owned a corner and each decided for itself when
+   to appear. Two of them overlapped by about 32×24px whenever a carried lamp
+   made both show at once, which is the bug you get for free by handing three
+   things their own coordinates and hoping they never coincide. A flex column
+   cannot overlap itself, so the whole class of bug is gone rather than fixed.
+
+   Right-aligned with the jump button below it, so a long word grows leftward
+   and the edge a thumb aims at never moves. The bottom clears the sprint
+   button's top edge, since the two would otherwise share a few pixels of
+   column. */
+.interact {
+  position: absolute;
   right: 20px;
-  bottom: calc(104px + env(safe-area-inset-bottom));
+  bottom: calc(132px + env(safe-area-inset-bottom));
+  display: flex;
+  /* Reversed, so the FIRST child is the BOTTOM one. main.js stamps `order` from
+     a fixed table and lists the entry nearest the thumb first; reversing here is
+     what makes those two agree. */
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* Paper and ink, the same recipe as every other surface here: a glyph to find
+   it by and a word to read. The glyph earns its place in a column — four pills
+   are four similar shapes, and you should be able to pick the one you want out
+   of them without reading all four. */
+.ix {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
   min-width: 96px;
-  height: 46px;
+  padding: 0 1.05rem 0 0.9rem;
   border-radius: 23px;
-  padding: 0 1.1rem;
-  font-family: inherit;
-  font-size: 0.95rem;
-  font-weight: 700;
-  background: var(--ink);
-  color: var(--paper);
-  /* Grows from its right edge, so a longer word never shifts the button out
-     from under a thumb that is already reaching for it. */
-  transform-origin: 100% 50%;
-}
-
-.act-do:active {
-  transform: scale(0.94);
-  background: var(--ink);
-}
-
-/* しまう for a carried unique: a smaller pill inboard of the main one, on the
-   same line. Outlined rather than filled, which is this app's way of saying
-   secondary — the filled pill beside it is the thing you are being offered,
-   this is the other thing you could do. */
-.act-stow {
-  right: 124px;
-  bottom: calc(104px + env(safe-area-inset-bottom));
-  height: 46px;
-  min-width: 74px;
-  border-radius: 23px;
-  padding: 0 0.85rem;
-  font-family: inherit;
-  font-size: 0.86rem;
-  font-weight: 600;
+  border: 2.5px solid var(--ink);
   background: rgba(255, 253, 247, 0.94);
   color: var(--ink);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  /* Grows from its right edge, so a longer word never shifts the pill out from
+     under a thumb that is already reaching for it. */
   transform-origin: 100% 50%;
-}
-
-.act-stow:not([hidden]) {
+  /* Arrives rather than blinks. Runs once, when main.js builds the node — a
+     pill that merely changes its word is never rebuilt, so it never re-pops. */
   animation: act-pop 0.22s cubic-bezier(0.22, 1.2, 0.36, 1);
+  transition: transform 0.1s ease, background 0.16s ease, color 0.16s ease;
 }
 
-/* The light switch. Sprint's size and inset, one row up, so the three round
-   controls and the pill stack read as one cluster in the thumb's arc. */
-.act-light {
-  right: 100px;
-  bottom: calc(126px + env(safe-area-inset-bottom));
-  width: 56px;
-  height: 56px;
+.ix svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.act-light svg { width: 26px; height: 26px; }
+.ix:active { transform: scale(0.94); }
 
-/* Filled when the light is ON — the same word じどう and the armed sprint use.
-   The glyph inverts with it, so the bulb reads as lit rather than as selected. */
-.act-light[aria-pressed="true"] {
+/* WHAT THE VERB WILL BE DONE TO. Smaller and lighter than the verb beside it,
+   and second, because the two are answers to different questions: the verb
+   answers "what", which is what you scan the stack for, and this answers "which
+   one", which only matters once you have found the verb. Sized so that a pill
+   reads as 「ひろう くまさん」 at a glance rather than as two equal words.
+
+   It exists because facing gave the buttons a target they could name. Before
+   that this pill could only say ひろう and let you find out. */
+.ix-of {
+  font-size: 0.78em;
+  font-weight: 500;
+  opacity: 0.72;
+}
+
+/* Nowhere to put it — see `refuse` in main.js. It shakes its head rather than
+   sitting there doing nothing, because a button that answers a press with
+   silence reads as a broken button and not as a no.
+
+   Small: two thirds of the pill's own corner radius, over a fifth of a second.
+   The point is to be FELT rather than watched, and a refusal that puts on a
+   performance would be a bigger event than the thing it is refusing. */
+.ix.is-refused {
+  animation: ix-refuse 0.24s ease-in-out;
+}
+
+@keyframes ix-refuse {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}
+
+/* The bottom entry: the one under the thumb, and the one the world is really
+   offering. Filled with the ink, which is this app's word for that — and since
+   a single verb on offer is the common case by a long way, the ordinary stack
+   is one filled pill, exactly the control this replaced. */
+.ix.is-primary {
   background: var(--ink);
   color: var(--paper);
+  font-size: 0.95rem;
+  font-weight: 700;
 }
+
+/* あげる!, and only ever alone — see actionsNow, where a bite returns by itself.
+   The one press in this game with a deadline on it gets a bigger target. */
+.ix.is-urgent {
+  height: 58px;
+  min-width: 128px;
+  font-size: 1.05rem;
+}
+
+.ix.is-urgent svg { width: 24px; height: 24px; }
 
 /* It arrives rather than blinks — the same small overshoot the time panel
    uses, for the same reason: it appears under your thumb and arriving dead-on
@@ -428,10 +533,6 @@ html, body {
 @keyframes act-pop {
   from { transform: scale(0.6); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
-}
-
-.act-do:not([hidden]) {
-  animation: act-pop 0.22s cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 /* Off the ground neither verb exists. Opacity rather than display so they can
@@ -649,66 +750,137 @@ html, body {
   font-weight: 700;
 }
 
-/* ----------------------------------------------------------------- pouch
+/* ----------------------------------------------------------------- the sheet
 
-   The clock's own arrangement, one pill down: the pill holds its place in the
-   stack, the panel grows out of the same corner. The chips are a column
-   because the names are the point — a row of bare icons would be a toolbar,
-   and this is a pouch being looked into. */
+   The bag and the book. One card in the middle of the screen over a scrim,
+   staying open until it is dismissed — see the note in index.html for why these
+   two left the corner while the clock stayed in it.
+
+   Below the doorway veil at 12, because a door swap should black this out along
+   with everything else, and well below the start screen at 20. */
 .pouch { position: relative; }
 
-.pouch.is-open #pouch-toggle {
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top) + 1rem) 1rem
+           calc(env(safe-area-inset-bottom) + 1rem);
   opacity: 0;
-  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.16s ease, visibility 0s linear 0.16s;
 }
 
-/* The panel is CAPPED AND SCROLLS, and the 図鑑 is why. Three species was a
-   list you glanced at and the panel could be as tall as its contents; twelve
-   rows at 38px plus the chips above them is about 700px, which is taller than
-   the phone this is played on — the bottom of the 図鑑 would have hung off the
-   screen with nothing to say so.
+.sheet.is-open {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.18s ease, visibility 0s;
+}
 
-   Capped against the VIEWPORT rather than at a fixed height, so it uses whatever
-   the screen has: 12rem is the pill stack it grows out of plus the safe area
-   plus room to breathe at the bottom. `overscroll-behavior: contain` matters
-   more than it looks — the page itself sets `touch-action: none` for the world's
-   own drag handling, and without this a flick that runs off the end of the list
-   would keep going as a swipe at the planet behind it. */
-.pouch-panel {
+/* Quiets the world rather than blacking it out: you are looking in your bag in
+   the middle of a meadow, not leaving the meadow. It is also the dismiss —
+   pressing anywhere off the card puts it away. */
+.sheet-scrim {
   position: absolute;
-  right: 0;
-  top: 0;
-  width: min(230px, calc(100vw - 2rem));
-  max-height: calc(100vh - 12rem);
+  inset: 0;
+  background: rgba(91, 76, 68, 0.3);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* Wide as the screen allows up to a limit, because past about 420px the slots
+   stop being easier to hit and start being a poster. `min-height: 0` on the
+   body below is what actually lets this cap work: a flex child's default
+   min-height is its content, so without it a long 図鑑 would push the card
+   taller than max-height instead of scrolling inside it. */
+.sheet-card {
+  position: relative;
+  width: min(92vw, 420px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem;
+  border: 3px solid var(--ink);
+  border-radius: 26px;
+  background: var(--paper);
+  box-shadow: 0 10px 26px rgba(91, 76, 68, 0.24);
+  transform: scale(0.9);
+  transition: transform 0.16s cubic-bezier(0.4, 0, 0.7, 0.4);
+}
+
+.sheet.is-open .sheet-card {
+  transform: scale(1);
+  transition: transform 0.24s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+/* The panel says its own name now. The pill that opened it is behind a scrim
+   and dimmed by the time you are reading this, so it cannot be the label. */
+.sheet-title {
+  flex: none;
+  margin: 0.1rem 2.4rem 0.75rem 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.sheet-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2.5px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.sheet-close:active { transform: scale(0.9); }
+
+.sheet-close svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+
+/* Scrolls only when it has to: the pack never does, the 図鑑 always does.
+   `overscroll-behavior` earns its place for the same reason it did in the
+   drawer this replaced — the page sets `touch-action: none` for the world's own
+   drags, and a flick running off the end of the list would otherwise carry on
+   as a swipe at the planet behind the scrim. */
+.sheet-body {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 2.5px solid var(--ink);
-  border-radius: 24px;
-  background: rgba(255, 253, 247, 0.96);
-  box-shadow: 0 6px 18px rgba(91, 76, 68, 0.14);
-  pointer-events: auto;
-  transform-origin: top right;
-  transform: scale(0.4);
-  opacity: 0;
-  visibility: hidden;
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.7, 0.4),
-              opacity 0.16s ease,
-              visibility 0s linear 0.2s;
 }
 
-.pouch.is-open .pouch-panel {
-  transform: scale(1);
-  opacity: 1;
-  visibility: visible;
-  transition: transform 0.26s cubic-bezier(0.22, 1.2, 0.36, 1),
-              opacity 0.14s ease,
-              visibility 0s;
+.sheet-cap {
+  flex: none;
+  /* Held whether or not there is anything to SAY, so the card does not change
+     height as the pack's line changes between naming a thing and teaching the
+     long press. The 図鑑 has no line at all, and that is the one case where the
+     room should go rather than be held — see :empty below. */
+  min-height: 1.2rem;
+  margin: 0.8rem 0.2rem 0.1rem;
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.75;
 }
+
+.sheet-cap:empty { display: none; }
 
 /* THE PACK, as a grid of slots rather than a list of what you happen to own.
    Four across and two down: the shape is the point, because an empty slot is
@@ -718,7 +890,7 @@ html, body {
 .pack-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 9px;
 }
 
 .pack-slot {
@@ -728,19 +900,25 @@ html, body {
   align-items: center;
   justify-content: center;
   border: 2.5px solid var(--ink);
-  border-radius: 14px;
+  border-radius: 16px;
   background: transparent;
-  padding: 4px;
+  padding: 5px;
   cursor: pointer;
-  transition: transform 0.12s ease, background 0.15s ease;
+  /* The slot owns the whole gesture, long press included. Without this the
+     browser reads a finger held on it as the start of a scroll or a selection
+     and takes the press away mid-count. */
+  touch-action: none;
+  -webkit-touch-callout: none;
+  transition: transform 0.12s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .pack-slot:active { transform: scale(0.93); background: var(--paper); }
 
-/* Empty: a dashed well, and not pressable. */
+/* Empty: a dashed well. Still pressable, because an empty slot is exactly where
+   you would want to put the thing you have just lifted. */
 .pack-slot.is-empty {
-  border-style: dashed;
   border-color: rgba(91, 76, 68, 0.3);
+  border-style: dashed;
   cursor: default;
 }
 
@@ -750,64 +928,47 @@ html, body {
   object-fit: contain;
 }
 
-/* The one in your hand wears the ink, the way じどう and the armed sprint do —
-   one filled thing among outlined ones is this app's word for "on". */
+/* THE ONE IN YOUR HAND, and it used to be filled with solid ink — which is this
+   app's word for "on" everywhere else, and wrong here for one reason: every
+   other thing wearing it is TEXT, which flips to paper and stays legible. A
+   drawing cannot. The items are outlined in that same ink, so a filled slot ate
+   the very picture it was there to point at, and the one slot most worth
+   reading became the least readable thing on the card. A ring says it just as
+   plainly and leaves the drawing alone. */
 .pack-slot.is-held {
-  background: var(--ink);
+  border-color: var(--pink);
+  background: rgba(246, 166, 182, 0.22);
+  box-shadow: 0 0 0 3px rgba(246, 166, 182, 0.5);
+}
+
+/* Lifted by a long press, and waiting to be told where to go. Dashed, because
+   that is what this slot is about to become. */
+.pack-slot.is-lifted {
   border-color: var(--ink);
+  border-style: dashed;
+  background: rgba(91, 76, 68, 0.1);
+  box-shadow: none;
+  transform: scale(0.9);
+}
+
+/* While something is lifted, every slot is somewhere it could land — so the
+   empty ones stop looking inert and say so. */
+.sheet-card.is-moving .pack-slot.is-empty {
+  border-color: rgba(91, 76, 68, 0.55);
+  cursor: pointer;
 }
 
 .pack-n {
   position: absolute;
-  right: 3px;
-  bottom: 1px;
-  font-size: 0.62rem;
+  right: 5px;
+  bottom: 3px;
+  font-size: 0.68rem;
   font-weight: 700;
   line-height: 1;
   color: var(--ink);
   background: rgba(255, 253, 247, 0.92);
   border-radius: 6px;
-  padding: 1px 3px;
-}
-
-.pack-slot.is-held .pack-n { color: var(--ink); }
-
-/* A chip is a row: the drawing, the name, the count over on the right. The
-   drawing keeps the card's own portrait shape rather than being squared off —
-   it is the same canvas the hand shows, and squashing it here would make the
-   chip and the held thing read as two different objects. */
-.pouch-chip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* `flex: none` on every direct child of the panel, here and on the 図鑑's two
-     rules, and it is load-bearing now that the panel is capped: a flex column
-     shrinks its children to fit before it agrees to scroll, so without it a full
-     pouch would squash twenty rows into the cap and hand you a list of slivers
-     instead of a scrollbar. min-height alone protects these two; the heading is
-     a bare <p> and had nothing. */
-  flex: none;
-  min-height: 48px;
-  padding: 4px 12px 4px 8px;
-  border: 2.5px solid var(--ink);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.12s ease, background 0.15s ease;
-}
-
-.pouch-chip:active { transform: scale(0.95); background: var(--paper); }
-
-.pouch-chip img {
-  width: 24px;
-  height: 38px;
-  object-fit: contain;
-  flex: none;
+  padding: 1px 4px;
 }
 
 .pouch-n {
@@ -817,49 +978,34 @@ html, body {
   opacity: 0.75;
 }
 
-.pouch-empty {
-  margin: 2px 4px;
-  font-size: 0.76rem;
-  opacity: 0.65;
-}
-
-/* The 図鑑's half of the panel: same rows as the chips but not buttons — a
-   record, not a menu — set apart by a rule above the heading. Twelve rows now,
-   which is what put the cap and the scroll on the panel above. */
+/* The 図鑑: rows rather than slots, and not buttons — it is a record, not a
+   menu. It shares the sheet with the pack because they are never both wanted,
+   and it is the reason the sheet's body scrolls at all: twelve species is the
+   one thing in this app that is a LIST rather than a handful. */
 .zukan-head {
   flex: none;
-  margin: 0 4px;
-  font-size: 0.68rem;
+  margin: 0.4rem 4px 0.2rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   opacity: 0.7;
 }
 
-/* Its own panel now, not a section under the pack — one is what you are
-   carrying, the other what you have ever caught, and sharing a drawer made
-   the pack's slots look like the first two rows of a longer list. Twelve
-   species is more than fits under a thumb, so this is the one panel in the app
-   that scrolls: it is the one thing here that is a LIST rather than a handful. */
-.zukan-panel {
-  max-height: min(56vh, 400px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
-}
+.zukan-head:first-child { margin-top: 0; }
 
 .zukan-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: none;
-  min-height: 38px;
-  padding: 2px 12px 2px 8px;
-  font-size: 0.76rem;
+  min-height: 44px;
+  padding: 2px 10px 2px 6px;
+  font-size: 0.82rem;
 }
 
 .zukan-row img {
-  width: 20px;
-  height: 32px;
+  width: 26px;
+  height: 40px;
   object-fit: contain;
   flex: none;
 }

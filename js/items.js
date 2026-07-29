@@ -66,8 +66,9 @@ export const ITEMS = {
   kinoko2: { kind: 'stackable', cover: 'mushroom2', name: 'ちゃいろい きのこ' },
 
   // THE UNIQUES — see the kind's note above. `art` names the loose furniture
-  // piece in CONFIG.interior.furniture that IS this item; there is exactly one
-  // of each in the world, which is the entire meaning of the kind. They are
+  // model this item wears; an explicit furniture `item` id distinguishes
+  // physical pieces when two uniques share that model. There is exactly one
+  // of each item id in the world, which is the entire meaning of the kind. They are
   // never in the pouch: a unique is in its spot, in your hand, set down
   // somewhere, or lent to a friend on a timer.
   bear: { kind: 'unique', art: 'plushie', name: 'くまさん' },
@@ -81,6 +82,19 @@ export const ITEMS = {
   // The bulb is NOT here and should not be. It is screwed to the ceiling, which
   // is the difference between a lamp and a light fitting.
   lamp: { kind: 'unique', art: 'lantern', name: 'ランプ' },
+  // Hachiware's copy uses the same model and name, but a separate id is what
+  // lets the inventory track the two physical lanterns independently.
+  hachiwareLamp: { kind: 'unique', art: 'lantern', name: 'ランプ' },
+  // Hachiware's two rubbish bags are separate physical objects and use
+  // separate art because their body profiles and colours differ.
+  trashBag: { kind: 'unique', art: 'trashbag', name: 'ごみぶくろ' },
+  trashBagAlt: { kind: 'unique', art: 'trashbag2', name: 'ごみぶくろ' },
+  // Chiikawa's own pink sasumata. Its separate id is what makes the physical
+  // weapon persist between its home spot, the hand, and placed locations.
+  chiikawaWeapon: { kind: 'unique', art: 'pinkweapon', name: 'ピンクのさすまた' },
+  // Hachiware's blue counterpart is another physical weapon, not a recolour of
+  // the same inventory entry, so both can exist and be carried independently.
+  hachiwareWeapon: { kind: 'unique', art: 'blueweapon', name: 'ブルーのさすまた' },
 };
 
 // Species index → item id, for the one place that meets a fish as a fish rather
@@ -408,6 +422,41 @@ export class Inventory {
     this.held = null;
     if (was) this.uniques[was] = { state: 'stored' };
     this._emit();
+  }
+
+  // Put what is in one slot into another: swap with whatever is already there,
+  // or pour into it when the two are the same stackable kind. This is the whole
+  // of arranging your bag, and it is deliberately the ONLY thing that reorders
+  // slots — every other way in appends to the first hole it finds, because a
+  // pickup is not a decision and this is.
+  //
+  // THE HAND FOLLOWS THE THING, NOT THE BOX. `held` is an index into `slots`,
+  // which is what makes putting something away a matter of forgetting a number
+  // — and it is exactly why a swap has to carry it. Left alone, moving anything
+  // into the slot you were holding would silently put that thing in your hand
+  // instead, the pack rearranging your grip behind your back. Both slots have to
+  // be fixed up because either could be the held one, and a merge hands it to
+  // whichever of the two survives.
+  moveSlot(from, to) {
+    if (from === to) return false;
+    const a = this.slots[from];
+    if (!a) return false;
+    const b = this.slots[to];
+
+    // A unique never merges: there is one bear, so two slots can never hold the
+    // same one and a same-id landing could only ever be the thing on itself.
+    if (b && b.id === a.id && ITEMS[a.id].kind !== 'unique') {
+      b.n += a.n;
+      this.slots[from] = null;
+      if (this.held === from) this.held = to;
+    } else {
+      this.slots[to] = a;
+      this.slots[from] = b;
+      if (this.held === from) this.held = to;
+      else if (this.held === to) this.held = from;
+    }
+    this._emit();
+    return true;
   }
 
   // The rod's deposit slot: count the catch for the zukan and put the fish in
