@@ -14,7 +14,7 @@ import {
   activePhase, isAuto, setPhaseOverride,
   PHASE_LABEL, PHASES, LOOK, phaseAtIndex,
 } from './daylight.js';
-import { IMG, SKY_DISC_ART } from './assets.js';
+import { IMG, ICON_CAT, SKY_DISC_ART } from './assets.js';
 import { paintSheet, sheetBounds } from './art.js';
 import { loadArt } from './assets.js';
 import { ITEMS, Inventory, itemIcon, SLOTS } from './items.js';
@@ -700,6 +700,21 @@ function squareIcon(src) {
   return out;
 }
 
+// What a SLOT shows, which is not what the world shows.
+//
+// The pack grid is the one place that wears the drawn icon tiles — see ICONS in
+// assets.js for why they are different pictures on purpose. Everything else in
+// the app goes on asking `itemIcon` for the thing itself: the card in your hand,
+// the fish in the lake, the 図鑑's rows and its silhouettes.
+//
+// The fallback is not decoration. A future item added to ITEMS with no row in
+// ICONS gets the old squared drawing rather than an empty square, so forgetting
+// to draw a tile is a slightly plainer slot instead of a hole.
+function slotIcon(id) {
+  const tile = IMG.icons[id];
+  return tile ? tile.src : squareIcon(packIcon(id)).toDataURL();
+}
+
 // Set the held unique down at `spot` — or, if the spot is water, watch it go
 // under and start the walk home. With no spot it goes straight home. The one
 // exit every held-unique state shares.
@@ -1331,13 +1346,30 @@ const sheetCard = document.getElementById('sheet-card');
 const sheetTitle = document.getElementById('sheet-title');
 const sheetBody = document.getElementById('sheet-body');
 const sheetCap = document.getElementById('sheet-cap');
+const sheetHint = document.getElementById('sheet-hint');
+const dropBtn = document.getElementById('sheet-drop');
+const countRow = document.getElementById('sheet-count');
+const countN = document.getElementById('count-n');
 
 // 'pack', 'zukan', or null. One card serves both — see index.html for why.
 let sheetMode = null;
-// The slot a long press has picked up, waiting to be told where to go. Declared
-// up here with the rest of the sheet's state because openSheet clears it, and a
-// `let` further down the file would still be in its dead zone when it does.
-let lifted = null;
+// The slot the bin is waiting on an amount for, or null. Declared up here with
+// the rest of the sheet's state because openSheet clears it, and a `let` further
+// down the file would still be in its dead zone when it does.
+let askN = null;
+// How many of that stack. Back to one every time the question is asked:
+// 「すてる ９こ」 is not something anybody wants to press twice by accident
+// because the last stack happened to be big.
+let dropN = 1;
+// The drag in progress. One finger at a time, so these are single values rather
+// than state per slot: `press` from the moment a tile is touched, `dragFrom`
+// only once the slip threshold has been passed — which is the whole of what
+// separates a tap from a carry. Up here for the same dead-zone reason as above,
+// since openSheet cancels a drag in flight.
+let press = null;
+let dragFrom = null;
+let ghost = null;
+let overEl = null;
 
 // NO TIMER, and that is the change. Both of these used to fold themselves away
 // after a stretch of being ignored, borrowed from the clock panel — which is
@@ -1351,9 +1383,12 @@ function openSheet(mode) {
   sheetEl.classList.toggle('is-open', !!mode);
   pouchEl.classList.toggle('is-open', mode === 'pack');
   zukanEl.classList.toggle('is-open', mode === 'zukan');
-  // Nothing stays lifted across an open or a close: the gesture is only
-  // meaningful against the grid you started it on.
-  lifted = null;
+  // Nothing carries across an open or a close: a drag in progress and a question
+  // waiting for an answer are both only meaningful against the grid they started
+  // on. cancelDrag also takes the ghost off screen, which would otherwise be
+  // left floating over a closed sheet.
+  cancelDrag();
+  askN = null;
 
   if (mode === 'pack') { sheetTitle.textContent = 'もちもの'; paintPack(); }
   else if (mode === 'zukan') { sheetTitle.textContent = 'ずかん'; paintZukan(); }
@@ -1390,19 +1425,24 @@ function paintPack() {
     slot.className = 'pack-slot'
       + (cell ? '' : ' is-empty')
       + (cell && inventory.held === i ? ' is-held' : '')
-      + (lifted === i ? ' is-lifted' : '');
+      + (askN === i ? ' is-asking' : '');
     // The picture is decoration once the button says what it is: two readings of
     // the same thing is one too many when the second is 「あかい きのこ あかい きのこ」.
     slot.setAttribute('aria-label', cell
       ? ITEMS[cell.id].name + (cell.n > 1 ? ` ${cell.n}こ` : '')
       : 'あき');
     if (cell) {
+      // Which family it is in, which the stylesheet turns into the border
+      // colour. Only on filled slots: an empty one is not a kind of thing.
+      slot.dataset.cat = ICON_CAT[cell.id] || '';
       const img = document.createElement('img');
       img.alt = '';
-      img.src = squareIcon(packIcon(cell.id)).toDataURL();
+      img.src = slotIcon(cell.id);
       slot.appendChild(img);
-      // The count only when there is more than one. A ×1 on every slot is
-      // noise: the drawing already says "one of these".
+      // The count only when there is more than one, which also means never on a
+      // unique. A 「１」 on every slot is noise — the drawing already says "one
+      // of these" — and on the bear it would be a stranger claim than that,
+      // since being the only one is the whole of what a unique is.
       if (cell.n > 1) {
         const n = document.createElement('span');
         n.className = 'pack-n';
@@ -1411,81 +1451,134 @@ function paintPack() {
       }
     }
     // Empty slots are wired up too, and are NOT disabled: an empty slot is
-    // exactly where you would want to put down the thing you have just lifted,
-    // and a disabled button is deaf to the press that would do it.
+    // exactly where you would want to let go of the tile you are carrying, and
+    // a disabled button is deaf to the press that would do it.
     armSlot(slot, i);
     grid.appendChild(slot);
   }
   sheetBody.appendChild(grid);
-  showLift();
+  showRow();
 }
 
 // --- taking things out, and moving them about
 //
-// A tap takes a thing in hand. A LONG PRESS lifts it, and the next slot you
-// touch is where it goes — swapping with whatever is there, or pouring in when
-// the two are the same kind. See moveSlot in items.js for the half of that which
-// is about the pack rather than about fingers.
+// A tap takes a thing in hand. A DRAG picks the tile up and carries it: let go
+// over another slot to swap or pour in, or over the row at the bottom to be rid
+// of it. See moveSlot in items.js for the half of that which is about the pack
+// rather than about fingers.
 //
-// Long press rather than drag, because a drag over a grid on a phone means
-// tracking a finger across nodes it did not start on and guessing which one it
-// is over; two taps say the same thing with none of that. It is also why this
-// is pointer events rather than the click `onPress` gives everything else: the
-// press has to be noticed WHILE the finger is down, and a click only arrives
-// once it has gone.
-const LIFT_MS = 360;
-const LIFT_SLIP = 12;
+// This was a long press, and the reason given for it — that dragging over a grid
+// means tracking a finger across nodes it did not start on — was a weak one.
+// `elementFromPoint` answers exactly that question, which is what `under()`
+// below does. What the long press really cost was discoverability: it is
+// invisible, so it needed a line of text to explain it, and that line lived in
+// the one place that had something else to say the moment you were carrying
+// anything. A drag teaches itself. It also removes the modal state that sat
+// between lifting and placing, and stops two nearly identical presses on the
+// same tile meaning two different things.
+//
+// Which of the two a press turns out to be is decided by DISTANCE, not by time:
+// under the threshold it was a tap, past it it is a drag. Nothing hidden, and
+// nothing to wait for.
+const DRAG_SLIP = 8;
 
 function armSlot(el, i) {
-  let sx = 0;
-  let sy = 0;
-  let moved = false;
-  let fired = false;
-  let timer = 0;
-
-  const stop = () => { if (timer) { clearTimeout(timer); timer = 0; } };
-
   el.addEventListener('pointerdown', (e) => {
-    sx = e.clientX;
-    sy = e.clientY;
-    moved = false;
-    fired = false;
-    stop();
-    if (!inventory.slots[i]) return;   // nothing here to pick up
-    timer = setTimeout(() => {
-      timer = 0;
-      fired = true;
-      lifted = i;
-      // Marked in place rather than by repainting the grid: the finger is still
-      // down on this very node, and replacing it would throw away the pointerup
-      // that ends the press — leaving the slot stuck looking pressed.
-      for (const s of el.parentElement.children) s.classList.remove('is-lifted');
-      el.classList.add('is-lifted');
-      showLift();
-    }, LIFT_MS);
+    if (!inventory.slots[i]) return;    // nothing here to pick up
+    press = { i, el, id: e.pointerId, x: e.clientX, y: e.clientY };
+    // Once a drag starts the finger leaves this tile immediately, and without
+    // capture the moves would go to whatever is under it instead.
+    capture(el, e.pointerId);
   });
 
   el.addEventListener('pointermove', (e) => {
-    if (moved) return;
-    if (Math.abs(e.clientX - sx) > LIFT_SLIP || Math.abs(e.clientY - sy) > LIFT_SLIP) {
-      moved = true;
-      stop();
+    if (!press || press.id !== e.pointerId) return;
+    if (dragFrom === null) {
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < DRAG_SLIP) return;
+      startDrag(press.i, press.el, e);
     }
+    moveDrag(e.clientX, e.clientY);
   });
 
-  el.addEventListener('pointercancel', stop);
-
-  el.addEventListener('pointerup', () => {
-    stop();
-    // A press that wandered was not a press, and one that already became a lift
-    // has had its meaning: letting go is not also a tap.
-    if (moved || fired) return;
-    tapSlot(i);
+  el.addEventListener('pointerup', (e) => {
+    if (!press || press.id !== e.pointerId) return;
+    const from = press.i;
+    press = null;
+    if (dragFrom === null) { tapSlot(from); return; }
+    endDrag(e.clientX, e.clientY);
   });
 
-  // A long press on a touchscreen is also the browser's own gesture for "select
-  // this" or "show me a menu". Neither is wanted on a slot.
+  el.addEventListener('pointercancel', () => { press = null; cancelDrag(); });
+
+  // A held finger on a touchscreen is also the browser's own gesture for
+  // "select this" or "show me a menu". Neither is wanted on a slot.
   el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+// What is under the finger, as a slot index, the bin, or nothing. The ghost
+// takes no pointer events, or this would only ever find the ghost.
+function under(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  if (el.closest('#sheet-drop')) return 'bin';
+  const slot = el.closest('.pack-slot');
+  if (!slot || !slot.parentElement) return null;
+  return [...slot.parentElement.children].indexOf(slot);
+}
+
+function startDrag(i, el, e) {
+  dragFrom = i;
+  askN = null;
+  const cell = inventory.slots[i];
+  const box = el.getBoundingClientRect();
+
+  ghost = document.createElement('img');
+  ghost.className = 'pack-ghost';
+  ghost.src = slotIcon(cell.id);
+  ghost.dataset.cat = ICON_CAT[cell.id] || '';
+  ghost.style.width = `${box.width}px`;
+  ghost.style.height = `${box.height}px`;
+  document.body.appendChild(ghost);
+
+  // Marked by hand rather than by repainting the grid: a repaint would replace
+  // the very node holding the pointer capture, and every move after it would go
+  // somewhere else. Nothing repaints until the drag is over.
+  el.classList.add('is-source');
+  showRow();
+  moveDrag(e.clientX, e.clientY);
+}
+
+function moveDrag(x, y) {
+  ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+  const hit = under(x, y);
+  const next = hit === 'bin' ? dropBtn
+    : (typeof hit === 'number' && hit !== dragFrom
+      ? sheetBody.querySelectorAll('.pack-slot')[hit] : null);
+  if (next === overEl) return;
+  if (overEl) overEl.classList.remove('is-over');
+  overEl = next;
+  if (overEl) overEl.classList.add('is-over');
+}
+
+function endDrag(x, y) {
+  const from = dragFrom;
+  const hit = under(x, y);
+  cancelDrag();
+  if (hit === 'bin') { binDrop(from); return; }
+  if (typeof hit === 'number' && hit !== from) { inventory.moveSlot(from, hit); return; }
+  // Let go over nothing, or over where it started: it simply goes back. Repainted
+  // because cancelDrag only undoes the drag's own marks, and a refused move
+  // leaves the grid otherwise untouched.
+  paintPack();
+}
+
+// Everything the drag put on screen, taken off again. Safe to call twice.
+function cancelDrag() {
+  if (ghost) { ghost.remove(); ghost = null; }
+  if (overEl) { overEl.classList.remove('is-over'); overEl = null; }
+  for (const s of sheetBody.querySelectorAll('.is-source')) s.classList.remove('is-source');
+  dragFrom = null;
+  showRow();
 }
 
 function tapSlot(i) {
@@ -1494,20 +1587,9 @@ function tapSlot(i) {
   saidLongIdle = false;
   rig.markTouched(now);
 
-  // Something is lifted, so this press is about where it lands rather than about
-  // what is in this slot. Cleared BEFORE the move, because the move repaints and
-  // the repaint reads this.
-  if (lifted !== null) {
-    const from = lifted;
-    lifted = null;
-    if (from !== i) inventory.moveSlot(from, i);
-    // Painted unconditionally, and not only because pressing the lifted slot
-    // again means "put it back down". A refused move — the slot emptied under
-    // the lift by something the world did while it was up — returns false
-    // without emitting, and then nothing else would take the mark off it.
-    paintPack();
-    return;
-  }
+  // A pending "how many?" is answered by its own buttons; a tap anywhere else in
+  // the grid is a change of mind.
+  if (askN !== null) { askN = null; paintPack(); return; }
 
   const cell = inventory.slots[i];
   if (!cell) return;
@@ -1519,20 +1601,101 @@ function tapSlot(i) {
   else inventory.holdSlot(i);
 }
 
-// The line under the grid, and the highlight that goes with it.
-function showLift() {
-  sheetCard.classList.toggle('is-moving', lifted !== null);
+// The two lines under the grid, and the row that is a drop target while a tile
+// is in the air and a question after one has landed on it.
+function showRow() {
+  const asking = askN !== null ? inventory.slots[askN] : null;
+  const dragged = dragFrom !== null ? inventory.slots[dragFrom] : null;
+  sheetCard.classList.toggle('is-moving', !!(asking || dragged));
 
-  if (lifted !== null) {
-    const c = inventory.slots[lifted];
-    sheetCap.textContent = c ? `${ITEMS[c.id].name} を どこへ？` : '';
+  if (asking) {
+    // Landed on the bin, and there is more than one, so the only thing still
+    // unanswered is how many.
+    sheetCap.textContent = `${ITEMS[asking.id].name} を いくつ すてる？`;
+    dropBtn.textContent = 'すてる';
+    countRow.hidden = false;
+    dropN = Math.min(Math.max(1, dropN), asking.n);
+    countN.textContent = dropN;
+  } else if (dragged) {
+    // In the air. The row is somewhere to let go of it — 「おく」 puts a unique
+    // down in the world, 「すてる」 lets a stackable go, two words because they
+    // are two different endings, exactly as the action pill distinguishes おく
+    // from しまう.
+    sheetCap.textContent = ITEMS[dragged.id].name;
+    dropBtn.textContent = ITEMS[dragged.id].kind === 'unique' ? 'おく' : 'すてる';
+    countRow.hidden = true;
+  } else {
+    const held = inventory.held === null ? null : inventory.slots[inventory.held];
+    sheetCap.textContent = held ? `${ITEMS[held.id].name} を もっているよ` : '';
+  }
+
+  // Always said, whatever the line above is doing. See the note in index.html.
+  sheetHint.textContent = inventory.slots.some(Boolean)
+    ? 'タップで てに とる ・ ドラッグで ならべかえ'
+    : 'まだ なにも もっていないよ';
+}
+
+// --- letting go of things
+
+function setDropN(n) {
+  const c = askN === null ? null : inventory.slots[askN];
+  if (!c) return;
+  dropN = Math.min(Math.max(1, n), c.n);
+  countN.textContent = dropN;
+}
+
+// Dropped on the row at the bottom. Which ending that is depends on the thing
+// rather than on a mode, and only one of the three needs asking about.
+function binDrop(i) {
+  const c = inventory.slots[i];
+  if (!c) { paintPack(); return; }
+
+  // There is one bear, so it is SET DOWN rather than destroyed — and since you
+  // can walk over and pick it up again, nothing here needs confirming.
+  if (ITEMS[c.id].kind === 'unique') {
+    const spot = placeSpot();
+    // Nose in a corner: nowhere in arm's reach on your own side of the wall. The
+    // button shakes its head rather than inventing somewhere, and the tile goes
+    // back to its slot so you can turn round and try again.
+    if (!spot) { paintPack(); shakeDrop(); return; }
+    // Into the hand first, because putDownUnique reads `heldUnique` — the one
+    // exit every set-down in the app already shares, water gag and topple
+    // included, which is what makes a drag out of the pack land in the world
+    // exactly the way the pill's おく does.
+    inventory.holdSlot(i);
+    putDownUnique(spot.clone());
+    // Out to look at it: a thing you have just put down is out THERE, and the
+    // card would be standing in front of the result of what you did.
+    openSheet(null);
     return;
   }
-  const held = inventory.held === null ? null : inventory.slots[inventory.held];
-  if (held) { sheetCap.textContent = `${ITEMS[held.id].name} を もっているよ`; return; }
-  sheetCap.textContent = inventory.slots.some(Boolean)
-    ? 'タップで てに とる ・ ながおしで いれかえ'
-    : 'まだ なにも もっていないよ';
+
+  // One of a kind of thing there is more of: nothing to weigh up, it just goes.
+  if (c.n === 1) { inventory.discard(i, 1); return; }
+
+  // More than one, so the amount is genuinely ambiguous and throwing them away
+  // cannot be undone. The row turns into the question instead of guessing.
+  askN = i;
+  dropN = 1;
+  paintPack();
+}
+
+// Answering the "how many?" the bin asked.
+function confirmDrop() {
+  if (askN === null) return;
+  const i = askN;
+  askN = null;
+  inventory.discard(i, dropN);
+  dropN = 1;
+  paintPack();
+}
+
+// A refusal has to look like one; a button that quietly does nothing reads as
+// broken. Borrowed from the action pills' own shake — see refuse().
+function shakeDrop() {
+  dropBtn.classList.remove('is-refused');
+  void dropBtn.offsetWidth;
+  dropBtn.classList.add('is-refused');
 }
 
 // THE 図鑑, in a drawer of its own. It shared the pack's panel while both were
@@ -1559,6 +1722,7 @@ const ZUKAN = [
 function paintZukan() {
   sheetBody.textContent = '';
   sheetCap.textContent = '';
+  sheetHint.textContent = '';
   sheetCard.classList.remove('is-moving');
   for (const section of ZUKAN) {
     const ids = Object.keys(ITEMS).filter((id) => section.has(ITEMS[id]));
@@ -1639,6 +1803,18 @@ onPress(zukanBtn, () => openZukan(!zukanEl.classList.contains('is-open')));
 // card, and — for whoever is playing this at a desk — escape.
 onPress(document.getElementById('sheet-close'), () => openSheet(null));
 onPress(document.getElementById('sheet-scrim'), () => openSheet(null));
+
+// Only ever the confirm for a pending amount. While a tile is in the air this
+// is a place to LET GO of it, not something to press — the drag's own pointerup
+// is what lands it there.
+onPress(dropBtn, confirmDrop);
+onPress(document.getElementById('count-all'), () => {
+  const c = askN === null ? null : inventory.slots[askN];
+  if (c) setDropN(c.n);
+});
+for (const b of countRow.querySelectorAll('.count-step')) {
+  onPress(b, () => setDropN(dropN + Number(b.dataset.step)));
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && sheetMode) openSheet(null);

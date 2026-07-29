@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>goldens — lighting contact sheet</title>
+
+<!-- THE GOLDEN SNAPSHOT RIG. Phase 0 of LIGHTING_REWORK.md, and the thing that
+     makes every later phase provable rather than argued about.
+
+     It is a page of its own rather than a mode inside index.html because what
+     it needs is the opposite of what the app needs: no UI, no household sim, no
+     clock, no input, and a camera that goes exactly where it is put. What it
+     DOES share is every module that decides what a pixel is — scene.js,
+     daylight.js, the art loader — so a sheet captured here is the same
+     lighting the app draws.
+
+     Kept at the repo root because the art loads from './asset/images/', which
+     is relative to the document. A page in a subdirectory would load nothing.
+
+     Not registered in sw.js and not linked from anywhere: it is a workbench,
+     and it should never be part of what a visitor downloads. -->
+
+<style>
+  body {
+    margin: 0; padding: 16px; background: #14171c; color: #C8CDD6;
+    font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace;
+  }
+  #stage { position: fixed; left: -9999px; top: 0; }
+  #sheet { max-width: 100%; border: 1px solid #2A3038; image-rendering: auto; }
+  button {
+    font: inherit; color: inherit; background: #232830;
+    border: 1px solid #39414D; border-radius: 6px; padding: 6px 14px;
+    cursor: pointer; margin-right: 8px;
+  }
+  button:hover { background: #2C323C; }
+  input {
+    font: inherit; color: inherit; background: #1B1F26;
+    border: 1px solid #39414D; border-radius: 6px; padding: 6px 10px;
+    margin-right: 8px;
+  }
+  #log { white-space: pre-wrap; margin: 10px 0; color: #8A93A0; }
+  a { color: #8FD0EE; }
+</style>
+</head>
+<body>
+
+<!-- The real renderer's canvas. Parked off screen: what gets looked at is the
+     contact sheet below, which is a 2D canvas the tiles are composited into. -->
+<canvas id="stage"></canvas>
+
+<p>
+  <button id="run" type="button">capture</button>
+  <!-- Straight to ./goldens/ through the dev server, because that is where
+       dev/compare.py looks. The name is what the differ is given, so the
+       convention is a label for the state of the tree: "before", "phase2", … -->
+  <input id="name" type="text" value="before" size="14" aria-label="sheet name">
+  <button id="save" type="button">save to disk</button>
+  <button id="download" type="button">download</button>
+  <span id="stamp"></span>
+</p>
+
+<p id="log">booting…</p>
+
+<canvas id="sheet"></canvas>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module" src="./js/goldens.js"></script>
+</body>
+</html>

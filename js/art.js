@@ -303,26 +303,23 @@ const HORIZON_SEED = 70413;
 // TWO ROWS MATTER MORE THAN THE REST, and both are set against the planet's limb
 // rather than chosen by eye:
 //
-//   `treeTop` at 0.46 sits ABOVE the limb's 0.567, so the crowns break the
-//   horizon. That is the whole read of a far treeline — a nodding row of tops
-//   with the trunks and everything under them behind the hill. It is a little
-//   higher than the old 0.48 because the new silhouette is made from broad,
-//   quiet shrubs rather than hundreds of small circles; the extra ten texels
-//   let their shoulders read without taking the mountains away.
+//   `treeTop` at 0.27 reserves room for the rare tallest tree. Ordinary bush
+//   crowns begin around 0.40-0.55, while their feet sit just below the standing
+//   limb at 0.567. That placement exposes whole upper silhouettes rather than
+//   reducing every plant to a similar row of crown tips.
 //
 //   `treeBase` at 0.90 sits well BELOW the limb's 0.761 AT THE TOP OF A HOP.
-//   It is only where the lowest foliage finally becomes a solid fill; two
-//   overlapping rows of crowns occupy everything above it. A jump therefore
-//   reveals more shrubs and a few branches rather than a flat green slab, with
-//   0.139 of the sheet still in reserve for jumping from low furniture or a
-//   future small increase in hop height.
+//   It is only where the lowest foliage finally becomes a solid fill; the
+//   deeper, independently placed plants occupy everything above it. A jump
+//   therefore reveals more shrubs, trees and branches rather than a flat green
+//   slab, with 0.139 of the sheet still in reserve.
 //
 // The gap between them is deliberate depth: the back row breaks the standing
 // horizon, and the lower row keeps the area exposed during a hop illustrated.
 const SKYLINE = {
   mountainPeak: 0.18,
   mountainBase: 0.62,
-  treeTop: 0.46,
+  treeTop: 0.27,
   treeBase: 0.90,
   hazeTo: 0.62,
 };
@@ -450,124 +447,352 @@ function mountainBand(g, W, H, rand, {
   }
 }
 
-// A distant Chiikawa wood is one continuous scalloped silhouette, not a pile of
-// circles and not a row of isolated shrubs. The reference backgrounds gather
-// four to six soft lobes into each broad clump, then let the clumps join at
-// shallow valleys. That last part matters most when a hop reveals more of the
-// band: separate closed bushes turn into a row of U shapes, while a continuous
-// wood remains foliage all the way down.
-function traceHorizonRow(g, row, off = 0) {
-  g.moveTo(off, row.edgeY);
-  for (const lobe of row.lobes) {
+// The distant wood is assembled from individual plants. The references mix
+// wide cloud-shaped bushes, narrow pointed shrubs and the occasional small tree
+// with a visible trunk. Closed silhouettes are important here: when two plants
+// meet, normal painter's-order overlap makes a believable little cluster rather
+// than joining their outlines into one decorative ribbon.
+function traceRoundedBush(g, plant, off = 0) {
+  const x = plant.x + off;
+  const left = x - plant.width / 2;
+  const right = x + plant.width / 2;
+  const height = plant.baseY - plant.topY;
+  const shoulderY = plant.topY + height * plant.shoulder;
+  const footInset = plant.width * 0.13;
+  let fromY = shoulderY;
+
+  g.moveTo(left + footInset, plant.baseY);
+  g.quadraticCurveTo(left - plant.width * 0.025, shoulderY, left, shoulderY);
+  for (const lobe of plant.lobes) {
+    const endX = left + plant.width * lobe.endT;
+    const endY = plant.topY + height * lobe.endY;
+    const apexY = plant.topY + height * lobe.apexY;
+    // The quadratic control point is solved so the visible midpoint reaches
+    // the requested apex. This makes each lobe soft without making every bush
+    // share the same repeated semicircle.
+    const controlY = 2 * apexY - (fromY + endY) / 2;
     g.quadraticCurveTo(
-      off + lobe.peakX,
-      lobe.peakY,
-      off + lobe.endX,
-      lobe.endY,
+      left + plant.width * lobe.midT,
+      controlY,
+      endX,
+      endY,
+    );
+    fromY = endY;
+  }
+  g.quadraticCurveTo(
+    right + plant.width * 0.025,
+    shoulderY,
+    right - footInset,
+    plant.baseY,
+  );
+  g.quadraticCurveTo(x, plant.baseY + height * 0.025, left + footInset, plant.baseY);
+  g.closePath();
+}
+
+function tracePointedShrub(g, plant, off = 0) {
+  const x = plant.x + off;
+  const left = x - plant.width / 2;
+  const right = x + plant.width / 2;
+  const height = plant.baseY - plant.topY;
+  const shoulderY = plant.topY + height * 0.82;
+  const footInset = plant.width * 0.16;
+  let fromX = left;
+  let fromY = shoulderY;
+
+  g.moveTo(left + footInset, plant.baseY);
+  g.quadraticCurveTo(left - plant.width * 0.02, shoulderY, left, shoulderY);
+  for (const spike of plant.spikes) {
+    const tipX = left + plant.width * spike.tipT;
+    const tipY = plant.topY + height * spike.tipY;
+    const endX = left + plant.width * spike.endT;
+    const endY = plant.topY + height * spike.endY;
+    g.quadraticCurveTo(
+      fromX + (tipX - fromX) * 0.72,
+      fromY + (tipY - fromY) * 0.34,
+      tipX,
+      tipY,
+    );
+    g.quadraticCurveTo(
+      tipX + (endX - tipX) * 0.32,
+      tipY + (endY - tipY) * 0.68,
+      endX,
+      endY,
+    );
+    fromX = endX;
+    fromY = endY;
+  }
+  g.quadraticCurveTo(
+    right + plant.width * 0.02,
+    shoulderY,
+    right - footInset,
+    plant.baseY,
+  );
+  g.quadraticCurveTo(x, plant.baseY + height * 0.018, left + footInset, plant.baseY);
+  g.closePath();
+}
+
+// A tree canopy is a complete, slightly lopsided blob rather than the top half
+// of a bush. Quadratic interpolation through the radial points gives it the
+// hand-drawn cloud outline seen on the larger background trees.
+function traceTreeCanopy(g, plant, off = 0) {
+  const points = plant.crownPoints.map(point => ({
+    x: plant.x + off + point.x,
+    y: plant.crownY + point.y,
+  }));
+  const last = points[points.length - 1];
+  const first = points[0];
+  g.moveTo((last.x + first.x) / 2, (last.y + first.y) / 2);
+  for (let i = 0; i < points.length; i++) {
+    const point = points[i];
+    const next = points[(i + 1) % points.length];
+    g.quadraticCurveTo(
+      point.x,
+      point.y,
+      (point.x + next.x) / 2,
+      (point.y + next.y) / 2,
     );
   }
+  g.closePath();
 }
 
-function paintHorizonRow(g, W, H, row, base, fill, ink) {
-  for (const off of [-W, 0, W]) {
+function paintTreeWood(g, H, plant, off) {
+  const x = plant.x + off;
+  const topY = plant.crownY + plant.crownHeight * 0.15;
+  const half = plant.trunkWidth / 2;
+  g.beginPath();
+  g.moveTo(x - half * 0.72, topY);
+  g.quadraticCurveTo(x - half, plant.baseY - plant.trunkWidth, x - half * 1.15, plant.baseY);
+  g.lineTo(x + half * 1.12, plant.baseY);
+  g.quadraticCurveTo(
+    x + half,
+    plant.baseY - plant.trunkWidth,
+    x + half * 0.70 + plant.trunkLean,
+    topY,
+  );
+  g.closePath();
+  g.fillStyle = PAL.horizonTreeTrunk;
+  g.fill();
+  g.strokeStyle = PAL.horizonTreeBranch;
+  g.lineWidth = H * 0.006;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.stroke();
+}
+
+function paintPlantBranches(g, H, plant, off) {
+  const x = plant.x + off;
+  const height = plant.baseY - plant.topY;
+  const y0 = plant.kind === 'tree'
+    ? plant.baseY - height * 0.13
+    : plant.baseY - height * 0.05;
+  const y1 = plant.kind === 'tree'
+    ? plant.topY + height * 0.42
+    : plant.topY + height * 0.31;
+  const lean = plant.branchLean;
+  const fork = plant.width * (plant.kind === 'tree' ? 0.14 : 0.11);
+
+  g.beginPath();
+  g.moveTo(x, y0);
+  g.quadraticCurveTo(x + lean * 0.30, (y0 + y1) / 2, x + lean, y1);
+  g.moveTo(x + lean * 0.53, y0 + (y1 - y0) * 0.52);
+  g.lineTo(x + lean * 0.42 - fork, y1 + height * 0.12);
+  g.moveTo(x + lean * 0.70, y0 + (y1 - y0) * 0.70);
+  g.lineTo(x + lean * 0.74 + fork * 0.86, y1 + height * 0.18);
+  g.strokeStyle = PAL.horizonTreeBranch;
+  g.lineWidth = H * 0.006;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.stroke();
+}
+
+function paintCanopyMarks(g, H, plant, off) {
+  if (plant.kind !== 'tree') return;
+  const x = plant.x + off;
+  const y = plant.topY + plant.crownHeight * 0.46;
+  const spread = plant.width * 0.18;
+  g.beginPath();
+  g.moveTo(x - spread * 1.15, y);
+  g.quadraticCurveTo(x - spread * 0.75, y + H * 0.025, x - spread * 0.30, y + H * 0.008);
+  g.moveTo(x + spread * 0.20, y + H * 0.012);
+  g.quadraticCurveTo(x + spread * 0.66, y + H * 0.030, x + spread * 1.02, y - H * 0.002);
+  g.strokeStyle = PAL.horizonTreeDetail;
+  g.lineWidth = H * 0.005;
+  g.lineCap = 'round';
+  g.stroke();
+}
+
+function paintHorizonPlant(g, H, plant, ink) {
+  for (const off of [-plant.period, 0, plant.period]) {
+    if (plant.kind === 'tree') {
+      paintTreeWood(g, H, plant, off);
+    }
+
     g.beginPath();
-    traceHorizonRow(g, row, off);
-    g.lineTo(off + W, base * H);
-    g.lineTo(off, base * H);
-    g.closePath();
-    g.fillStyle = fill;
+    if (plant.kind === 'bush') traceRoundedBush(g, plant, off);
+    else if (plant.kind === 'pointed') tracePointedShrub(g, plant, off);
+    else traceTreeCanopy(g, plant, off);
+    g.fillStyle = plant.fill;
     g.fill();
-
-    g.beginPath();
-    traceHorizonRow(g, row, off);
     g.strokeStyle = ink;
-    g.lineWidth = H * 0.009;
+    g.lineWidth = H * 0.008;
     g.lineCap = 'round';
     g.lineJoin = 'round';
     g.stroke();
+
+    if (plant.hasBranches) paintPlantBranches(g, H, plant, off);
+    paintCanopyMarks(g, H, plant, off);
   }
 }
 
-// Sparse forked marks inside some crowns are enough to make the band read as
-// trees rather than a decorative hedge. They are painted after their own row
-// but before the next row, so nearer foliage naturally buries most of them.
-function paintHorizonBranch(g, W, H, branch, ink) {
-  const { x, y0, y1, lean, fork } = branch;
-  for (const off of [-W, 0, W]) {
-    const px = x + off;
-    g.beginPath();
-    g.moveTo(px, y0);
-    g.quadraticCurveTo(px + lean * 0.35, (y0 + y1) / 2, px + lean, y1);
-    g.moveTo(px + lean * 0.52, y0 + (y1 - y0) * 0.48);
-    g.lineTo(px + lean * 0.52 - fork, y1 + (y0 - y1) * 0.13);
-    g.moveTo(px + lean * 0.70, y0 + (y1 - y0) * 0.68);
-    g.lineTo(px + lean * 0.70 + fork * 0.88, y1 + (y0 - y1) * 0.22);
-    g.strokeStyle = ink;
-    g.lineWidth = H * 0.006;
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    g.stroke();
-  }
-}
-
-// One periodic row of connected shrubs. `top` is where the tallest clump may
-// begin and `wander` is the depth over which the other clumps drift. `count`
-// counts whole bushes rather than lobes: around three broad clumps cross a
-// portrait lens, and each clump supplies its own four-to-six scallops.
-function treelineLayer(g, W, H, rand, {
-  top, wander, count, height, base, fill, ink, branches,
-}) {
-  const step = W / count;
-  const row = {
-    // The valley between two whole clumps, kept shallow enough that a hop does
-    // not expose long bare-sided Vs. The next row will cover most of it, but
-    // the silhouette is sound even when inspected on its own.
-    edgeY: (top + wander * 0.65 + height * 0.42) * H,
-    lobes: [],
-    branches: [],
-  };
-  let fromY = row.edgeY;
-  for (let i = 0; i < count; i++) {
-    const crownTop = (top + rand() * wander) * H;
-    const crownHeight = height * H * (0.88 + rand() * 0.24);
-    const lobeCount = 3 + Math.floor(rand() * 3);
-    for (let j = 0; j < lobeCount; j++) {
-      const startT = j / lobeCount;
-      const endT = (j + 1) / lobeCount;
+function prepareHorizonPlant(rand, plant) {
+  if (plant.kind === 'bush') {
+    plant.shoulder = 0.70 + rand() * 0.08;
+    plant.lobes = [];
+    const count = 4 + Math.floor(rand() * 4);
+    const widths = [];
+    let widthTotal = 0;
+    for (let i = 0; i < count; i++) {
+      const width = 0.62 + rand() * 0.76;
+      widths.push(width);
+      widthTotal += width;
+    }
+    let startT = 0;
+    for (let i = 0; i < count; i++) {
+      const endT = startT + widths[i] / widthTotal;
       const midT = (startT + endT) / 2;
       const dome = Math.sin(Math.PI * midT);
-      const endY = j === lobeCount - 1
-        ? row.edgeY
-        : crownTop + crownHeight * (0.39 + rand() * 0.07);
-      const apexY = crownTop
-        + crownHeight * (0.025 + (1 - dome) * 0.17 + rand() * 0.035);
-      // A quadratic control point is not itself on the curve. Solving its
-      // midpoint equation puts the visible apex at `apexY`, keeping the lobes
-      // round rather than pointed even when their neighbouring valleys differ.
-      const controlY = 2 * apexY - (fromY + endY) / 2;
-      row.lobes.push({
-        peakX: (i + midT) * step,
-        peakY: controlY,
-        endX: (i + endT) * step,
+      const endY = i === count - 1
+        ? plant.shoulder
+        : 0.31 + (1 - dome) * 0.24 + rand() * 0.065;
+      plant.lobes.push({
+        midT,
+        endT,
         endY,
+        apexY: 0.025 + (1 - dome) * 0.34 + rand() * 0.045,
       });
-      fromY = endY;
+      startT = endT;
     }
+  } else if (plant.kind === 'pointed') {
+    plant.spikes = [];
+    const count = 5 + Math.floor(rand() * 4);
+    const widths = [];
+    let widthTotal = 0;
+    for (let i = 0; i < count; i++) {
+      const width = 0.58 + rand() * 0.84;
+      widths.push(width);
+      widthTotal += width;
+    }
+    let startT = 0;
+    for (let i = 0; i < count; i++) {
+      const endT = startT + widths[i] / widthTotal;
+      const tipT = startT + (endT - startT) * (0.38 + rand() * 0.24);
+      const edge = Math.abs(tipT - 0.5) * 2;
+      plant.spikes.push({
+        tipT,
+        tipY: 0.035 + edge * 0.37 + rand() * 0.10,
+        endT,
+        endY: i === count - 1 ? 0.82 : 0.46 + edge * 0.17 + rand() * 0.08,
+      });
+      startT = endT;
+    }
+  } else {
+    plant.crownHeight = (plant.baseY - plant.topY) * (0.60 + rand() * 0.08);
+    plant.crownY = plant.topY + plant.crownHeight / 2;
+    plant.crownPoints = [];
+    const count = 9 + Math.floor(rand() * 3);
+    for (let i = 0; i < count; i++) {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * i) / count;
+      const radius = i === 0 ? 1 : 0.78 + rand() * 0.32;
+      plant.crownPoints.push({
+        x: Math.cos(angle) * plant.width * 0.50 * radius,
+        y: Math.sin(angle) * plant.crownHeight * 0.50 * radius,
+      });
+    }
+    plant.trunkWidth = plant.width * (0.13 + rand() * 0.035);
+    plant.trunkLean = plant.width * (rand() - 0.5) * 0.06;
+  }
+  return plant;
+}
 
-    if (rand() < branches) {
-      row.branches.push({
-        x: (i + 0.43 + rand() * 0.14) * step,
-        y0: Math.min(base * H - H * 0.01, crownTop + crownHeight * 1.38),
-        y1: crownTop + crownHeight * (0.22 + rand() * 0.10),
-        lean: step * (rand() - 0.5) * 0.28,
-        fork: step * (0.10 + rand() * 0.04),
-      });
-    }
+// A periodic layer of discrete plants. Irregular gaps create both openings and
+// clusters; wide crowns and a few deliberately tucked-in companions guarantee
+// natural overlaps. Sorting by the foot of each plant gives those overlaps a
+// stable sense of depth instead of alternating arbitrarily around the band.
+function treelineLayer(g, W, H, rand, {
+  count, baseMin, baseMax, heightMin, heightMax,
+  treeHeightMin, treeHeightMax,
+  treeChance, pointedChance, fills, ink, companions,
+}) {
+  const step = W / count;
+  const gaps = [];
+  let gapTotal = 0;
+  for (let i = 0; i < count; i++) {
+    const gap = 0.40 + rand() * 1.28;
+    gaps.push(gap);
+    gapTotal += gap;
   }
 
-  paintHorizonRow(g, W, H, row, base, fill, ink);
-  for (const branch of row.branches) {
-    paintHorizonBranch(g, W, H, branch, PAL.horizonTreeBranch);
+  const plants = [];
+  let x = rand() * step;
+  for (let i = 0; i < count; i++) {
+    const roll = rand();
+    const kind = roll < treeChance
+      ? 'tree'
+      : roll < treeChance + pointedChance ? 'pointed' : 'bush';
+    const baseY = (baseMin + rand() * (baseMax - baseMin)) * H;
+    let height = (heightMin + rand() * (heightMax - heightMin)) * H;
+    let width = step * (0.72 + rand() * 0.55);
+    if (kind === 'tree') {
+      height = H * (treeHeightMin + rand() * (treeHeightMax - treeHeightMin));
+      // Tree crowns are compact and roughly round in the references. Basing
+      // their width on H avoids the wide, flattened ovals produced when the
+      // population count (and therefore horizontal step) changes.
+      width = H * (0.22 + rand() * 0.09);
+    } else if (kind === 'pointed') {
+      width *= 0.60 + rand() * 0.18;
+      height *= 0.86 + rand() * 0.17;
+    }
+
+    const plant = prepareHorizonPlant(rand, {
+      kind,
+      x: ((x % W) + W) % W,
+      period: W,
+      width,
+      baseY,
+      topY: baseY - height,
+      fill: fills[Math.floor(rand() * fills.length)],
+      branchLean: width * (rand() - 0.5) * 0.24,
+      hasBranches: kind === 'tree' || (kind === 'bush' && rand() < 0.25),
+    });
+    plants.push(plant);
+
+    // Every few plants, tuck in a smaller neighbour. These are the deliberate
+    // local stacks visible in the references; the rest arise naturally from
+    // the irregular spacing and different crown widths.
+    if (i % companions === 2) {
+      const companionKind = kind === 'pointed' ? 'bush' : 'pointed';
+      const companionWidth = width * (0.48 + rand() * 0.18);
+      const companionHeight = height * (0.55 + rand() * 0.16);
+      const companionBase = baseY + H * (0.012 + rand() * 0.026);
+      plants.push(prepareHorizonPlant(rand, {
+        kind: companionKind,
+        x: (plant.x + width * (rand() < 0.5 ? -0.34 : 0.34) + W) % W,
+        period: W,
+        width: companionWidth,
+        baseY: companionBase,
+        topY: companionBase - companionHeight,
+        fill: fills[Math.floor(rand() * fills.length)],
+        branchLean: companionWidth * (rand() - 0.5) * 0.20,
+        hasBranches: companionKind === 'bush' && rand() < 0.20,
+      }));
+    }
+
+    x += (gaps[i] / gapTotal) * W;
+  }
+
+  plants.sort((a, b) => a.baseY - b.baseY);
+  for (const plant of plants) {
+    paintHorizonPlant(g, H, plant, ink);
   }
 }
 
@@ -613,22 +838,31 @@ export function paintHorizon() {
   );
 
   // The fill begins below anything the ordinary hop can reveal. Above it are
-  // two quiet rows: one pale silhouette against the mountains and one deeper
-  // row that only comes into view while jumping. A third row made the reveal
-  // read as horizontal stripes; two keeps the woodland continuous while still
-  // giving the newly exposed area real crowns and branches.
+  // two depth-sorted collections of complete plants. Their varied shapes,
+  // footing and occasional local overlaps remain readable when a jump exposes
+  // more of the sheet; there is no continuous scalloped ribbon to reveal.
   g.fillStyle = PAL.horizonTree;
   g.fillRect(0, SKYLINE.treeBase * H, W, H - SKYLINE.treeBase * H);
 
   treelineLayer(g, W, H, rand, {
-    top: SKYLINE.treeTop, wander: 0.085,
-    count: 32, height: 0.145, base: SKYLINE.treeBase,
-    ink: PAL.horizonTreeInk, fill: PAL.horizonTreeBack, branches: 0.55,
+    count: 15,
+    baseMin: 0.61, baseMax: 0.68,
+    heightMin: 0.13, heightMax: 0.205,
+    treeHeightMin: 0.24, treeHeightMax: 0.34,
+    treeChance: 0.20, pointedChance: 0.30,
+    fills: [PAL.horizonTreeBack, PAL.horizonTreeMid],
+    ink: PAL.horizonTreeInk,
+    companions: 5,
   });
   treelineLayer(g, W, H, rand, {
-    top: 0.615, wander: 0.13,
-    count: 38, height: 0.15, base: SKYLINE.treeBase,
-    ink: PAL.horizonTreeInk, fill: PAL.horizonTree, branches: 0.48,
+    count: 13,
+    baseMin: 0.80, baseMax: SKYLINE.treeBase,
+    heightMin: 0.15, heightMax: 0.25,
+    treeHeightMin: 0.29, treeHeightMax: 0.41,
+    treeChance: 0.22, pointedChance: 0.24,
+    fills: [PAL.horizonTreeMid, PAL.horizonTree],
+    ink: PAL.horizonTreeInk,
+    companions: 4,
   });
 
   return c;
@@ -1667,47 +1901,57 @@ export function litSpot(canvas) {
 // The stops are not re-tuned for it, only squeezed: the same shape, starting at
 // the wall instead of at the origin. That keeps it fitted to the (1-t)^2.4 the
 // lamp shader lights standing props with, which was measured off this list.
-// The pool a small light standing ON THE FLOOR throws, as opposed to the one a
-// window throws down a wall. `paintLampGlow`'s hole is drawn SOLID — see the
-// note in it — because the thing filling that hole is a building, which covers
-// it. Here the thing filling it is the lamp's own foot, which is four
-// centimetres of brass, and a solid core does two bad things at once: it lights
-// the base from inside, and it blows the boards right under the lamp out to a
-// flat yellow disc.
+// `paintItemGlow` stood here — the pool a small light standing ON THE FLOOR
+// threw, as against the one a window throws down a wall. It was EMPTY at the
+// middle, brightest just clear of the lamp's own foot, because a solid core did
+// two bad things at once: it lit the brass from inside, and it blew the boards
+// directly under the lamp out to a flat yellow disc. Which is also what a real
+// one looks like — a lamp on a floor shadows the floor it stands on.
 //
-// So this one is EMPTY at the middle, brightest just outside the foot, and away
-// from there it is the same falloff. Which is also what a real one looks like:
-// a lamp on a floor shadows the floor it is standing on.
-export function paintItemGlow(foot = 0.14) {
-  const S = 256;
-  const c = makeCanvas(S, S);
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  // Nothing under the foot, up to full just clear of it, then the same shape
-  // paintLampGlow falls off with so the two lights in this world agree.
-  const stops = [
-    [0, 0], [foot * 0.75, 0], [foot, 0.55], [foot + 0.10, 1],
-    [0.42, 0.34], [0.70, 0.09], [1, 0],
-  ];
-  for (const [at, a] of stops) {
-    grad.addColorStop(Math.min(1, at), `rgba(255,255,255,${a})`);
-  }
-  g.fillStyle = grad;
-  g.beginPath();
-  g.arc(S / 2, S / 2, S / 2, 0, TAU);
-  g.fill();
-  return c;
-}
+// Its stops were the other half of a pair, measured against paintLampGlow's, so
+// that the two lights in this world agreed about how far they got; the shader
+// exponents 2.0 and 2.4 were fitted to one list each.
+//
+// Nothing draws light onto a surface any more — see light-model.js — so both
+// the stamp and the pair of exponents it was fitted to are gone. The bite it
+// cut around the lamp's foot is not missing: a foot is a surface at distance
+// zero from the light, and a restore returns it to the colour brass is.
 
+// `hole` is how much of the middle the building itself takes up, as a fraction
+// of the whole stamp.
+//
+// THE MIDDLE IS EMPTY, and it did not use to be. Canvas fills everything inside
+// the first stop with that stop's colour, so a hole needed no stop of its own —
+// the inner disc came out SOLID, and the note here said that was right because
+// what fills that hole is a building, which covers it.
+//
+// A building covers it from OUTSIDE. You can go in now. The patch lies on the
+// planet at a lift of 0.05 and a room's floor is a cap at 0.012, so the solid
+// centre of this stamp floats a few centimetres ABOVE the boards of the room it
+// belongs to — an additive disc of lamplight the width of the whole building,
+// lying over the floor, at every hour the windows are lit.
+//
+// It went unseen for as long as the room had a brightness of its own to hide
+// it. Against a room that is genuinely dark except where a lamp reaches, it was
+// the first thing on screen: a cave whose floor was uniformly warm wherever you
+// stood and whatever the lantern was doing.
+//
+// So the hole is a hole. Nothing outside can tell — the building stands in it —
+// and the room gets its floor back.
 export function paintLampGlow(hole = 0) {
   const S = 256;
   const c = makeCanvas(S, S);
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  // Canvas fills everything inside the first stop with the first stop's colour,
-  // so a hole needs no stop of its own: the inner disc comes out solid, which
-  // is what light pooling right up against the foot of a wall looks like.
   const stops = [[0.00, 1], [0.16, 0.74], [0.40, 0.30], [0.68, 0.08], [1.00, 0]];
+  // Two stops of nothing across the hole itself, so the fill starts at the wall
+  // rather than at the middle of the world. `hole - 1e-4` keeps the second one
+  // strictly below the first real stop; a pair at the same offset is a step,
+  // which is what is wanted here — the wall is where the light begins.
+  if (hole > 0) {
+    grad.addColorStop(0, 'rgba(255,255,255,0)');
+    grad.addColorStop(Math.max(0, hole - 1e-4), 'rgba(255,255,255,0)');
+  }
   for (const [at, a] of stops) {
     grad.addColorStop(hole + at * (1 - hole), `rgba(255,255,255,${a})`);
   }

@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v62';
+const CACHE = 'hidamari-v65';
 
 const ASSETS = [
   './',
@@ -103,6 +103,32 @@ const ASSETS = [
   './asset/images/loading-1.png',
   './asset/images/loading-2.png',
   './asset/images/loading-3.png',
+  // The pack's tiles. Different pictures from the drawings above on purpose —
+  // see ICONS in assets.js. WebP for the same reason bg-menu is: the sources are
+  // 1254px and about a megabyte each, which would be twenty megabytes of start
+  // screen for something never shown above 70px. Drawing a new one means the
+  // file, a row in ICONS, and a line here.
+  './asset/images/icon/icon-common-grass.webp',
+  './asset/images/icon/icon-common-mushroom-red.webp',
+  './asset/images/icon/icon-common-mushroom-regular.webp',
+  './asset/images/icon/icon-fish-apricot-moonspot-carp.webp',
+  './asset/images/icon/icon-fish-blue-button-puffer.webp',
+  './asset/images/icon/icon-fish-blushspot-loach.webp',
+  './asset/images/icon/icon-fish-golden-dashfin.webp',
+  './asset/images/icon/icon-fish-lavender-pebblefin.webp',
+  './asset/images/icon/icon-fish-lilac-needlefish.webp',
+  './asset/images/icon/icon-fish-lime-blossomfin.webp',
+  './asset/images/icon/icon-fish-limebar-minnow.webp',
+  './asset/images/icon/icon-fish-mint-pearl-minnow.webp',
+  './asset/images/icon/icon-fish-peach-carp.webp',
+  './asset/images/icon/icon-fish-pink-ripplefin.webp',
+  './asset/images/icon/icon-fish-sky-teardrop-fish.webp',
+  './asset/images/icon/icon-special-chiikawa-fork.webp',
+  './asset/images/icon/icon-special-hachiware-fork.webp',
+  './asset/images/icon/icon-unique-bear.webp',
+  './asset/images/icon/icon-unique-kettle.webp',
+  './asset/images/icon/icon-unique-lamp.webp',
+  './asset/images/icon/icon-unique-trashbag.webp',
   './asset/images/characters/chiikawa-idle.png',
   './asset/images/characters/chiikawa-happy.png',
   './asset/images/characters/chiikawa-delight.png',

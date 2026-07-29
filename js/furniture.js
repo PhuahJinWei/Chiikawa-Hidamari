@@ -2363,7 +2363,7 @@ export function buildLantern(h) {
   }
 
   // See the note on `reach` below, which is what this is.
-  const lampReach = h * 10.0;
+  const lampReach = h * 7.0;
 
   return {
     group: g,
@@ -2386,21 +2386,32 @@ export function buildLantern(h) {
       // it gets. It appears twice below only because the foot has to be a
       // fraction of it; that is why it is a variable and not a literal.
       //
-      // TEN of its own height — 3.4 units — and it has been climbing: 2.6 lit
-      // a corner, which is what the note here once claimed it was for; 7 was
-      // fitted to the reference frame where one lantern owns half the floor;
-      // and 10 is half a stride more on top of that, asked for by eye once the
-      // lamp was something you could set down in the open. On the grass there
-      // is no wall three paces out to catch the light, so the same reach that
+      // SEVEN of its own height — 2.4 units — and it has been up to 10 and
+      // back. The history is worth keeping because the number moved for
+      // reasons that stopped applying:
+      //
+      // 2.6 lit a corner. 7 was fitted to the reference frame, "where one
+      // lantern owns half the floor". 10 came later, asked for by eye once the
+      // lamp was something you could carry out onto the grass — because out
+      // there is no wall three paces off to catch the light, so the reach that
       // filled a room read as a small circle in a field.
       //
-      // What keeps this honest as it grows is ROOM_POOL in scene.js: the pool
-      // stamps are additive and this one now overlaps the bulb's over most of
-      // the floor, and that constant is what stops the two of them summing the
-      // boards past white.
+      // That last argument was about a FALLOFF: with a long fading tail, a
+      // bigger number mostly buys a wider haze and the eye reads the bright
+      // middle as the light. With a disc it buys a bigger CIRCLE, and at 10 the
+      // circle was the whole cave — the model on, and invisible.
+      //
+      // So back to the reach that was fitted to the frame in the first place,
+      // which is the picture being aimed at. What it costs is the open-air
+      // case, and that is the right thing to pay: a lantern set down in a field
+      // SHOULD light a small circle in a field.
       reach: lampReach,
       lit: glass,
       colour: PAL.lampGlow,
+      // A flame, so the warmest thing in the world restores to the warmest
+      // white in it — and still a white. See PAL.lampRestore for why this end
+      // of the model has to stay so close to neutral.
+      restore: '#FFF0DB',
       // The bite out of the middle of the pool, as a fraction of its reach.
       //
       // Without it the pool's centre sits INSIDE the lantern's own foot — a cap
@@ -2695,19 +2706,49 @@ export function buildBulb(h) {
       // A bare bulb in a small room throws further than a lantern on the
       // floor, and from higher up, so its pool is wider and softer.
       //
-      // 4.6 heights is 4.7 units, up from 3.5, and the number to check it
-      // against is the geometry it has to beat: the bulb hangs 2.3 above the
-      // middle of a floor whose wall stands 3.2 out, so the FOOT of the wall —
-      // the farthest lit thing in the room — is about 3.9 away through the
-      // air. At 3.5 that put the room's own corners at the last tenth of the
-      // falloff, which is why the walls held their gloom right up to the
-      // skirting; at 4.7 the same corners sit at t≈0.83 and get a real share.
-      reach: h * 4.6,
+      // 2.9 heights is 3.0 units, DOWN from 4.6 heights, and the direction of
+      // that change is the whole difference between the two models.
+      //
+      // The old number was chosen to make sure the light got everywhere: the
+      // note here worked out that the foot of the wall is about 3.9 away
+      // through the air and pushed the reach past it so the corners "get a real
+      // share" instead of holding their gloom to the skirting. Under a falloff
+      // that is a long fading tail, that is the right instinct — a short reach
+      // just means a dim room.
+      //
+      // Under a disc it is exactly backwards. The reach is not how far a hint
+      // of light carries, it is the RADIUS OF THE CIRCLE, and a circle that
+      // reaches every corner is a lit room with no circle in it. At 4.7 the
+      // disc covered a whole room edge to edge and the model was invisible;
+      // the gloom the old note complains about is the thing the reference
+      // frame is mostly made of.
+      //
+      // It went to 2.9 heights first, argued "against a wall 3.2 out" — which
+      // is the HOUSE's wall, and the bulb does not hang in the house. It hangs
+      // at the apex of the CAVE: wall 4.0 out, and the filament measured 2.5
+      // above the boards. A reach of 3.0 with the plateau ending at 1.9 meant
+      // the circle ran out of radius in mid-air — a bright patch of ceiling
+      // over a floor the light never touched, which is exactly how it
+      // photographed.
+      //
+      // 4.4 heights is 4.5 units, fitted to the room it actually lights:
+      // the boards directly below the filament sit at t=0.56, comfortably
+      // inside the plateau; the floor 2.5 out is at half cover; and the foot
+      // of the wall, 4.7 through the air, is past the rim entirely. The middle
+      // of the cave is lit and its corners stay night, which is what a bare
+      // bulb in a big room does.
+      reach: h * 4.4,
       lit: glass,
       haloes,
       dim: GLASS_DIM,
       bright: GLASS_LIT,
       colour: PAL.lampGlow,
+      // What it restores a surface to. Cooler than the lantern's, because this
+      // is a wired bulb and that is a flame — the difference between the two
+      // lights in the room, and now something the lighting can actually say
+      // rather than a fact about their glass alone. Barely: both are near
+      // white, and the gap between them is meant to be felt rather than seen.
+      restore: '#FFF6EC',
       // No foot to shadow — it is in the air — so the pool fills its middle.
       hole: 0.02,
       // How far below the plaster the light itself is, so scene.js can put the

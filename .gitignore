@@ -7,6 +7,12 @@ asset/generated test image/
 # Dev-only art preview page — imports js/art.js, not part of the site
 preview.html
 
+# Contact sheets captured by goldens.html. The RIG is kept (goldens.html,
+# js/goldens.js, dev/compare.py) because every phase of the lighting rework is
+# verified with it; its output is not, at 2.4MB a sheet and regenerable in
+# twenty seconds. Capture a "before" on the tree you are about to change.
+goldens/
+
 # OS
 Thumbs.db
 ehthumbs.db

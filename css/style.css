@@ -863,6 +863,23 @@ html, body {
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
+  /* ROOM FOR THE HELD RING TO BE DRAWN, and the pair is one idea rather than
+     two: the padding holds the clip box off the grid, and the equal negative
+     margin gives back the space it took, so nothing moves. The grid sits where
+     it sat and the box that crops it is five pixels bigger all round.
+
+     It needs saying because the cause is invisible. Asking for `overflow-y:
+     auto` does not leave the other axis alone — a non-visible value on either
+     axis computes the other to auto as well, so this element crops horizontally
+     whether or not anybody wanted it to, exactly at the grid's edge. The held
+     slot's ring is drawn OUTSIDE its border box, so on any slot in the first or
+     last column, or the top or bottom row, the ring was being sliced off.
+
+     Seven against the ring's four, rather than the five that just clears it:
+     the margin here is the only thing standing between a ring and a haircut, and
+     it should not need revisiting the next time one of these grows by a pixel. */
+  padding: 7px;
+  margin: -7px;
 }
 
 .sheet-cap {
@@ -881,6 +898,106 @@ html, body {
 }
 
 .sheet-cap:empty { display: none; }
+
+/* The gesture line, under whatever the state line is saying. Quieter than it,
+   because it is the same words every time and the eye should be able to stop
+   reading them once they are known. */
+.sheet-hint {
+  flex: none;
+  margin: 0.25rem 0.2rem 0.1rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.5;
+}
+
+.sheet-hint:empty { display: none; }
+
+/* ---- the drop row, which exists only while a slot is lifted */
+
+.sheet-act {
+  flex: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
+
+.sheet-card.is-moving .sheet-act { display: flex; }
+
+.sheet-count {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sheet-count[hidden] { display: none; }
+
+.count-step,
+.count-all,
+.sheet-drop {
+  font-family: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2.5px solid var(--ink);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+
+.count-step:active,
+.count-all:active,
+.sheet-drop:active { transform: scale(0.92); }
+
+.count-step {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.count-n {
+  min-width: 1.9rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+  /* So stepping from 9 to 10 does not shove the buttons sideways. */
+  font-variant-numeric: tabular-nums;
+}
+
+.count-all {
+  height: 34px;
+  padding: 0 0.7rem;
+  border-radius: 17px;
+  font-size: 0.74rem;
+}
+
+/* The ink fill is this app's word for the thing under your thumb, and it is
+   safe here in a way it was not on a slot: this one is TEXT, so it flips to
+   paper and stays legible. */
+.sheet-drop {
+  height: 34px;
+  padding: 0 1.1rem;
+  border-radius: 17px;
+  font-size: 0.82rem;
+  color: var(--paper);
+  background: var(--ink);
+}
+
+/* Nowhere to put it down. See shakeDrop in main.js — a button that silently
+   does nothing reads as broken rather than as a refusal. */
+.sheet-drop.is-refused { animation: refuse-shake 0.36s ease; }
+
+@keyframes refuse-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-5px); }
+  45%      { transform: translateX(4px); }
+  70%      { transform: translateX(-2px); }
+}
 
 /* THE PACK, as a grid of slots rather than a list of what you happen to own.
    Four across and two down: the shape is the point, because an empty slot is
@@ -902,7 +1019,12 @@ html, body {
   border: 2.5px solid var(--ink);
   border-radius: 16px;
   background: transparent;
-  padding: 5px;
+  /* The tile IS the slot: no padding, and clipped to the corner radius, so the
+     drawn icon fills it edge to edge instead of floating inside a frame. That is
+     what makes the category colour behind each subject read as a set — see
+     ICONS in assets.js. */
+  padding: 0;
+  overflow: hidden;
   cursor: pointer;
   /* The slot owns the whole gesture, long press included. Without this the
      browser reads a finger held on it as the start of a scroll or a selection
@@ -914,6 +1036,25 @@ html, body {
 
 .pack-slot:active { transform: scale(0.93); background: var(--paper); }
 
+/* THE BORDER IS THE FAMILY, not the app's pen.
+
+   Everything else on this screen is outlined in ink, and these are the
+   exception for the same reason the tiles themselves are: a slot is a label. A
+   tile already carries its family as the colour behind the subject, and a
+   border drawn from the same family is what turns four background colours into
+   a system you can read at a glance instead of four unrelated washes. Each of
+   these is its own tile's background taken deeper — see ICON_CAT in assets.js
+   for where the category comes from, which is the file name, which is the same
+   fact as the colour.
+
+   Slightly thicker than the ink border it replaces, because a mid-tone edge
+   against a mid-tone fill needs the weight that ink got for free. */
+.pack-slot[data-cat] { border-width: 3px; }
+.pack-slot[data-cat='common'],  .pack-ghost[data-cat='common']  { border-color: #969BA0; }
+.pack-slot[data-cat='fish'],    .pack-ghost[data-cat='fish']    { border-color: #78AFD7; }
+.pack-slot[data-cat='unique'],  .pack-ghost[data-cat='unique']  { border-color: #E4B937; }
+.pack-slot[data-cat='special'], .pack-ghost[data-cat='special'] { border-color: #7855AA; }
+
 /* Empty: a dashed well. Still pressable, because an empty slot is exactly where
    you would want to put the thing you have just lifted. */
 .pack-slot.is-empty {
@@ -923,9 +1064,13 @@ html, body {
 }
 
 .pack-slot img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  /* `cover` rather than `contain`, because these are square tiles going into
+     square slots and the difference only shows on the fallback — a squared
+     drawing on transparency, which loses nothing by being filled to the edge. */
+  object-fit: cover;
+  display: block;
 }
 
 /* THE ONE IN YOUR HAND, and it used to be filled with solid ink — which is this
@@ -935,40 +1080,108 @@ html, body {
    the very picture it was there to point at, and the one slot most worth
    reading became the least readable thing on the card. A ring says it just as
    plainly and leaves the drawing alone. */
-.pack-slot.is-held {
+/* It has to work harder than it used to. When every other border was ink, pink
+   was the only colour in the grid and being coloured WAS the signal; among four
+   coloured families it is one more hue unless it is also heavier. So: a thicker
+   edge and a second, softer ring outside it — a doubled outline reads as
+   emphasis at any hue, which is what this needs to survive sitting on the
+   yellow of a unique. Ordered after the family rules so it wins the tie. */
+/* 4px and not 3.5: border widths are floored to whole pixels, so a half step
+   over the families' 3px is no step at all — measured, 3.5px computes to 3px
+   and the held slot came out wearing exactly the same weight as its neighbours.
+   The spread on the ring keeps fractions; the border does not. */
+.pack-slot.is-held,
+.pack-slot[data-cat].is-held {
   border-color: var(--pink);
+  border-width: 4px;
   background: rgba(246, 166, 182, 0.22);
-  box-shadow: 0 0 0 3px rgba(246, 166, 182, 0.5);
+  box-shadow: 0 0 0 4px rgba(246, 166, 182, 0.5);
 }
 
-/* Lifted by a long press, and waiting to be told where to go. Dashed, because
-   that is what this slot is about to become. */
-.pack-slot.is-lifted {
+/* WHERE THE TILE CAME FROM, while it is in the air. Dashed, because for as long
+   as the drag lasts this slot is effectively empty — and it is drawn as the
+   hole rather than as a copy of what is being carried, so there are never two of
+   the same thing on screen. The picture fades rather than taking a wash over the
+   top: the tiles are opaque, so a tint would be behind a photograph. */
+.pack-slot.is-source {
   border-color: var(--ink);
   border-style: dashed;
-  background: rgba(91, 76, 68, 0.1);
+  background: rgba(91, 76, 68, 0.08);
   box-shadow: none;
-  transform: scale(0.9);
 }
 
-/* While something is lifted, every slot is somewhere it could land — so the
-   empty ones stop looking inert and say so. */
+.pack-slot.is-source img { opacity: 0.25; }
+
+/* WHERE IT WOULD LAND if you let go now. The one piece of feedback a drag
+   genuinely needs: without it, dropping onto a four-by-four grid is a guess. */
+.pack-slot.is-over {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 4px rgba(91, 76, 68, 0.22);
+  transform: scale(1.06);
+}
+
+/* Waiting on an answer to "how many?". Not a drag state — the tile is back in
+   its slot and the question is at the bottom of the card — so it is marked, not
+   emptied. */
+.pack-slot.is-asking {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 4px rgba(91, 76, 68, 0.3);
+}
+
+/* While a tile is in the air every slot is somewhere it could land, so the empty
+   ones stop looking inert and say so. */
 .sheet-card.is-moving .pack-slot.is-empty {
   border-color: rgba(91, 76, 68, 0.55);
   cursor: pointer;
 }
 
+/* THE TILE UNDER THE FINGER. Fixed to the viewport and positioned by transform
+   alone, so following a finger is a compositor job and never a layout one.
+
+   It takes no pointer events, and that is not a detail: `elementFromPoint` is
+   how the drag knows what it is over, and a ghost that answered would be the
+   only thing it ever found. */
+.pack-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0.94;
+  box-shadow: 0 8px 16px rgba(91, 76, 68, 0.32);
+  will-change: transform;
+}
+
+/* HOW MANY, written across the bottom of the tile rather than tucked into a
+   corner of it. It was a small dark chip on a pale pad, which is a footnote —
+   and the count is not a footnote, it is the second thing you came here to
+   read. Big, centred, and outlined in the same pen as every drawing behind it,
+   so it sits ON the picture the way a sticker would rather than beside it.
+
+   The outline is eight offset shadows rather than `-webkit-text-stroke` with
+   `paint-order: stroke fill`, which is the tidier spelling and thins the
+   numeral anywhere paint-order is not honoured. Eight shadows behave the same
+   everywhere and at this size look identical. */
 .pack-n {
   position: absolute;
-  right: 5px;
-  bottom: 3px;
-  font-size: 0.68rem;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  text-align: center;
+  font-size: 1.08rem;
   font-weight: 700;
   line-height: 1;
-  color: var(--ink);
-  background: rgba(255, 253, 247, 0.92);
-  border-radius: 6px;
-  padding: 1px 4px;
+  color: #FFFFFF;
+  text-shadow:
+    -2px -2px 0 var(--ink), 0 -2px 0 var(--ink), 2px -2px 0 var(--ink),
+    -2px 0 0 var(--ink), 2px 0 0 var(--ink),
+    -2px 2px 0 var(--ink), 0 2px 0 var(--ink), 2px 2px 0 var(--ink);
+  /* So a two-digit stack is not a different shape from a one-digit one. */
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .pouch-n {

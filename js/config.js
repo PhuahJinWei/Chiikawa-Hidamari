@@ -213,15 +213,17 @@ export const PAL = {
   horizonMountain: '#B3B4C9',
   horizonMountainBackInk: '#857A84',
   horizonMountainInk: '#6F646F',
-  // The band of woods along the skyline. The anime backgrounds separate it
-  // into broad, pale scalloped shrubs instead of one dark hedge: the back row
-  // is airiest and the lower row holds the familiar leaf green when a jump
-  // uncovers it. One soft grey-green outline ties the rows together; sparse
-  // warm branches keep the foliage from reading as decorative cloud shapes.
+  // The band of woods along the skyline. Separate pale bushes, pointed shrubs
+  // and round-canopy trees use three close greens, so overlapping plants remain
+  // legible without turning into striped rows. Warm trunks and sparse branch
+  // forks make the larger silhouettes read as trees rather than hedge lobes.
   horizonTreeBack: '#B7D39F',
+  horizonTreeMid: '#AECF98',
   horizonTree: '#A5C78E',
   horizonTreeInk: '#5D6652',
   horizonTreeBranch: '#6E5B47',
+  horizonTreeTrunk: '#C7A08A',
+  horizonTreeDetail: '#78AA78',
   // The field running out to the foot of those woods. A shade deeper than the
   // ground you are stood on, so the join at the limb reads as distance rather
   // than as a seam.
@@ -531,6 +533,28 @@ export const PAL = {
   // What it puts on the floor. Matched to the house's LAMP_COLOR on purpose:
   // two warm lights in one world should be the same warm.
   lampGlow: '#FFD489',
+  // ...and what a lamp restores a surface TO, which is a different question
+  // from what it puts on a floor and has a very different answer.
+  //
+  // `lampGlow` above is a light being cast — a saturated amber you can see as
+  // light. This is the multiply a fully lit surface wears, and a surface fully
+  // in lamplight should look like ITSELF: the drawing at very nearly its own
+  // daylight colours, with a suggestion of warmth over it. Anything more
+  // saturated here does not read as a well-lit room, it reads as a room with an
+  // orange gel over the lens — and it destroys the one thing the restore model
+  // exists to protect, which is that blue things in lamplight stay blue.
+  //
+  // Near-white on purpose, then. The warmth in a lit room comes from the lamp
+  // itself and the air around it, both of which are additive and both of which
+  // are still there. See light-model.js.
+  lampRestore: '#FFF3E2',
+  // ...and the same for light that has come OUT of a building, which is the one
+  // emitter you never see the source of. A lamp indoors is on screen carrying
+  // its own warmth in its glass and its halo; a lit window at fifteen paces is
+  // nothing but the patch of grass it lands on, so if that patch is not warm
+  // then nothing about the picture is. A step further from white than the
+  // lamp's own target, and no more than a step.
+  lampSpill: '#FFE9C6',
 
   // `fishKoi: ['#E0895C', '#F2E4CB', '#97ABB8']` stood here — three tints worn
   // by one white master drawing, which was the whole of what a species was.

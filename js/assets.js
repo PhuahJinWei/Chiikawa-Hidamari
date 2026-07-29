@@ -115,7 +115,58 @@ export const SKY_DISC_ART = true;
 // the shoal deals from it, the 図鑑 lists it, and a lookup is always by a
 // species id that came out of FISH_SPECIES. `IMG.fish[sp.id]` says that; twelve
 // IMG.fishPeachCarp keys would have said "twelve unrelated pictures".
-export const IMG = { sheets: {}, fish: {} };
+export const IMG = { sheets: {}, fish: {}, icons: {} };
+
+// THE PACK'S ICONS, which are deliberately NOT the same pictures as the world's.
+//
+// Every other drawing in this file is the thing itself: the fish in the lake
+// wears the texture the 図鑑 lists and the card in your hand shows, and that
+// sameness is load-bearing — the thing you chose and the thing you are holding
+// must not be two drawings. These are the exception, and the reason is that a
+// slot is a LABEL rather than a window. They are drawn as tiles, subject on a
+// category colour — grey for what grows, blue for what swims, yellow for what
+// is somebody's, purple for the forks — and that colour only says anything when
+// all of them are sitting in one grid being compared.
+//
+// So they are used in exactly one place, the pack grid, and nowhere else. The
+// hand, the lake and the 図鑑 stay on the drawings; see slotIcon in main.js, and
+// the note on the 図鑑 for why its silhouettes could not use these even if it
+// wanted to.
+//
+// Keyed by ITEM id. The fish are not listed because they derive from
+// FISH_SPECIES' own `file` — the same kebab-case the water uses — so a species
+// can never end up with a tile nobody fetches, nor a row here the roster has
+// never heard of. Everything else is named by hand, because these file names
+// are the artist's words for the things rather than the code's.
+//
+// Two ids may share one file: both lanterns and both rubbish bags are two
+// physical objects wearing one drawing, which is what they are in the world too.
+const ICONS = {
+  kusa: 'common-grass',
+  kinoko1: 'common-mushroom-red',
+  kinoko2: 'common-mushroom-regular',
+  bear: 'unique-bear',
+  kettle: 'unique-kettle',
+  lamp: 'unique-lamp',
+  hachiwareLamp: 'unique-lamp',
+  trashBag: 'unique-trashbag',
+  trashBagAlt: 'unique-trashbag',
+  chiikawaWeapon: 'special-chiikawa-fork',
+  hachiwareWeapon: 'special-hachiware-fork',
+};
+
+// WHICH FAMILY A TILE BELONGS TO — grows / swims / somebody's / the forks — read
+// off the file name rather than declared a second time. The drawing's background
+// colour and this are the same fact about the same thing, and the pack draws each
+// slot's border from it, so deriving means the border and the tile behind it can
+// never disagree about what kind of thing they are describing.
+//
+// The fish are the one family named by their table instead of by a file, because
+// their file names are generated from that table in the first place.
+export const ICON_CAT = {
+  ...Object.fromEntries(Object.entries(ICONS).map(([id, file]) => [id, file.split('-')[0]])),
+  ...Object.fromEntries(FISH_SPECIES.map((sp) => [sp.id, 'fish'])),
+};
 
 // Deliberately the load event and not decode().
 //
@@ -188,6 +239,18 @@ export async function loadArt(onProgress) {
   // water. Adding one means the row in config.js, the file, and a path in sw.js.
   for (const sp of FISH_SPECIES) {
     jobs.push(load(`${BASE}fish/${sp.file}.png`).then((img) => { IMG.fish[sp.id] = img; }));
+  }
+
+  // The pack's tiles — see ICONS above. Required like everything else here, so
+  // that a drawing which never arrived is a loud failure at start-up rather than
+  // an empty square somebody notices three afternoons later. They ship as WebP
+  // because the originals are 1254px and about a megabyte each, which is twenty
+  // megabytes of start screen for pictures that are never shown above 70px.
+  for (const [id, file] of Object.entries(ICONS)) {
+    jobs.push(load(`${BASE}icon/icon-${file}.webp`).then((img) => { IMG.icons[id] = img; }));
+  }
+  for (const sp of FISH_SPECIES) {
+    jobs.push(load(`${BASE}icon/icon-fish-${sp.file}.webp`).then((img) => { IMG.icons[sp.id] = img; }));
   }
 
   for (const spec of EVERYONE) {

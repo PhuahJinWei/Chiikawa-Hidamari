@@ -146,7 +146,20 @@ const VERSION = 2;
 // of everything, so the pack is a thing you occasionally have to think about
 // without ever being a thing you have to manage. Stacks are uncapped, so it
 // only ever runs out of KINDS.
-export const SLOTS = 8;
+// Sixteen, up from eight, and the number is a judgement about how often you
+// should have to choose. There are twenty-three kinds of thing — twelve fish,
+// three that grow, eight that belong to somebody — so eight slots meant you
+// could not carry one of every fish, let alone a fish AND a tuft of grass, and
+// an afternoon at the water quietly filled the bag until plucking stopped
+// working. Sixteen ends that without ending the decision: twenty-three still
+// does not fit, so the pack is a thing you occasionally think about, which is
+// what it was always for. Four rows of four still lands under a thumb on the
+// shortest phone worth tuning for, which twenty would not.
+//
+// A save written when this was eight loads unchanged: the slot loop reads past
+// the end of the old array and gets undefined, which it already treats as an
+// empty slot. Growing this needs no new version; SHRINKING it would.
+export const SLOTS = 16;
 
 // The three koi of the tinted era, and the drawn species each one became.
 //
@@ -422,6 +435,29 @@ export class Inventory {
     this.held = null;
     if (was) this.uniques[was] = { state: 'stored' };
     this._emit();
+  }
+
+  // Take `n` of a stackable out of the pack and let them go. The 図鑑's tally is
+  // untouched on purpose: it records what you have CAUGHT, and throwing a fish
+  // back is not a claim never to have met one.
+  //
+  // Refuses uniques outright rather than quietly doing nothing sensible with
+  // them. There is one bear, and the answer to not wanting to carry it is to put
+  // it down somewhere — which is a thing that happens in the world, through the
+  // loose-furniture placement, and not in here. The sheet asks which of the two
+  // it is looking at before it offers a verb at all.
+  discard(i, n = 1) {
+    const c = this.slots[i];
+    if (!c || ITEMS[c.id].kind === 'unique') return false;
+    const take = Math.min(n, c.n);
+    if (take <= 0) return false;
+    c.n -= take;
+    if (c.n <= 0) {
+      this.slots[i] = null;
+      if (this.held === i) this.held = null;
+    }
+    this._emit();
+    return true;
   }
 
   // Put what is in one slot into another: swap with whatever is already there,

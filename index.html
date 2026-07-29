@@ -203,8 +203,38 @@
 
     <!-- The one line under it all, doing three jobs: it names what is in your
          hand, it teaches the long press, and it is what an empty pack says
-         instead of eight silent dashed holes. -->
+         instead of sixteen silent dashed holes. -->
     <p id="sheet-cap" class="sheet-cap"></p>
+
+    <!-- ALWAYS ON, and it is here because the line above is not. That one is a
+         state — what is in your hand, how many you are about to throw away — so
+         the moment you pick anything up it has something else to say, and while
+         it was also the only place the gestures were named, carrying something
+         silently deleted the instructions. A hint that hides exactly when you
+         are most likely to want it is not a hint. -->
+    <p id="sheet-hint" class="sheet-hint"></p>
+
+    <!-- GETTING RID OF SOMETHING, and it only exists while a slot is lifted.
+         The long press already means "this one, now where" — so the answer is
+         either another slot, or this row: one more destination rather than a
+         second gesture and a button sitting there in the resting state.
+
+         The verb depends on what is lifted, because the two endings are not the
+         same act. A stackable is let go of and gone (there is more grass). A
+         unique is SET DOWN — there is one bear, and its answer is the same
+         loose-furniture placement 「おく」 has always used, so it lands at your
+         feet where you can see it rather than ceasing to exist. The count only
+         appears for the first, since there is never more than one of the
+         second. -->
+    <div id="sheet-act" class="sheet-act">
+      <div id="sheet-count" class="sheet-count">
+        <button class="count-step" type="button" data-step="-1" aria-label="へらす">−</button>
+        <span id="count-n" class="count-n">1</span>
+        <button class="count-step" type="button" data-step="1" aria-label="ふやす">＋</button>
+        <button id="count-all" class="count-all" type="button">ぜんぶ</button>
+      </div>
+      <button id="sheet-drop" class="sheet-drop" type="button"></button>
+    </div>
   </div>
 </div>
 

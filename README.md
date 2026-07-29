@@ -1312,12 +1312,23 @@ things to do.
 
 ## The backpack
 
-`slots` in items.js: eight of them, each empty or holding `{ id, n }`. The
+`slots` in items.js: sixteen of them, each empty or holding `{ id, n }`. The
 pouch it replaced was a LEDGER — `counts[id]`, a set with no order and no limit
 — and the difference is not bookkeeping. A ledger answers "how many do I have";
 a pack answers "what have I got room for", and only the second is a thing you
 can make a decision about. Stacks are uncapped; the pack only ever runs out of
 KINDS. Uniques take a slot with `n` always 1.
+
+**Sixteen is a judgement about how often you should have to choose.** It was
+eight, and there are twenty-three kinds of thing — twelve fish, three that grow,
+eight that belong to somebody — so eight meant you could not carry one of every
+fish, let alone a fish AND a tuft of grass, and an afternoon at the water
+quietly filled the bag until plucking silently stopped working. Sixteen ends
+that without ending the decision, because twenty-three still does not fit. Four
+rows of four still lands under a thumb on the shortest phone worth tuning for,
+which twenty would not. Growing this needs no save version: the slot loop reads
+past the end of an eight-entry array and gets `undefined`, which it already
+treats as empty. SHRINKING it would.
 
 `held` is a slot INDEX rather than an id, which is the small decision the rest
 rests on: your hand holds a place in the pack, so putting something away is
@@ -1465,7 +1476,58 @@ the planet behind the scrim. `min-height: 0` on the body is what lets the card's
 so a long 図鑑 would otherwise push the card past the bottom of the screen
 instead of scrolling inside it.
 
-**Slots are squared before they are shown.** The drawings arrive on canvases of
+**The grid wears drawn tiles; everything else wears the drawings.** This is the
+one deliberate break in a rule the rest of the app keeps hard — that the thing
+you chose and the thing you are holding must not be two pictures. A slot is a
+LABEL rather than a window, and the tiles carry a category colour behind each
+subject (grey for what grows, blue for what swims, yellow for what is
+somebody's, purple for the forks) which only says anything when they are all in
+one grid being compared. So `slotIcon` is used in the pack and nowhere else; the
+hand, the lake and the 図鑑 go on asking `itemIcon`.
+
+**The 図鑑 could not have used them even if it wanted to.** Its unseen rows are
+`brightness(0)` on a transparent drawing, which is a silhouette; the tiles are
+opaque, and the same filter on one is a black square. The deeper reason is the
+better one though: an unseen row promises the SHAPE of the drawing you are about
+to catch, so the reveal has to be that same drawing filling in. Swapping to a
+tile would make the promise and the payoff two different pictures.
+
+**The border is the family too, and that is the one place the app's pen is put
+down.** Everything else on screen is outlined in ink; a slot is not, because a
+tile already carries its family as the colour behind the subject and an ink edge
+round it left four backgrounds looking like four unrelated washes rather than
+one system. Each border is its own tile's background taken deeper — common
+`#969BA0`, fish `#78AFD7`, unique `#E4B937`, special `#7855AA` — and the
+category comes from `ICON_CAT`, which splits it off the file name, so the border
+and the picture behind it cannot disagree about what kind of thing they describe.
+
+That costs the held state its monopoly on colour. Pink used to be the only hue
+in a grid of ink, so being coloured WAS the signal; among four coloured families
+it needs weight as well, which is a heavier edge plus a second soft ring outside
+it. **4px and not 3.5**: border widths are floored to whole pixels, so a half
+step over the families' 3px is no step at all — measured, 3.5px computed to 3px
+and the held slot came out wearing exactly its neighbours' weight. Box-shadow
+spread keeps fractions; borders do not.
+
+**The count is written across the bottom of the tile**, big and centred and
+outlined in ink, rather than tucked into a corner on a pale chip. A chip is a
+footnote and the count is the second thing you came to read. Still only when
+there is more than one — which also means never on a unique, where 「１」 would
+be a stranger claim than redundant, since being the only one is the whole of
+what the kind means. The outline is eight offset text-shadows rather than
+`-webkit-text-stroke` with `paint-order: stroke fill`, which is the tidier
+spelling and thins the numeral anywhere paint-order is not honoured.
+
+Tiles ship as WebP at 256px. The sources are 1254px and about a megabyte each —
+twenty megabytes of start screen for something never shown above 70px — and the
+whole set comes to 85KB. `ICONS` in assets.js maps item id to file; the fish are
+not listed because they derive from `FISH_SPECIES.file`, the same kebab-case the
+water already uses, so a species cannot end up with a tile nobody fetches. Two
+ids may share one file, which is what both lanterns and both rubbish bags are in
+the world too. `slotIcon` falls back to the squared drawing, so a future item
+with no tile is a plainer slot rather than a hole.
+
+**Slots are squared before they are shown** — for the fallback, now. The drawings arrive on canvases of
 their own shape and their own margins — a fish cropped tight to its pixels by
 `paintFishCard`, a mushroom padded for its mipmap by `paintSheet`, grass tall and
 thin on a mostly empty card — so `object-fit: contain` fits each CANVAS to its
@@ -1480,13 +1542,52 @@ wearing it is TEXT, which flips to paper and stays legible, and a drawing
 cannot. The items are outlined in that same ink, so a filled slot ate the very
 picture it was pointing at.
 
-**A long press lifts a slot; the next one you touch is where it goes.** See
-`moveSlot` in items.js — it swaps, or merges when the two are the same stackable
-kind. Long press rather than drag, because dragging across a grid on a phone
-means tracking a finger over nodes it did not start on and guessing which one it
-is above; two taps say the same thing with none of that. THE HAND FOLLOWS THE
-THING: `held` is an index, so a swap that did not carry it would leave you
-holding whatever was moved into the slot you were holding.
+**Drag a tile to carry it; let go over a slot to swap or pour in.** See
+`moveSlot` in items.js. THE HAND FOLLOWS THE THING: `held` is an index, so a swap
+that did not carry it would leave you holding whatever was moved into the slot
+you were holding. Which a press turns out to be is decided by DISTANCE and not
+by time — under `DRAG_SLIP` it was a tap and takes the thing in hand, past it it
+is a carry. Nothing hidden and nothing to wait for.
+
+**This was a long press, and the argument for it was wrong.** The claim was that
+dragging across a grid means tracking a finger over nodes it did not start on
+and guessing which one it is above. `elementFromPoint` answers exactly that
+question — it is four lines — so the real difference was that the long press was
+easier to write. What it cost was discoverability: an invisible gesture needs a
+line of text to explain it, and that line lived in the one place that had
+something else to say the moment you were carrying anything, so picking a thing
+up silently deleted the instructions for moving it. A drag teaches itself by
+being tried. It also deletes the modal state between lifting and placing, and
+stops two nearly identical presses on the same tile meaning two different
+things — the exact ambiguity the action pill's own notes call out as worth
+removing. The hint line survives as `#sheet-hint`, always on, separate from the
+state line for precisely the reason the old one failed.
+
+Nothing repaints between `pointerdown` and `pointerup`. The source slot is
+marked by hand rather than by rebuilding the grid, because a rebuild replaces
+the node holding the pointer capture and every move after it goes somewhere
+else. `.pack-ghost` takes no pointer events, or `elementFromPoint` would only
+ever find the ghost.
+
+**The row at the bottom is where you drop things to be rid of them** — a
+destination rather than a button, so there is no second gesture and nothing
+parked in the resting state. What happens next depends on the thing, and only
+one of the three cases needs asking about:
+
+- **A unique** is SET DOWN, not destroyed. `placeSpot` finds somewhere in reach
+  on your own side of the wall and the drop routes through the hand into
+  `putDownUnique` — the one exit every set-down in the app already shares, water
+  gag and topple included — so a drag out of the pack lands in the world exactly
+  the way the action pill's おく does. No confirmation, because you can walk over
+  and pick it up again. Nowhere to put it and the row shakes its head rather than
+  inventing somewhere. The sheet closes afterwards: the thing is out there now,
+  and the card would be standing in front of the result.
+- **One of a stackable** simply goes. Nothing to weigh up.
+- **More than one** is the only ambiguous case, and the only irreversible one, so
+  the row turns into the question: −/＋/ぜんぶ and a confirm, defaulting to one
+  every time because 「すてる ９こ」 is not something to press twice by accident.
+  `discard` leaves the 図鑑's tally alone deliberately — it records what you have
+  CAUGHT, and throwing a fish back is not a claim never to have met one.
 
 **Gifting** is what holding is for: a tap on a friend with something in your
 hand is a delivery, not a visit — the item changes what the gesture means,
