@@ -14,6 +14,12 @@ import {
   activePhase, isAuto, setPhaseOverride,
   PHASE_LABEL, PHASES, LOOK, phaseAtIndex,
 } from './daylight.js';
+import {
+  tickWeather, activeWeather, wetness, snowCover, setSnowCover, lightningStruck,
+  rainbowOut, rainbow, iceLook, pondsFrozen,
+  setWeatherOverride, isAutoWeather, forecast,
+  WEATHERS, WEATHER_LABEL,
+} from './weather.js';
 import { IMG, ICON_CAT, SKY_DISC_ART } from './assets.js';
 import { paintSheet, sheetBounds } from './art.js';
 import { loadArt } from './assets.js';
@@ -21,18 +27,24 @@ import { ITEMS, Inventory, itemIcon, SLOTS } from './items.js';
 import { Fishing } from './fishing.js';
 import {
   buildPlushie, buildTeapot, buildLantern, buildTrashBag, buildTrashBagAlt,
-  buildPinkWeapon, buildBlueWeapon, buildOpenBook, buildHouseKey,
+  buildPinkWeapon, buildBlueWeapon, buildOpenBook, buildHouseKey, buildGuitar,
 } from './furniture.js';
 
 const stage = document.getElementById('stage');
 const startEl = document.getElementById('start');
 const layer = document.getElementById('bubbles');
 
+// --- the front door
+//
 // How far in we are, said twice: as a car driving the road on the start screen,
 // and as a number beside it. Both come off `--p`, which the CSS turns into a
 // position for the car and a length of covered road behind it — so the two can
 // never disagree, and easing the move is a transition rather than anything
 // counted here.
+//
+// The phase-coloured sky and the drawn planet that stood here are gone: the menu
+// is an illustration again, and a drawing brings its own sky and its own horizon.
+// LOOK is still imported for the world itself, which is where it belongs.
 const loadbar = document.getElementById('loadbar');
 const pctEl = document.getElementById('start-pct');
 
@@ -243,7 +255,7 @@ let glide = 0;
 // freedom anybody enjoys, it is a bug they can see. So while the body is
 // visible and being towed:
 //
-//   The house and the solid props (trees, stumps, the bench) deflect it,
+//   The house and the solid props (trees and stumps) deflect it,
 //   at the same berth the wandering cast gives a wall. Deflection can hold the
 //   body a prop's radius past the leash, which is fine: the leash exists so
 //   you cannot be STRANDED, and "beside the tree your spot is under" is not
@@ -305,6 +317,113 @@ function applyPhase(next, { instant = false } = {}) {
 let phase = null;
 let phaseCheckAt = 0;
 
+// How much of the last lightning bolt is left, 1 down to 0. Held here rather
+// than in weather.js for the reason given there: the director deals a day and
+// answers questions about the sky, and a flash is neither — it is an event on
+// the frame clock, and this is the file with the frame clock in it.
+let flash = 0;
+
+// Whether the coats are currently on. The threshold itself is
+// CONFIG.weather.dressAt, which is shared with the scenery's own snow drawings
+// so the whole world changes on one frame rather than over several — see the
+// note there.
+let dressed = false;
+
+// ...and what a bolt does to whoever is out in it.
+//
+// There is no sound in this app, which takes the better half of thunder away —
+// what makes a real one land is the gap between seeing it and hearing it. So
+// the flinch has to carry it, and the cheapest honest flinch is a LINE: the
+// bank's `thunder` bucket is written surprised, and saying one already puts
+// that expression on their face through the machinery every other line uses.
+// Nothing new draws, and nobody had to be taught to be startled.
+//
+// One of them, not all three, and not every bolt. A storm strikes every dozen
+// seconds or so; three characters answering each of them in chorus would read
+// as a cast reacting to a stage direction rather than as people in the rain.
+function strike(now) {
+  if (!started || Math.random() > 0.45) return;
+  const seen = bots.filter((b) => (
+    b.dlg.has('thunder') && !b.dlg.isVisible && b.ch.isVisible && canChatter(b.ch)
+  ));
+  if (!seen.length) return;
+  speak(seen[Math.floor(Math.random() * seen.length)], 'thunder', now);
+}
+
+// Whether there was a rainbow up on the LAST frame, so that the one frame it
+// arrives on can be found. See below.
+let bowWas = false;
+
+// ...and whether the ponds were bearing weight, for the same reason: the thaw
+// has to be caught as an EDGE, because what it owes is a one-off rescue rather
+// than a state. See the hand-back in the frame.
+let iceWas = false;
+
+// SOMEBODY LOSES THEIR FOOTING, which is the whole of what walking on ice costs
+// them and the only reason the ice is funny rather than merely novel.
+//
+// Rolled per second of WALKING rather than of standing, so a friend who has
+// stopped to look at you never falls over for no reason — and only for somebody
+// actually out on a pond, so the meadow stays as sure-footed as it has always
+// been.
+//
+// It is a LINE AND A PAUSE and deliberately nothing more. The obvious version
+// spins them, or slides them a little way along their bearing, and both need
+// animation this world does not have — a card cannot windmill. What it does
+// have is a bank of surprised faces and a bubble, which is how everything else
+// in this app reacts to anything, so a slip is: stop, be startled, say so.
+function slipOnIce(dtMs, now) {
+  if (!started || !pondsFrozen()) return;
+  const p = (dtMs / 1000) * CONFIG.weather.slipChance;
+  for (const b of bots) {
+    const ch = b.ch;
+    if (!ch.walking || ch.hurrying) continue;
+    // ASLEEP rather than not-visible, and the difference is the whole mechanic.
+    // `isVisible` is answering "are they over the horizon", which on a planet
+    // five units across is nearly always yes for the two you are not looking
+    // at — so gating on it made the ice slippery only where somebody happened
+    // to be watching, and measured at exactly zero slips in a hundred seconds
+    // of walking on it. What actually cannot slip is a body that is lying down.
+    //
+    // The LINE is still gated on being seen, a few lines below, which is where
+    // that rule belongs: a slip off in the distance is a friend stumbling, and a
+    // bubble nobody can see is chatter spent on nothing.
+    if (ch.asleep || now < ch.busyUntil) continue;
+    if (!CONFIG.lakes.some((l) => inLake(ch.dir, l, 0))) continue;
+    if (Math.random() > p) continue;
+    ch.walking = false;
+    ch.errand = null;
+    ch.restUntil = now + CONFIG.weather.slipMs;
+    // Silent if nobody could see it. A bubble opening on a friend the far side
+    // of the planet spends the chatter budget on something nobody watched —
+    // the same rule the meeting exchange keeps.
+    if (b.dlg.has('slip') && !b.dlg.isVisible && canChatter(ch)) speak(b, 'slip', now);
+  }
+}
+
+// ...and somebody noticing one.
+//
+// It fires ONCE, on the frame the arc crosses into being worth looking at, and
+// that is the whole difference between this and the ordinary weather chatter.
+// A rainbow line in the timeOfDay slot would come round every half minute for
+// as long as the arc was up, which would turn the rarest thing in this world
+// into background noise — the same argument that keeps `delight` out of the
+// idle bank. This is the moment somebody looks up and says so.
+//
+// Whoever can actually see it, which excludes anybody still indoors: the cast
+// come out of the rain a few seconds before the arc arrives, so somebody left
+// on a cushion is somebody who has not noticed yet, and they will have their
+// own chance when they get outside and the gathering picks them up.
+function noticeBow(now) {
+  if (!started) return;
+  const seen = bots.filter((b) => (
+    b.dlg.has('rainbow') && !b.dlg.isVisible && b.ch.isVisible
+    && canChatter(b.ch) && !globe.isInside(b.ch.dir)
+  ));
+  if (!seen.length) return;
+  speak(seen[Math.floor(Math.random() * seen.length)], 'rainbow', now);
+}
+
 // Hand the hour to a different clock. Always this rather than setPhaseOverride
 // directly, because the deadline the *previous* clock set has to be retired
 // with it: the two are read at very different rates, and a じどう check is
@@ -351,6 +470,11 @@ function arcBetween(a, b) {
 // aimed at somebody stood in the middle of a pond, and exactly right aimed at
 // somebody who has just walked up to one.
 function playerAtWater() {
+  // 「あっ、ぬれちゃうよ…!」 is about getting wet, and on ice nobody is going to.
+  // The whole bucket stands down rather than being reworded: a friend warning
+  // you off a pond you are comfortably standing on reads as them not having
+  // looked at it.
+  if (pondsFrozen()) return false;
   for (const lake of CONFIG.lakes) {
     if (inLake(playerDir, lake, CONFIG.player.shoreNotice)) return true;
   }
@@ -658,6 +782,16 @@ const HAND_BUILDERS = {
     g.rotation.z = 0.42;
     return g;
   },
+  // The room copy lies flat before the cave gives it a wall lean. Turn the
+  // broad decorated face toward the camera for both the hand and pack snapshot.
+  guitar: () => {
+    const face = buildGuitar(1.28).group;
+    face.rotation.x = Math.PI / 2;
+    const holder = new THREE.Group();
+    holder.add(face);
+    holder.rotation.z = Math.PI;
+    return holder;
+  },
 };
 const handMeshes = {};
 
@@ -700,6 +834,10 @@ const HAND_POSE = {
   housekey: {
     x: 0.52, y: -0.50, h: 0.30, w: 0.40,
     turn: -0.20, tip: 0.05, roll: Math.PI / 2,
+  },
+  guitar: {
+    x: 0.52, y: -0.50, h: 0.36, w: 0.58,
+    turn: -0.18, tip: 0.05, roll: -0.12,
   },
 };
 
@@ -757,6 +895,11 @@ const CARRY = {
   // The rubbish bags are lugged: heavy, low, and out from the body.
   trashbag: { ...GRIP, x: 0.36, y: 0.26, size: 0.62 },
   trashbag2: { ...GRIP, x: 0.36, y: 0.26, size: 0.58 },
+  // Held across the body like the reference, with the soundboard facing out.
+  guitar: {
+    ...GRIP, x: 0.30, y: 0.37, size: 0.66,
+    spin: -0.14, tilt: 0.08, roll: -0.12,
+  },
 };
 
 // The copy that rides on a BODY, which is never the copy in your hand: the two
@@ -884,7 +1027,13 @@ function putDownUnique(spot) {
   const id = inventory.heldUnique;
   if (!id) return false;
   const loose = uniqueByItem(id);
-  if (spot && CONFIG.lakes.some((l) => inLake(spot, l))) {
+  // ぽちゃん needs something to go ぽちゃん INTO. On ice the pond refuses the
+  // drop entirely and falls through to the ordinary placement below, which
+  // refuses a pond too — so nothing is set down on a frozen pond at all. That
+  // is deliberate rather than an oversight: a lantern left on the ice would be
+  // floating in open water twenty minutes later, and the thaw has no way to put
+  // it back. The snowman is kept off the ponds for exactly the same reason.
+  if (spot && !pondsFrozen() && CONFIG.lakes.some((l) => inLake(spot, l))) {
     // ぽちゃん. The pond keeps it a moment, then it finds its way back to its
     // spot at home — see uniques.pondMs. The splash is borrowed from the rod.
     fishing.splashAt(spot);
@@ -973,6 +1122,27 @@ function tickTopple(now) {
   const u = CONFIG.uniques;
   const loose = uniqueByItem(topple.id);
   if (!loose) { topple = null; return; }
+  // CAUGHT. The wobble is a telegraph, and a telegraph you can act on is one
+  // somebody WILL act on — 420ms of a thing shaking on a rim is an invitation to
+  // grab it, and grabbing it has to end the fall.
+  //
+  // Without this the script ran to completion over a piece that was already in
+  // your hand, and the landing is what did the damage rather than the fall: it
+  // writes `placed` at the spot the piece would have come to rest, which empties
+  // the hand — and syncPouch, finding a piece still marked carried that is no
+  // longer the held one, does the one thing that means: it stows it. So the
+  // inventory said the lamp was lying on the floor, the world had it stowed with
+  // its anchor hidden, and it was in neither place. Gone for the session, because
+  // nothing reconciles a placed piece back out of the pack — see tickUniques,
+  // which deliberately remembers only what is IN the pack.
+  //
+  // Asked of the WORLD rather than of the hand, and that is the whole of why it
+  // is one test: there are four ways a toppling piece can stop being on the floor
+  // — into your hand, into the pack, given to a friend, dropped in the pond — and
+  // every one of them leaves `state` something other than 'world'. A check
+  // against `heldUnique` would have covered the first and quietly kept this bug
+  // for the other three.
+  if (loose.state !== 'world') { topple = null; return; }
   const ms = now - topple.at;
 
   if (ms < u.wobbleMs) {
@@ -1570,12 +1740,21 @@ window.addEventListener('orientationchange', () => {
 // button and never reaches the stage's pointer handlers.
 const controls = document.getElementById('controls');
 const viewToggle = document.getElementById('view-toggle');
-const timeBtn = document.getElementById('time-toggle');
-const timeEl = document.getElementById('time');
+const viewCap = document.getElementById('view-cap');
+const viewGlyph = document.getElementById('view-glyph');
+// The sky chip: one reading for the hour and the weather both, and one panel
+// behind it holding what used to be two.
+const chipEl = document.getElementById('sky-chip');
+const chipBtn = document.getElementById('chip-toggle');
+const chipHour = document.getElementById('chip-hour');
+const chipHourMark = document.getElementById('chip-hour-mark');
+const chipSkyMark = document.getElementById('chip-sky-mark');
 const timeAuto = document.getElementById('time-auto');
 const timeTrack = document.getElementById('time-track');
 const timeKnob = document.getElementById('time-knob');
 const timeMarks = document.getElementById('time-marks');
+const skyAuto = document.getElementById('sky-auto');
+const skyGrid = document.getElementById('sky-grid');
 
 function onPress(el, fn) {
   el.addEventListener('click', () => {
@@ -1594,12 +1773,11 @@ function onPress(el, fn) {
 // so there is no state to remember — the button says what pressing it does.
 const pouchEl = document.getElementById('pouch');
 const pouchBtn = document.getElementById('pouch-toggle');
-const zukanEl = document.getElementById('zukan');
-const zukanBtn = document.getElementById('zukan-toggle');
 
 const sheetEl = document.getElementById('sheet');
 const sheetCard = document.getElementById('sheet-card');
-const sheetTitle = document.getElementById('sheet-title');
+const tabPack = document.getElementById('tab-pack');
+const tabZukan = document.getElementById('tab-zukan');
 const sheetBody = document.getElementById('sheet-body');
 const sheetCap = document.getElementById('sheet-cap');
 const dropBtn = document.getElementById('sheet-drop');
@@ -1636,8 +1814,11 @@ let overEl = null;
 function openSheet(mode) {
   sheetMode = mode;
   sheetEl.classList.toggle('is-open', !!mode);
-  pouchEl.classList.toggle('is-open', mode === 'pack');
-  zukanEl.classList.toggle('is-open', mode === 'zukan');
+  pouchEl.classList.toggle('is-open', !!mode);
+  // The tabs ARE the title now — see the note in index.html.
+  tabPack.setAttribute('aria-selected', mode === 'pack' ? 'true' : 'false');
+  tabZukan.setAttribute('aria-selected', mode === 'zukan' ? 'true' : 'false');
+  if (mode) sheetCard.setAttribute('aria-label', mode === 'pack' ? 'もちもの' : 'ずかん');
   // Nothing carries across an open or a close: a drag in progress and a question
   // waiting for an answer are both only meaningful against the grid they started
   // on. cancelDrag also takes the ghost off screen, which would otherwise be
@@ -1645,8 +1826,8 @@ function openSheet(mode) {
   cancelDrag();
   askN = null;
 
-  if (mode === 'pack') { sheetTitle.textContent = 'もちもの'; paintPack(); }
-  else if (mode === 'zukan') { sheetTitle.textContent = 'ずかん'; paintZukan(); }
+  if (mode === 'pack') paintPack();
+  else if (mode === 'zukan') paintZukan();
   else sheetCard.classList.remove('is-moving');
 }
 
@@ -2062,7 +2243,7 @@ function syncPouch() {
     globe.stowLoose(l);
   }
   if (pouchEl.classList.contains('is-open')) paintPack();
-  if (zukanEl.classList.contains('is-open')) paintZukan();
+  if (sheetMode === 'zukan') paintZukan();
 }
 
 inventory.onChange(syncPouch);
@@ -2078,7 +2259,10 @@ syncPouch();
 // So the pill opens the pack, always, and the verbs are the action button's.
 onPress(pouchBtn, () => openPouch(!pouchEl.classList.contains('is-open')));
 
-onPress(zukanBtn, () => openZukan(!zukanEl.classList.contains('is-open')));
+// Switching rooms rather than opening a door: the card is already up, so these
+// only ever repaint what is in it.
+onPress(tabPack, () => openSheet('pack'));
+onPress(tabZukan, () => openSheet('zukan'));
 
 // The three ways out, now that there is no timer: the cross, anywhere off the
 // card, and — for whoever is playing this at a desk — escape.
@@ -2103,29 +2287,11 @@ document.addEventListener('keydown', (e) => {
 
 // --- the drawer
 //
-// The clock and the 図鑑 fold behind one button, and そらへ and もちもの do not.
-// The split is HOW OFTEN, not what kind: the first two are things you visit and
-// the last two are things you live in, and a permanent pill for each of the four
-// was 214px of furniture standing over the corner of a drawing to serve two of
-// them well.
-//
-// It sits below the pills it hides, so opening it pushes nothing: the two you
-// live in keep their positions whether this is out or away, and the thing you
-// press is always where you left it.
-const ctlStack = document.getElementById('ctl-stack');
-const menuBtn = document.getElementById('menu-toggle');
-let menuCloseAt = 0;
-
-function openMenu(open) {
-  ctlStack.classList.toggle('is-more', open);
-  menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  menuCloseAt = open ? performance.now() + CONFIG.daylight.closeMs : 0;
-  // Shutting the drawer takes whatever it had open with it, or a panel would be
-  // left hanging in the air off a button that is no longer on screen.
-  if (!open) { openTime(false); openZukan(false); }
-}
-
-onPress(menuBtn, () => openMenu(!ctlStack.classList.contains('is-more')));
+// THE DRAWER IS GONE. It hid the clock, the sky and the 図鑑 behind three dots,
+// and its own reasoning — "the two you visit fold away" — stopped being true
+// twice over: the 図鑑 became a tab in the sheet, and the clock and the sky
+// became one chip in the other corner. After both moves there was nothing left
+// to fold, so the button that folded it went too.
 
 // --- movement pad
 // Purely a drawing: it has no pointer events of its own and appears wherever
@@ -2210,14 +2376,68 @@ const FOCUS = {
   // ...and it stays yours a little past that, so half a step back does not drop
   // what you were reaching for.
   hold: CONFIG.uniques.reach + 0.7,
-  // Half-angles, radians. NARROW TO ACQUIRE, WIDE TO KEEP. Turning toward
-  // something is deliberate and should need aim; drifting a little off what you
-  // are already holding on to is not, and should not cost you it.
-  cone: 0.61,
-  keep: 1.05,
-  // Stood on top of it, a bearing is noise: the tangent toward something under
-  // your feet swings through a half circle for millimetres of movement. Inside
-  // this, being there IS facing it.
+  // IS IT ON THE SCREEN, in NDC units past the frame's edge. NARROW TO ACQUIRE,
+  // WIDE TO KEEP — the same doctrine the cone below it used to carry, asked of
+  // the frame instead of of an angle.
+  //
+  // `cone: 0.61` and `keep: 1.05` stood here: half-angles in the ground plane,
+  // and the reason they are gone is that AN ANGLE IS NOT A FRAME. This planet is
+  // played in portrait, where the camera's 62-degree vertical field comes out as
+  // a horizontal HALF-field of 0.271 radians against an acquire cone of 0.61 —
+  // two and a third times too wide. Measured: a candidate sitting exactly on the
+  // old cone's edge four units out projected to ndcX -2.25, more than a full
+  // screen-width outside the picture. It was not a near miss; whole categories
+  // of thing were being focused that the player could not see, which is exactly
+  // the complaint. And an angle in the ground plane could never have caught the
+  // other half of it either, since it says nothing about up and down: the ground
+  // at your feet is 75 degrees below a gaze that only reaches 47.
+  //
+  // Projecting the candidate answers both at once, in the one coordinate system
+  // that IS what the player is looking at, and it follows the lens for free —
+  // rotate the phone, walk (which widens the field, see walkFov), sprint, and
+  // the test moves with the picture rather than drifting out of step with it.
+  //
+  // `edge` is generous rather than exact because a candidate is tested as a
+  // POINT and drawn as a thing with width: a character whose middle sits just
+  // past the frame still has most of a card inside it. 0.30 is about half a
+  // character at conversation distance. `edgeKeep` is a whole frame, so glancing
+  // away does not drop what you were reaching for mid-press.
+  edge: 0.30,
+  // A frame's own width was too forgiving and measured as such: a piece taken
+  // off to one side sat at ndcX -1.94 — most of two screens out — and was still
+  // held, which is the same complaint in a quieter voice. 0.45 is a glance
+  // rather than a look away.
+  edgeKeep: 0.45,
+  // DOWN IS DIFFERENT, and it is the one direction that gets its own number.
+  //
+  // Standing on a planet you are always on top of a hill, so the camera looks
+  // DOWN — and the ground near your own feet is below even that. Measured with a
+  // bear set down at the three distances 「おく」 uses: at 0.95 units it projects
+  // to ndcY -1.25, at 0.72 to -1.59, at 0.52 to -2.07. All three are off the
+  // bottom of the picture, and all three are things you are plainly dealing
+  // with: 0.95 is where 「おく」 puts something by default, and 「ひろう」 has to
+  // be offered for it the instant it lands or setting a thing down and picking it
+  // back up stops being one gesture.
+  //
+  // So the floor of the frame is forgiven where the sides are not, and the
+  // asymmetry is honest rather than convenient. Sideways-and-invisible is the
+  // complaint this whole change exists to fix — a friend two screens to the left
+  // is a thing you have no idea about. Below-and-invisible is not the same
+  // experience: it is at your feet, you put it there, and you know exactly what
+  // it is. The `reach` cap keeps this from reaching far — ground more than a unit
+  // or so out has climbed back into the picture anyway, so only what is genuinely
+  // underfoot lands down here.
+  edgeBelow: 1.35,
+  // Stood on top of it, a bearing is noise and the thing is under the frame
+  // entirely — the ground at your feet sits well below where the camera looks.
+  // So this is no longer a way IN: something you are standing on cannot be newly
+  // focused, because you genuinely cannot see it, and the world takes care not
+  // to leave anything there anyway (「おく」 places at arm's length, and
+  // nudgeLoose shoves what you tread on clear).
+  //
+  // It survives as a way to STAY focused. Walk over the bear you were already
+  // reaching for and it stays yours rather than flickering out from under the
+  // button, which is the same forgiveness `edgeKeep` gives for glancing away.
   onTop: 0.5,
   // How much better a challenger must be to take the focus off what you already
   // had, as a fraction of its score. TIES GO TO THE INCUMBENT, which is what
@@ -2234,6 +2454,25 @@ const FOCUS = {
   // button appears on the same line the world already draws around somebody.
   meet: CONFIG.social.greetArc,
   meetHold: CONFIG.social.greetArc + 1.1,
+  // HOW MUCH HARDER IT IS TO TAKE THE FOCUS OFF SOMEBODY YOU ARE TALKING TO.
+  // Replaces `beat` for a friend you have actually pressed a verb on — see
+  // `engaged` in resolveFacing.
+  //
+  // `beat` alone was geometry, and geometry has no idea a conversation is
+  // happening. Measured with Chiikawa squarely ahead at 4.0: a rival 1.6 units
+  // NEARER but 26 degrees to one side correctly lost, and the same rival at 2.0
+  // dead ahead took the focus outright. Sometimes that is right — on a planet
+  // this small somebody genuinely does walk between you — and mid-conversation
+  // it is not, because the stack is carrying 「かす」 and 「とりかえる」 and a flip
+  // between reaching and pressing hands your lamp to the wrong friend.
+  //
+  // FAVOURED RATHER THAN LOCKED, deliberately. A lock would be easier to reason
+  // about and would also insist you were still talking to somebody now hidden
+  // behind the friend standing in front of them. At 0.34 a challenger has to
+  // score about a third of the incumbent's — which over the measured case above
+  // means the 2.0-dead-ahead rival no longer wins, while somebody who has walked
+  // right up into your face still does.
+  engagedBeat: 0.34,
 };
 
 // What to call a thing on a button. The uniques bring their names from the item
@@ -2244,6 +2483,8 @@ for (const it of Object.values(ITEMS)) if (it.art) ART_NAME[it.art] = it.name;
 
 const _fTan = new THREE.Vector3();
 const _fLook = new THREE.Vector3();
+const _fPt = new THREE.Vector3();
+const _fSpan = new THREE.Vector3();
 const fixtureDir = new WeakMap();
 
 let focus = null;
@@ -2283,6 +2524,59 @@ function bearingTo(dir) {
 
 function gapTo(dir) { return rig.anchor.angleTo(dir) * CONFIG.globe.radius; }
 
+// Whether one point in the world lands inside the picture, within `m` of the
+// frame's edge in NDC.
+//
+// The point comes in the space the world group holds — a character's `root`, a
+// loose piece's `anchor` — and the planet floats on its own bob, which is what
+// `world.position` adds back. Live values rather than `matrixWorld`, and that is
+// worth a line: the world's matrices are refreshed during the render, so a
+// getWorldPosition here would answer with where things were LAST frame, and the
+// cast have already walked this one by the time the focus is decided.
+function inPicture(point, m) {
+  _fPt.copy(point).add(globe.world.position).project(globe.camera);
+  // Behind the eye. `project` happily returns a plausible-looking x and y for
+  // something at your back — it is the depth that gives it away — and without
+  // this a friend one pace behind you reads as dead centre. Measured: a rival
+  // stood directly behind came back at ndcX -0.05.
+  if (_fPt.z >= 1) return false;
+  if (Math.abs(_fPt.x) > 1 + m) return false;
+  if (_fPt.y > 1 + m) return false;
+  // Below the frame is forgiven further than off to the side — see
+  // FOCUS.edgeBelow, which is where that asymmetry is argued.
+  return _fPt.y >= -(1 + Math.max(m, FOCUS.edgeBelow));
+}
+
+// ...and whether a CANDIDATE does, which is not the same question, because a
+// candidate is a thing with height and the answer differs down its length.
+//
+// BOTH ENDS ARE TESTED, and it takes either. Only the base would refuse
+// everything near your feet: the ground a metre out is 70 degrees below
+// horizontal against a gaze that reaches 48, so a bear you had just set down at
+// arm's length is standing with its FOOT off the bottom of the frame and its
+// body plainly in it. And only the top would refuse a sasumata stood close
+// against a wall, whose head goes off the frame while the shaft fills it. Two
+// points and an `or` costs one extra projection on a list of a dozen and needs
+// no fudge factor to sit between the two failures.
+function onScreenFocus(f, m) {
+  if (f.bot) {
+    const ch = f.bot.ch;
+    if (inPicture(ch.root.position, m)) return true;
+    _fSpan.copy(ch.root.position).addScaledVector(ch.normal, ch.headTop);
+    return inPicture(_fSpan, m);
+  }
+  // A loose piece's anchor already carries whatever lift stands it on a table,
+  // and a fitting's carries the height it hangs at. Both are identity children
+  // of `world`, so their positions mean the same thing.
+  const node = f.loose ? f.loose.anchor : f.fixture.anchor;
+  if (inPicture(node.position, m)) return true;
+  // A fitting is a point — a bulb on a flex has no length worth walking — so
+  // there is no second end to try.
+  if (!f.loose) return false;
+  _fSpan.copy(node.position).addScaledVector(f.loose.dir, f.loose.top || 0);
+  return inPicture(_fSpan, m);
+}
+
 // Everything there is to look at. The loose pieces you could take up, and the
 // bulb, which is not loose and never will be but is still a thing in the room
 // that you can face and switch.
@@ -2304,6 +2598,12 @@ function eachCandidate(fn) {
 function eachFriend(fn) {
   for (const b of bots) {
     if (!b.ch.isVisible) continue;
+    // ...AND NOT THROUGH A WALL, which the projection cannot catch: somebody sat
+    // at home projects onto the front of the house perfectly well, as
+    // throughWall's own note says. It is the same rule a tap already obeys — see
+    // pickCharacter — and without it the pills offered you a conversation with
+    // whoever was on the far side of the masonry you were facing.
+    if (throughWall(b.ch)) continue;
     fn({ art: null, loose: null, fixture: null, bot: b });
   }
 }
@@ -2359,27 +2659,53 @@ function resolveFacing(s, now) {
     const dir = focusDir(s.cur);
     const gap = gapTo(dir);
     const off = bearingTo(dir);
-    if (gap <= s.hold && (off <= FOCUS.keep || gap <= FOCUS.onTop)) {
+    // Still in reach, and either still roughly in the picture or underfoot —
+    // see FOCUS.edgeKeep and FOCUS.onTop, which are the two forgivenesses.
+    if (gap <= s.hold
+      && (onScreenFocus(s.cur, FOCUS.edgeKeep) || gap <= FOCUS.onTop)) {
       keep = { ...s.cur, score: scoreOf(gap, off) };
     }
   }
 
-  // The best thing you are actually looking at. Narrow cone, arm's reach.
+  // The best thing you are actually looking at. ON THE SCREEN, and in reach.
   let best = null;
   s.each((c) => {
     const dir = focusDir(c);
     const gap = gapTo(dir);
     if (gap > s.reach) return;
-    const off = bearingTo(dir);
-    if (off > FOCUS.cone && gap > FOCUS.onTop) return;
-    const score = scoreOf(gap, off);
+    if (!onScreenFocus(c, FOCUS.edge)) return;
+    // Bearing still decides between two things you CAN see: dead centre beats
+    // out at the edge, which is what makes turning toward one of two friends
+    // pick that one. It is no longer what decides whether you can see it.
+    const score = scoreOf(gap, bearingTo(dir));
     if (!best || score < best.score) best = { ...c, score };
   });
 
   if (!keep) { settleFacing(s, best, now); return; }
   if (sameFocus(best, keep)) { s.cur = keep; return; }
   if (!best || now - s.at < FOCUS.dwellMs) { s.cur = keep; return; }
-  if (best.score > keep.score * FOCUS.beat) { s.cur = keep; return; }
+  // A FRIEND YOU ARE TALKING TO IS MUCH HARDER TO INTERRUPT than a thing you
+  // happen to be nearest — see FOCUS.engagedBeat for the measurements.
+  //
+  // `rig.focus` is the app's existing record of who you came to see: the tap
+  // sets it, the walk-up greeting sets it, and every people-verb sets it through
+  // closeIn. It is also what makes them `attentive` and stop wandering off, so
+  // "engaged" already means something to the world and this is that same word
+  // used for the same person.
+  //
+  // It is never cleared, and does not need to be. To be the incumbent at all a
+  // friend has to have survived the keep test a few lines up — still inside
+  // meetHold, still roughly in front of you — so the favour only ever applies
+  // while you are stood there facing the last person you spoke to, which is
+  // exactly when it should. Walk off and the geometry releases it for free.
+  //
+  // Props are unaffected: `keep.bot` is null for a lantern, so they go on being
+  // judged by the plain `beat` they always were.
+  const engaged = !!keep.bot && rig.focus === keep.bot.ch;
+  if (best.score > keep.score * (engaged ? FOCUS.engagedBeat : FOCUS.beat)) {
+    s.cur = keep;
+    return;
+  }
   settleFacing(s, best, now);
 }
 
@@ -3513,17 +3839,53 @@ const markEls = PHASES.map((p, i) => {
   return el;
 });
 
-// The pill always reads as the hour you are in, never as an hour a press would
-// get you — it is a clock first and a control second. じどう is marked by a dot
+// THE CHIP'S GLYPHS, drawn rather than lettered. The two halves have to sit
+// together in about 110px, and a second word ("ひる ゆき") would not fit without
+// making the chip wider than the two pills it replaced — which was the point of
+// merging them. A drawing of snow is also simply faster to read than the word.
+//
+// One cloud shape shared by everything that comes out of a cloud, so the family
+// reads as a family and only the thing falling out of it changes.
+const CLOUD = 'M7.4 15.2h9.2a3.3 3.3 0 0 0 0-6.6 5.1 5.1 0 0 0-9.8-1.3 3.05 3.05 0 0 0 .6 7.9Z';
+const MARKS = {
+  sun: '<circle cx="12" cy="12" r="4.2"/><path d="M12 3.1v2.3M12 18.6v2.3M3.1 12h2.3M18.6 12h2.3M5.7 5.7l1.6 1.6M16.7 16.7l1.6 1.6M18.3 5.7l-1.6 1.6M7.3 16.7l-1.6 1.6"/>',
+  moon: '<path d="M19.4 14.6A8.2 8.2 0 0 1 9.4 4.6a8.2 8.2 0 1 0 10 10Z"/>',
+  cloudy: `<path d="${CLOUD}"/>`,
+  drizzle: `<path d="${CLOUD}"/><path d="M10 18.2v2.2M14 18.2v2.2"/>`,
+  rain: `<path d="${CLOUD}"/><path d="M8.6 18 7.7 21M12 18l-.9 3M15.4 18l-.9 3"/>`,
+  storm: `<path d="${CLOUD}"/><path d="M13.6 17.6 10.3 21.6h2.7L12.2 24"/>`,
+  clearing: `<circle cx="16.8" cy="6.4" r="2.6"/><path d="${CLOUD}"/>`,
+  snow: `<path d="${CLOUD}"/><path d="M12 17.6v4.2M10.2 18.7l3.6 2M13.8 18.7l-3.6 2"/>`,
+  blizzard: `<path d="${CLOUD}"/><path d="M9.6 18v3.6M8 18.9l3.2 1.8M11.2 18.9 8 20.7"/><path d="M15.6 19.4v2.8"/>`,
+};
+
+function setMark(el, key) {
+  const d = MARKS[key];
+  el.innerHTML = d
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
+    : '';
+}
+
+// Said in full for whoever is listening, because what they get otherwise is two
+// pictures and one word. Both halves in one label, since it is one control.
+function labelChip() {
+  const w = activeWeather();
+  const hour = `${PHASE_LABEL[phase]}${isAuto() ? '（じどう）' : ''}`;
+  const sky = `${WEATHER_LABEL[w] || ''}${isAutoWeather() ? '（じどう）' : ''}`;
+  chipBtn.setAttribute('aria-label', `そらのようす: ${hour}、${sky}`);
+}
+
+// The chip always reads as the hour you are IN, never as an hour a press would
+// get you — a clock first and a control second. じどう is marked by a dot
 // rather than the word, so the reading stays the same length in both modes.
 function paintTime() {
   const auto = isAuto();
-  timeBtn.textContent = PHASE_LABEL[phase];
-  timeBtn.classList.toggle('is-auto', auto);
-  timeBtn.setAttribute(
-    'aria-label',
-    `じかん: ${PHASE_LABEL[phase]}${auto ? '（じどう）' : ''}`,
-  );
+  chipHour.textContent = PHASE_LABEL[phase];
+  // Sun by day, moon once the sky has one. The same test the scrubber's own knob
+  // uses, so the thing in the chip and the thing on the track never disagree.
+  setMark(chipHourMark, (phase === 'night' || phase === 'midnight') ? 'moon' : 'sun');
+  chipEl.classList.toggle('is-auto-time', auto);
+  labelChip();
   timeAuto.classList.toggle('is-on', auto);
   timeAuto.setAttribute('aria-pressed', auto ? 'true' : 'false');
 }
@@ -3551,27 +3913,35 @@ function paintScrubber() {
   timeTrack.setAttribute('aria-valuetext', PHASE_LABEL[PHASES[near]]);
 }
 
-let closeAt = 0;
-function openTime(open) {
-  timeEl.classList.toggle('is-open', open);
-  closeAt = open ? performance.now() + CONFIG.daylight.closeMs : 0;
+// NO TIMER, and the flag it left behind was doing two jobs at once.
+//
+// `closeAt` was a timestamp that also stood in for "is this open" — so the panel
+// could not stay up without the loop eventually taking it down, and every control
+// inside it had to remember to push the deadline back by hand. That is the right
+// arrangement for something you GLANCE at, which is what this was when it was a
+// clock pill. It is the wrong one for a panel you WORK in: choosing a weather,
+// dragging an hour, changing your mind. The sheet gave its own timer up for
+// exactly this reason.
+//
+// So the state is a plain boolean and the panel closes when you close it — the
+// chip again, or a press anywhere outside. Nothing to keep alive.
+let chipOpen = false;
+function openChip(open) {
+  chipOpen = open;
+  chipEl.classList.toggle('is-open', open);
+  chipBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
   // Painted here as well as in the loop, so the panel is already right in the
   // frame it appears in. Left to the loop alone it opens showing wherever the
   // day was when it last closed, and corrects itself a frame later — brief, but
   // exactly the sort of flicker that reads as something being broken.
-  if (open) paintScrubber();
+  if (open) { paintSky(); paintScrubber(); }
 }
 
-// Any interaction pushes the tidy-away back, so it never closes under a thumb
-// that is still deciding.
-function keepOpen() {
-  if (closeAt) closeAt = performance.now() + CONFIG.daylight.closeMs;
-}
-
-onPress(timeBtn, () => openTime(true));
+// One panel for both halves of the sky, so there is no "one at a time" left to
+// arrange: pressing the chip is the only way in and it brings the whole thing.
+onPress(chipBtn, () => openChip(!chipOpen));
 
 onPress(timeAuto, () => {
-  keepOpen();
   if (isAuto()) return;
   setHour(null);
   applyPhase(activePhase());
@@ -3620,7 +3990,6 @@ timeTrack.addEventListener('pointerdown', (e) => {
   downX = e.clientX;
   capture(timeTrack, e.pointerId);
   timeTrack.classList.add('is-held');
-  keepOpen();
   // Never let this reach the canvas: the track sits where a look-around swipe
   // would otherwise start.
   e.preventDefault();
@@ -3659,11 +4028,82 @@ function releaseTrack(e) {
     applyPhase(target);
   }
   paintTime();
-  keepOpen();
 }
 
 timeTrack.addEventListener('pointerup', releaseTrack);
 timeTrack.addEventListener('pointercancel', releaseTrack);
+
+// --- the sky
+//
+// WHICH SKIES THE PANEL OFFERS, in the order they are laid out. Written here
+// rather than taken from Object.keys(WEATHERS) because the ORDER is a reading
+// and the table's is an argument: the table groups the rain family together so
+// its numbers can be compared, and the panel runs dry to wet along the top row
+// and puts the two snows at the end, where the one weather that is not more or
+// less rain belongs.
+//
+// Checked against the table on the way in, so a sky listed here that the world
+// has never heard of is a loud failure at start-up rather than a button that
+// silently does nothing.
+const SKY_PICKS = [
+  'clear', 'cloudy', 'drizzle', 'rain',
+  'storm', 'clearing', 'snow', 'blizzard',
+];
+for (const key of SKY_PICKS) {
+  if (!WEATHERS[key]) throw new Error(`sky panel: no such weather '${key}'`);
+}
+
+const skyEls = SKY_PICKS.map((key) => {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'sky-pick';
+  el.textContent = WEATHER_LABEL[key];
+  el.setAttribute('aria-pressed', 'false');
+  onPress(el, () => {
+    setWeatherOverride(key);
+    paintSky();
+  });
+  skyGrid.appendChild(el);
+  return { key, el };
+});
+
+// The pill reads as the sky you are IN, never as the one a press would get you
+// — a reading first and a control second, exactly as the clock is. じどう is the
+// dot rather than the word for the same reason it is there: so the label does
+// not change width when the mode does.
+let skyLabelWas = null;
+function paintSky() {
+  const now = activeWeather();
+  const auto = isAutoWeather();
+  if (now !== skyLabelWas) {
+    skyLabelWas = now;
+    setMark(chipSkyMark, now);
+    // A CLEAR SKY SAYS NOTHING. The weather half only appears when the weather is
+    // doing something — otherwise the chip would carry a sun beside a sun, and
+    // the one state that needs no comment would be the noisiest thing up there.
+    chipEl.classList.toggle('is-plain', now === 'clear');
+  }
+  chipEl.classList.toggle('is-auto-sky', auto);
+  labelChip();
+  skyAuto.classList.toggle('is-on', auto);
+  skyAuto.setAttribute('aria-pressed', auto ? 'true' : 'false');
+  // The chosen one is filled, and NOTHING is filled while the schedule is
+  // driving — on じどう the panel is showing you what the day is doing rather
+  // than what you picked, and lighting up whichever sky happened to be out
+  // would read as a choice somebody made.
+  for (const p of skyEls) {
+    const on = !auto && p.key === now;
+    p.el.classList.toggle('is-on', on);
+    p.el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+}
+
+
+onPress(skyAuto, () => {
+  if (isAutoWeather()) return;
+  setWeatherOverride(null);
+  paintSky();
+});
 
 // Pressing anywhere else puts it away. Capture phase so it is decided before
 // the canvas starts a look or a walk, and passive so it never eats that press.
@@ -3673,16 +4113,13 @@ document.addEventListener('pointerdown', (e) => {
   // row of the 図鑑 folds the drawer holding its pill, and the drawer takes the
   // 図鑑 down with it. The sheet's own three dismissals are wired where it is.
   if (sheetMode) return;
-  if (closeAt && !timeEl.contains(e.target)) openTime(false);
-  // The drawer folds for a press outside the WHOLE stack rather than outside
-  // itself, so reaching past it for そらへ is not also an instruction to put it
-  // away — those two pills are its neighbours, not the world.
-  if (menuCloseAt && !ctlStack.contains(e.target)) openMenu(false);
+  if (chipOpen && !chipEl.contains(e.target)) openChip(false);
 }, { capture: true, passive: true });
 
 applyPhase(activePhase(), { instant: true });
 paintTime();
 paintScrubber();
+paintSky();
 globe.warmSkies();
 
 // --- start gate, which is also the gesture iOS needs before handing over tilt
@@ -3690,8 +4127,19 @@ startEl.addEventListener('click', () => {
   if (started) return;
   started = true;
   startEl.classList.add('is-gone');
-  setTimeout(() => { startEl.style.display = 'none'; }, 480);
-  controls.classList.add('is-ready');
+  // 620ms is what the going-in transition takes — see `.start.is-gone`. Taking the
+  // element out before it has finished would cut the tail off the very move this
+  // is here to play; leaving it in afterwards keeps a fullscreen layer composited
+  // over the world forever.
+  setTimeout(() => { startEl.style.display = 'none'; }, 640);
+
+  // THE HUD WAITS FOR THE DOOR TO SHUT. It used to fade up in the same frame the
+  // menu began leaving, so for a quarter of a second the pill stack and the
+  // menu's own buttons were on screen together, both half-transparent, and the
+  // two crossing over was most of what made the handover feel muddled. 260ms is
+  // the interface layer's own exit — so the controls start arriving as the last
+  // of the menu's words go, and land while the scenery is still opening out.
+  setTimeout(() => controls.classList.add('is-ready'), 260);
 
   const now = performance.now();
   lastTouchAt = now;
@@ -3786,12 +4234,13 @@ function updateCast(now) {
         const a = bots[i];
         const b = bots[j];
         if (a.ch.attentive || b.ch.attentive) continue;
-        // NOT ON THE WAY TO BED. The hold this sets is already ignored by
-        // somebody turning in, so they would not have stopped — but two friends
-        // passing at midnight striking up a conversation neither of them halts
-        // for is worse than no conversation: it is a chat held by two people
-        // walking away from each other. At this hour they have somewhere to be.
-        if (a.ch.turningIn || b.ch.turningIn) continue;
+        // NOT ON A WALK WITH A DEADLINE. The hold this sets is already ignored
+        // by somebody in a hurry, so they would not have stopped — but two
+        // friends passing at midnight striking up a conversation neither of
+        // them halts for is worse than no conversation: it is a chat held by
+        // two people walking away from each other. At that hour, and in a
+        // downpour, they have somewhere to be.
+        if (a.ch.hurrying || b.ch.hurrying) continue;
         if (arcBetween(a.ch.dir, b.ch.dir) > s.meetArc) continue;
         if (!onScreen(a.ch) && !onScreen(b.ch)) continue;
         speak(a, 'meet', now);
@@ -3870,6 +4319,88 @@ function frame(now) {
   rig.update(dt, now);
   const inside = insideHouse();
 
+  // THE WEATHER, before anything that asks about it. Two things read it this
+  // frame — the household, which decides whether anybody is running for a door,
+  // and the scene, which decides what the world is wearing — and both would be
+  // a frame behind if this ran anywhere later.
+  //
+  // It runs whether or not the visit has started, unlike the household below.
+  // The sky is not something you arrive into the middle of: `wet` fills and
+  // drains on a slow clock, and a director first ticked at the tap that
+  // dismisses the start card would begin every rainy visit with dry ground.
+  const wx = tickWeather(dt, now);
+  if (lightningStruck()) {
+    flash = 1;
+    strike(now);
+  } else if (flash > 0) {
+    // Out fast and squared, so the world drops back to the storm rather than
+    // easing down through it. A flash you can time is a lamp being switched on.
+    flash = Math.max(0, flash - dt / CONFIG.weather.boltMs);
+  }
+  globe.setWeather(wx, flash * flash * CONFIG.weather.boltLift, iceLook());
+
+  // THE THAW HANDS BACK ANYBODY IT WAS CARRYING, on the one frame the ice stops
+  // bearing weight. See `leaveWater` for why this is not optional: a walker
+  // left standing in water can never plan a step out of it, so without this the
+  // pond quietly keeps whoever was on it when it melted — an hour after the
+  // snow, with nobody watching, which is the worst possible time to find a bug.
+  const ice = pondsFrozen();
+  if (iceWas && !ice) {
+    for (const b of bots) b.ch.leaveWater();
+  }
+  iceWas = ice;
+  slipOnIce(dt, now);
+
+  // Somebody looks up. On the one frame it becomes worth looking at, and never
+  // again for that arc — see noticeBow.
+  const bowNow = rainbowOut();
+  if (bowNow && !bowWas) noticeBow(now);
+  bowWas = bowNow;
+
+  const lying = snowCover();
+  globe.updateRain(dt, {
+    anchor: rig.anchor,
+    wet: wetness(),
+    snow: lying,
+    // A FRACTION and not `inside`, which is the boolean the rest of this frame
+    // works from. Standing in the doorway is standing half in the rain, and the
+    // scene already answers that question exactly — see insideAmount.
+    inside: globe.insideAmount(rig.anchor),
+    alt: rig.alt,
+  });
+
+  // TRACKS. Everybody who is walking on the planet leaves them — you and all
+  // three of them — and the scene decides whether there is any snow to leave
+  // them in, so there is no test here.
+  //
+  // YOURS COMES FROM THE RIG AND ONLY ON FOOT. `rig.anchor` is where you are
+  // STOOD, which is what a footprint is about; the camera is somewhere else
+  // entirely once you rise, and a trail printed from the sky would be a line of
+  // prints scrawled across the world by nobody. Flying leaves nothing, which is
+  // both correct and the reason this is gated rather than clamped.
+  //
+  // Theirs comes from the character's own dir, walking or not — a body that has
+  // not moved covers no stride and so prints nothing, which is the same rule
+  // handling standing still, sitting down and being asleep without knowing that
+  // any of those exist.
+  if (rig.isFirstPerson) globe.tread('you', rig.anchor);
+  for (const b of bots) globe.tread(b.spec.key, b.ch.dir);
+
+  // COATS ON. Read off the cover rather than off the sky, which is what puts
+  // them on late and takes them off long after the last flake — see snowCover
+  // in weather.js, and setDressed in character.js for why this is a cut and not
+  // a fade.
+  //
+  // The scenery dresses off the same number, from inside the scene — see
+  // `dressAt`, which is one threshold precisely so that the cast and the bushes
+  // cannot change on different frames.
+  const wrapped = lying > CONFIG.weather.dressAt;
+  if (wrapped !== dressed) {
+    dressed = wrapped;
+    for (const b of bots) b.ch.setDressed(wrapped);
+    you.setDressed(wrapped);
+  }
+
   // Going home runs wherever you are, and has to: the walk to the door happens
   // whether or not you are watching, and somebody home when you get there is
   // home because this put them there.
@@ -3930,9 +4461,15 @@ function frame(now) {
     // something you have already flown over.
     const prop = inSolid(youDir, CONFIG.wander.wallKeep);
     if (prop) slideAround(youDir, prop, rig.anchor, CONFIG.wander.wallKeep, carry);
+    // Over water, which is what turns a walk into a crossing — the body is
+    // towed and the glide comes on however slowly you are moving. A frozen pond
+    // is not a crossing: you are standing on it. Gliding over ice you could
+    // walk on is the one thing that would give the whole trick away.
     let wet = false;
-    for (const lake of CONFIG.lakes) {
-      if (inLake(youDir, lake, overWater ? WATER_STAY : WATER_ENTER)) { wet = true; break; }
+    if (!pondsFrozen()) {
+      for (const lake of CONFIG.lakes) {
+        if (inLake(youDir, lake, overWater ? WATER_STAY : WATER_ENTER)) { wet = true; break; }
+      }
     }
     overWater = wet;
 
@@ -4017,21 +4554,12 @@ function frame(now) {
   globe.updateDaylight(dt);
 
   // Only while it is on screen — the rest of the time nothing can see it.
-  if (closeAt) {
-    paintScrubber();
-    if (!scrubbing && now > closeAt) openTime(false);
-  }
-  // The drawer folds itself away on the same forgotten-about timer, with one
-  // extra rule: while something it opened is still open, its clock is held at
-  // the top rather than running. Otherwise a minute spent dragging the scrubber
-  // would leave the drawer already overdue, and closing the panel would snap it
-  // shut in the same breath — the timer would be counting your attention as
-  // neglect.
-  if (menuCloseAt) {
-    if (timeEl.classList.contains('is-open') || zukanEl.classList.contains('is-open')) {
-      menuCloseAt = now + CONFIG.daylight.closeMs;
-    } else if (now > menuCloseAt) openMenu(false);
-  }
+  if (chipOpen) paintScrubber();
+  // The chip is a READING, so its weather half is repainted whether or not the
+  // panel is open — a front rolling in has to change the corner the same way it
+  // changes the sky. paintSky guards its own writes, so on the frames where
+  // nothing has moved this is a couple of class toggles.
+  paintSky();
 
   if (started) {
     for (const b of bots) {
@@ -4058,8 +4586,14 @@ function frame(now) {
 
     updateCast(now);
 
+    // The word AND the arrow turn over together, so the button says what
+    // pressing it does rather than where you presently are.
     const label = rig.goingUp ? 'じめんへ' : 'そらへ';
-    if (viewToggle.textContent !== label) viewToggle.textContent = label;
+    if (viewCap.textContent !== label) {
+      viewCap.textContent = label;
+      viewToggle.setAttribute('aria-label', label);
+      viewGlyph.classList.toggle('is-down', rig.goingUp);
+    }
 
     // The action buttons exist where their verbs do: on the ground. In the sky
     // there is nothing to jump off or run on, and two dead buttons beside two
@@ -4243,6 +4777,39 @@ if ('serviceWorker' in navigator && !IS_LOCAL) {
 if (IS_LOCAL) {
   window.hidamari = {
     bots, rig, globe, household, you, fishing, inventory,
+    // THE SKY, by hand. `sky('rain')` holds it there; `sky()` gives it back to
+    // the schedule. Every key in WEATHERS is fair game — see weather.js.
+    //
+    // This is the only way in to the rain at the moment, and it is deliberately
+    // a console handle rather than a control: the weather is meant to be
+    // something that happens to you, and a button for it would make it a
+    // setting. What the pill should eventually show is what the sky IS, not a
+    // list to pick from.
+    sky: (key) => setWeatherOverride(key),
+    // What it is right now, and what today's deal has in store. `forecast()`
+    // reads out the whole day at a glance, which is the only practical way to
+    // find out whether the seed you are looking at has any rain in it at all —
+    // over half of them do not.
+    weather: () => ({
+      now: activeWeather(),
+      auto: isAutoWeather(),
+      wet: Number(wetness().toFixed(3)),
+      snow: Number(snowCover().toFixed(3)),
+      bow: Number(rainbow().toFixed(3)),
+      today: forecast(),
+    }),
+    // Snow lays over a minute and a half and melts over twenty — see layMs and
+    // meltMs — which is exactly right to live in and hopeless to work on. This
+    // puts the cover wherever you want it so the coats, the white ground, the
+    // gathering and the snowmen can each be looked at without waiting out a
+    // winter for them.
+    //
+    // It sets the ground and lets the sky go on doing whatever it was doing, so
+    // `lay(1)` under a clear sky is the morning after — white everywhere,
+    // nothing falling, everybody in coats.
+    lay: (v = 1) => setSnowCover(v),
+    // Everything the sky can be, for tab completion.
+    skies: Object.keys(WEATHERS),
     // Straight in and straight out, for poking at the room without having to
     // walk there. Debug teleports, and the only ones left in the app: goIn
     // stands you mid-room facing the door, goOut on the doorstep facing it.

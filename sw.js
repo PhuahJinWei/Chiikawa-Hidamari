@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v77';
+const CACHE = 'hidamari-v111';
 
 const ASSETS = [
   './',
@@ -28,6 +28,9 @@ const ASSETS = [
   './js/cast.js',
   './js/sphere.js',
   './js/daylight.js',
+  './js/weather.js',
+  './js/falling.js',
+  './js/snowfield.js',
   './js/art.js',
   './js/assets.js',
   // The drawn art. Unlike the code, none of this is optional at runtime: the
@@ -39,6 +42,10 @@ const ASSETS = [
   // drawing could carry. See paintGlobe in art.js.
   './asset/images/bush-1.png',
   './asset/images/bush-2.png',
+  // ...and the same two with snow on them. See WORLD_SNOW in assets.js: a bush
+  // is a drawing, so its winter is a redraw rather than a tint.
+  './asset/images/bush-1-snow.png',
+  './asset/images/bush-2-snow.png',
   // `lake.png` stood here. The ponds are built — see water.js.
   './asset/images/house-day-1.png',
   './asset/images/house-night-1.png',
@@ -90,15 +97,17 @@ const ASSETS = [
   './asset/images/fish/lavender-pebblefin.png',
   './asset/images/fish/pink-ripplefin.png',
   './asset/images/fish/blushspot-loach.png',
-  // The start screen. Unlike everything above, these two are wanted *before*
-  // the wait rather than after it — nothing awaits them, so a miss is a menu
-  // with no meadow or no car on the road rather than a broken build.
+  // The start screen, and the whole of what it fetches. Unlike everything above
+  // these are wanted *before* the wait rather than after it — nothing awaits
+  // them, so a miss is a menu with no drawing behind it, or a road with no car
+  // on it, rather than a broken build.
   //
-  // The meadow ships as WebP: the source PNG next to it is 1.4MB, which on a
-  // cold connection is several seconds of blank sky on the one screen whose
-  // whole job is to have something to look at. The same drawing at quality 88
-  // is 62KB, with a median error of 1 in 255. Keep the PNG as the source, ship
-  // the WebP.
+  // The meadow ships as WebP: the source PNG beside it is 1.5MB, which on a cold
+  // connection is several seconds of flat blue on the one screen whose whole job
+  // is to have something to look at. The same drawing at quality 88 is 62KB.
+  // Keep the PNG as the source, ship the WebP — and RE-ENCODE IT when the source
+  // is redrawn, which is the one step easy to forget: the encoded file is not
+  // derived at build time, so a new PNG beside an old WebP ships the old picture.
   './asset/images/bg-menu.webp',
   // All three cars, because which one is driving is picked at random per load.
   './asset/images/loading-1.png',
@@ -146,6 +155,22 @@ const ASSETS = [
   './asset/images/characters/usagi-sleep.png',
   './asset/images/characters/momonga-idle.png',
   './asset/images/characters/momonga-fly.png',
+  // The winter wardrobe — see `snow` in cast.js, which is the list this one has
+  // to agree with. Required exactly as the sheets above are: a name in that
+  // list with no file here is a cold offline start that never finishes loading.
+  // `hachiware-sleep-snow.png` is drawn and deliberately NOT listed; nothing
+  // fetches it until the other two sleepers have one.
+  './asset/images/characters/chiikawa-idle-snow.png',
+  './asset/images/characters/chiikawa-happy-snow.png',
+  './asset/images/characters/chiikawa-delight-snow.png',
+  './asset/images/characters/hachiware-idle-snow.png',
+  './asset/images/characters/hachiware-happy-snow.png',
+  './asset/images/characters/hachiware-surprise-snow.png',
+  './asset/images/characters/usagi-idle-snow.png',
+  './asset/images/characters/usagi-happy-snow.png',
+  './asset/images/characters/usagi-surprise-snow.png',
+  './asset/images/characters/momonga-idle-snow.png',
+  './asset/images/characters/momonga-fly-snow.png',
   'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js',
 ];
 

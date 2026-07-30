@@ -17,7 +17,7 @@
 //             is written in
 //   look, lookOut   what it is squared up with, as the same pair
 //   phase     morning | noon | evening | night | midnight
-//   sleep     1 to lay the sleepers down whatever the hour says — the bench
+//   sleep     1 to lay the sleepers down whatever the hour says — the test rig
 //             for the bedding sandwich, which is the one placement in the app
 //             that cannot be judged from any hour but its own
 //   pitch     optional look pitch override, radians up from the resting one
@@ -82,7 +82,7 @@ if (globe.fish) {
 globe.setDaylight(PHASE, { instant: true });
 
 // The sleepers, laid down on demand rather than at the hour that would lay them
-// down by itself. This is the bench where the bedding sandwich gets fitted, and
+// down by itself. This is the test rig where the bedding sandwich gets fitted, and
 // fitting it at midnight in an unlit room would mean judging a placement in the
 // dark — which is exactly right for the app and useless for the workbench. So
 // `sleep=1` shows them at whatever hour is being looked at, noon included.
@@ -126,8 +126,8 @@ globe.skyRig.quaternion.identity();
 // Something in the hand, for judging the slot pose against the room behind
 // it. The weapon copies are posed here the way main.js's HAND_BUILDERS poses
 // them, and the default slot numbers below are main.js's HAND_POSE — knowing
-// duplicates, both: this is the bench where those numbers get chosen before
-// they are written down over there, and the bench showing anything other
+// duplicates, both: this is the test rig where those numbers get chosen before
+// they are written down over there, and the rig showing anything other
 // than the shipping grip by default would make every comparison a lie.
 const HOLD = q.get('hold');
 if (HOLD && BUILD[HOLD]) {
@@ -150,7 +150,7 @@ if (HOLD && BUILD[HOLD]) {
 
 logEl.textContent = `home ${HOME}  eye ${AT}/${OUT}  look ${LOOK}/${LOOK_OUT}  ${PHASE}`;
 
-// The workbench's own drawer: everything on the bench, reachable from the
+// The workbench's own drawer: every control in the rig, reachable from the
 // console, because a peephole you cannot poke numbers through is only half a
 // tool.
 window.peek = { globe, rig, home, N, t0, spotDir, tangentAt, THREE };

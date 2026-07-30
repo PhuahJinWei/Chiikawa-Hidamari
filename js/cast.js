@@ -41,6 +41,26 @@
 //
 // A 'blink' sheet is also picked up if you draw one, and without it they simply
 // do not blink.
+//
+// `snow` is the same list again for the SECOND WARDROBE — the drawings of each
+// of them wrapped up, worn while the ground is white. It names suffixes, not
+// files: an entry of 'happy' means `<key>-happy-snow.png` exists on disk, and
+// anything left out simply keeps its ordinary clothes for that expression.
+//
+// DECLARED RATHER THAN PROBED, which is the one thing about it worth arguing.
+// Asking the network whether a file is there is the obvious alternative and it
+// cannot be done here: every fetch in assets.js is awaited, and a missing file
+// is not a missing extra but a start screen that never turns into an invitation
+// (see the grass sheets, which taught that lesson once already). So the list is
+// the source of truth, exactly as `sheets` above is, and drawing a new one is
+// the same two steps — the file, and a word here.
+//
+// NOTHING SLEEPS IN SNOW GEAR. `sleep` is deliberately absent from all three
+// even though `hachiware-sleep-snow.png` has been drawn, because a sleeper is
+// drawn lying down by scene.js and one character alone in snow pyjamas would
+// read as a bug rather than as a wardrobe. Draw the other two, add 'sleep'
+// here, and teach _sleepCard to look — until then the one that exists is a file
+// nobody fetches, which costs nothing.
 
 import { FISH_SPECIES } from './config.js';
 
@@ -113,6 +133,7 @@ export const CAST = [
     scale: 0.90,
     home: { lat: 0.251, lon: -0.782 },
     sheets: ['idle', 'happy', 'delight', 'sleep'],
+    snow: ['idle', 'happy', 'delight'],
     likes: ['kusa'],
   },
 
@@ -122,6 +143,7 @@ export const CAST = [
     scale: 1.00,
     home: { lat: 0.372, lon: 0.592 },
     sheets: ['idle', 'happy', 'surprise', 'sleep'],
+    snow: ['idle', 'happy', 'surprise'],
     // Fish. ALL of them, taken off the roster rather than listed, because what
     // Hachiware likes is fish — that was already true of the three koi and
     // writing out twelve ids would turn a characteristic into an inventory. The
@@ -138,6 +160,7 @@ export const CAST = [
     scale: 0.97,
     home: { lat: -0.059, lon: 0.748 },
     sheets: ['idle', 'happy', 'surprise', 'sleep'],
+    snow: ['idle', 'happy', 'surprise'],
     likes: ['kinoko1', 'kinoko2'],
   },
 ];
@@ -165,4 +188,9 @@ export const PLAYER = {
   // in the resting sheet, walking when your spot is towed along. See
   // GLIDE_SPEED in main.js for what it takes to leave the ground.
   sheets: ['idle', 'fly'],
+  // You get wrapped up too, and both postures are drawn — which matters more
+  // for the player than for anybody else: yours is the only body that can be
+  // gliding over a white planet, and a momonga in summer clothes mid-glide over
+  // snow would be the one costume mistake permanently in shot.
+  snow: ['idle', 'fly'],
 };

@@ -103,70 +103,120 @@
   <div id="interact" class="interact"></div>
 </div>
 
+<!-- READINGS ON THE LEFT, ACTIONS ON THE RIGHT, and nothing hidden.
+
+     Five controls lived up here in one right-hand column — そらへ, もちもの, a
+     ・・・ drawer, and behind that drawer the clock, the sky and the ずかん. Three
+     things were wrong with it and only one of them was the styling:
+
+     - IT SPOKE TWO LANGUAGES. Down at the thumbs this screen is a game pad:
+       equal circles, glyphs, fixed places. Up here it was a document — word
+       pills of four different widths (そらへ 96px, もちもの 118px, the clock
+       changing width every time the hour did), stacked to a ragged edge.
+     - IT HID THE TWO THINGS WORTH SEEING. Time and weather are not commands,
+       they are the state of the world, and a game named for sunlight had them
+       folded behind an unlabelled ・・・ — unreadable at a glance AND two taps to
+       reach.
+     - IT FILED THE CAMERA UNDER MENUS. そらへ is how you move your view. It
+       belongs with the stick and the jump, not with the bag.
+
+     So: the sky is one chip in the top-left, which is a READING you can press;
+     the two verbs are equal circles in the top-right; the ずかん is a tab inside
+     the sheet it always shared a card with; and the drawer is gone, because
+     after the merge there was nothing left to fold. Five controls, two of them
+     invisible, became three that are all one tap. -->
 <div id="controls" class="controls">
-  <!-- SORTED BY HOW OFTEN YOU REACH FOR IT, not by what kind of thing it is.
-       Four word-pills stood here permanently, about 100×214px of furniture over
-       the corner of a drawing, and the four were not remotely equal: そらへ is
-       how you get about and もちもの is how you hand somebody a flower, both
-       many times a session, while the clock and the 図鑑 are things you visit.
-       The two you live in stay out; the two you visit fold behind the button
-       below them.
 
-       Collapsing ALL of it behind one menu was the other option and it is worse:
-       it would put a friend's present three taps away to save a pill. -->
-  <div id="ctl-stack" class="ctl-stack">
-    <button id="view-toggle" class="ctl ctl-pill" type="button">そらへ</button>
-
-    <!-- The pouch. The pill is only the way in now: what it opens is the sheet
-         at the bottom of this file, in the middle of the screen. -->
-    <div id="pouch" class="pouch">
-      <button id="pouch-toggle" class="ctl ctl-pill" type="button">もちもの</button>
-    </div>
-
-    <!-- The rest, and the only round control up here. Round because it is not a
-         verb and not a reading — the two shapes this screen already uses — and
-         a circle of dots is the one glyph that means "there is more" without
-         having to say what. It sits at the BOTTOM of the stack so that what it
-         opens appears below it: nothing above ever moves, and the two pills you
-         actually live in hold their positions whether this is open or shut. -->
-    <button id="menu-toggle" class="ctl ctl-more" type="button" aria-expanded="false">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="5.5" cy="12" r="1.7"/>
-        <circle cx="12" cy="12" r="1.7"/>
-        <circle cx="18.5" cy="12" r="1.7"/>
-      </svg>
-      <span class="sr-only">そのほか</span>
+  <!-- THE SKY, both halves of it, as one reading.
+       The hour and the weather were two pills asking the same question, and the
+       answer is one sentence: it is noon and it is snowing. So they are one chip
+       with one panel behind it — which is also better than two panels, because
+       the two interact. Snow at noon and snow at midnight are different skies,
+       and choosing them in the same place is how you find that out.
+       The glyphs and the word are written by paintChip in main.js. -->
+  <div id="sky-chip" class="chip-wrap">
+    <button id="chip-toggle" class="chip" type="button">
+      <span id="chip-hour-mark" class="chip-mark" aria-hidden="true"></span>
+      <span id="chip-hour" class="chip-word">ひる</span>
+      <span class="chip-rule" aria-hidden="true"></span>
+      <span id="chip-sky-mark" class="chip-mark" aria-hidden="true"></span>
     </button>
 
-    <!-- The clock, and the day it opens into. The pill stays in flow so the
-         stack keeps its size; the panel is absolute and grows out of the pill's
-         own top-right corner, so opening it moves nothing else. Its label is
-         the hour you are in, which was worth a permanent seat only until you
-         notice the sky says the same thing louder. -->
-    <div id="time" class="time">
-      <button id="time-toggle" class="ctl ctl-pill ctl-time" type="button">ひる</button>
-
-      <div id="time-panel" class="time-panel">
+    <div id="chip-panel" class="chip-panel">
+      <!-- THE DAY IS AN AXIS and the sky is not, which is why one is a scrubber
+           and the other a grid. Morning runs to noon runs to evening and halfway
+           between two of them is a real place to be. Rain is not "more" than
+           cloud on any line you could slide along, and snow is off in a
+           direction of its own — so those are laid out as a set, which is what
+           they are. -->
+      <div class="chip-sec">
+        <p class="chip-head">じかん</p>
         <button id="time-auto" class="time-auto" type="button">じどう</button>
-        <div class="time-scrub">
-          <div id="time-track" class="time-track" role="slider"
-               aria-label="じかん" aria-valuemin="0" aria-valuemax="3" aria-valuenow="0">
-            <div id="time-knob" class="time-knob"></div>
-          </div>
-          <!-- Filled from PHASES so the labels can never drift from the day. -->
-          <div id="time-marks" class="time-marks"></div>
-        </div>
       </div>
+      <div class="time-scrub">
+        <div id="time-track" class="time-track" role="slider"
+             aria-label="じかん" aria-valuemin="0" aria-valuemax="4" aria-valuenow="0">
+          <div id="time-knob" class="time-knob"></div>
+        </div>
+        <!-- Filled from PHASES so the labels can never drift from the day. -->
+        <div id="time-marks" class="time-marks"></div>
+      </div>
+
+      <div class="chip-sec chip-sec-2">
+        <p class="chip-head">そら</p>
+        <button id="sky-auto" class="time-auto" type="button">じどう</button>
+      </div>
+      <!-- Filled from the weather table itself, so the panel can never offer a
+           sky the world does not have. -->
+      <div id="sky-grid" class="sky-grid"></div>
+    </div>
+  </div>
+
+  <!-- THE TWO VERBS. Equal circles with the word underneath rather than pills
+       with the word inside: a fixed 52px disc aligns with the one above it
+       forever, whatever the label says or what language it is in, which is the
+       whole of what was ragged before. The caption stays because this app talks
+       — every other control here is a word, and a bare glyph would be the only
+       thing on screen asking to be guessed at. -->
+  <div id="ctl-stack" class="ctl-stack">
+    <div id="pouch" class="pouch">
+      <button id="pouch-toggle" class="ctl-icon" type="button">
+        <!-- A BACKPACK, and it was a tote — a trapezoid with a wide handle arched
+             over the top, which is the shape every shop icon on a phone uses. It
+             read as "store", not as "your things".
+
+             Three strokes carry the difference. The body is upright and rounded
+             rather than tapering, because a tote flares and a pack does not. The
+             handle is a SMALL grab loop on top instead of a wide carrying arc —
+             that one change does most of the work, since the wide arc is the part
+             that says shopping. And the front pocket is open at the base so it
+             sits ON the pack rather than being a box drawn inside it. A flap line
+             across the lid was tried too and dropped: at 24px three horizontal
+             bands start reading as a stack of lines rather than as a bag. -->
+        <span class="ctl-disc">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.9 20.4v-8.8a4.4 4.4 0 0 1 4.4-4.4h5.4a4.4 4.4 0 0 1 4.4 4.4v8.8a1.4 1.4 0 0 1-1.4 1.4H6.3a1.4 1.4 0 0 1-1.4-1.4Z"/>
+            <path d="M9.9 7.3V6.1a2.1 2.1 0 0 1 4.2 0v1.2"/>
+            <path d="M8.7 21.8v-5.1a1 1 0 0 1 1-1h4.6a1 1 0 0 1 1 1v5.1"/>
+          </svg>
+        </span>
+        <span class="ctl-cap">かばん</span>
+      </button>
     </div>
 
-    <!-- The collection, out of the pack and into a room of its own. It shared
-         the pack's panel while both were small, and stopped making sense the
-         moment the pack became slots: one is what you are carrying now, the
-         other is what you have ever caught, and they are not the same question
-         asked twice. -->
-    <div id="zukan" class="pouch">
-      <button id="zukan-toggle" class="ctl ctl-pill" type="button">ずかん</button>
-    </div>
+    <!-- The glyph turns over with the verb, so it says what pressing it DOES
+         rather than where you happen to be — the rule the action pills already
+         follow. See the swap in frame(). -->
+    <button id="view-toggle" class="ctl-icon" type="button">
+      <span class="ctl-disc">
+        <svg id="view-glyph" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3.6 16.2c3.4-2.6 5.7-3.9 8.4-3.9s5 1.3 8.4 3.9"/>
+          <path d="M12 10.6V3.4"/>
+          <path d="m8.6 6.4 3.4-3 3.4 3"/>
+        </svg>
+      </span>
+      <span id="view-cap" class="ctl-cap">そらへ</span>
+    </button>
   </div>
 </div>
 
@@ -188,9 +238,26 @@
 <div id="sheet" class="sheet">
   <div id="sheet-scrim" class="sheet-scrim"></div>
 
+  <!-- Named by whichever tab is selected, since the title it used to point at is
+       gone and the tabs are what say which room this is. -->
   <div id="sheet-card" class="sheet-card" role="dialog" aria-modal="true"
-       aria-labelledby="sheet-title">
-    <p id="sheet-title" class="sheet-title"></p>
+       aria-label="もちもの">
+    <!-- TWO ROOMS, ONE DOOR. The ずかん had a pill of its own in the corner, and
+         it opened this same card — a second entrance to a building you were
+         already standing in. As tabs the relationship is the true one: what you
+         are carrying and what you have ever caught are two views of your own
+         collection, and getting between them costs one tap instead of closing
+         the card, finding another pill, and opening it again.
+
+         The title went with the pill. A tab bar already says which room you are
+         in, and saying it twice was the sort of thing you only notice is noise
+         once it is gone. -->
+    <div class="sheet-tabs" role="tablist">
+      <button id="tab-pack" class="sheet-tab" type="button" role="tab"
+              aria-selected="true">もちもの</button>
+      <button id="tab-zukan" class="sheet-tab" type="button" role="tab"
+              aria-selected="false">ずかん</button>
+    </div>
 
     <button id="sheet-close" class="sheet-close" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -230,21 +297,24 @@
   </div>
 </div>
 
-<!-- The front door. A whole screen rather than a card, because it is the first
-     thing anybody sees, it is on for as long as the art takes to decode, and it
-     is the only place the three gestures are ever explained.
+<!-- THE FRONT DOOR. A whole screen, on for as long as the art takes to decode.
 
-     The meadow behind it is bg-menu.webp, hung from the stylesheet. Nothing on
-     this screen may come out of `IMG`, because this screen is what covers the
-     wait for exactly that — but a file the browser fetches for itself, outside
-     loadArt()'s batch, is free to arrive whenever it arrives. Same arrangement
-     as the car on the road below.
+     The drawing behind it is bg-menu.png — a redrawn one, square where the old
+     one was portrait, and the change of shape is the whole reason the layout
+     below is what it is. Measured off it, as a fraction of its height: dead flat
+     sky to 0.33, soft cloud to 0.55, mountains 0.57 to 0.62, and the meadow with
+     the three of them lying in it from 0.70 down.
 
-     The layout is blocked around where that drawing is busy: the title sits in
-     the empty sky, the middle third is left alone because that is where the
-     hills, the tree and the little house are, the road crosses the open meadow,
-     and the button drops into the one clean corridor between the three of them
-     at the bottom. Move anything vertically and check it against the art. -->
+     THE CAST MOVED TO THE MIDDLE. In the old drawing they stood apart at the two
+     bottom corners and left a clean corridor between them, which is where the
+     button used to go. In this one they are together in the centre of the
+     meadow, so the whole bottom third is theirs and nothing may be put over it.
+     Everything therefore lives ABOVE the mountains — see the padding on the
+     panel, which is measured in `vw` for the reason given there.
+
+     Nothing here may come out of `IMG`; see the note on loadArt. Both files this
+     screen uses — the drawing and the car — are fetched by the browser on its
+     own account, outside the batch loadArt() awaits. -->
 <div id="start" class="start">
 
   <div class="start-sheet">
@@ -258,10 +328,15 @@
     </header>
 
     <div class="start-foot">
-      <!-- How far in we are, as a drive rather than a bar. The car faces left,
-           so it starts at the right-hand kerb and the road it has already
-           covered is the stretch behind it. One number drives all of it: --p,
-           written by main.js as each file lands. -->
+      <!-- How far in we are, as a drive. The car faces left, so it sets off from
+           the right-hand kerb and the road behind it is the stretch already
+           covered. One number drives all of it — `--p`, written by main.js as
+           each file lands.
+
+           It is a bar in the sky rather than a path on the ground, and that is
+           the one thing this drawing costs: the ground is where the three of them
+           are. Given the choice between a road across their faces and a road
+           reading honestly as a piece of interface, it reads as interface. -->
       <div id="loadbar" class="loadbar">
         <div class="loadbar-road"></div>
         <div class="loadbar-done"></div>

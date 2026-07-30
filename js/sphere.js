@@ -394,6 +394,32 @@ export function inBuilding(dir, margin = 0) {
   return null;
 }
 
+// WHICH BUILDING'S ROOF IS OVER A SPOT, or null — the whole disc a building
+// stands on, walls and room and doorway together.
+//
+// This is NOT `inBuilding` with a different name, and the difference is the one
+// that matters most in this file. `inBuilding` answers "may a body be here",
+// so it is about the WALL BAND: it lets the room through as free floor and the
+// doorway through as a way in, because both are places you are allowed to
+// stand. Anything asking "is the sky visible from here" wants the opposite —
+// the room and the doorway are exactly the places the answer is no.
+//
+// Two bugs came from asking the wrong one, both by reading `inBuilding` as
+// "inside the building". The snow shell cut its hole with it and so cut a RING
+// where the walls are, keeping every face over the floor: snow rose through
+// the boards of both houses and buried the furniture from below. The rain's
+// splashes carried a comment promising they would never land under a roof and
+// no test to go with it, so it rained rings on the carpet.
+//
+// The margin widens the disc, and unlike `inBuilding` there is no inner edge to
+// leave alone — there is nothing inside a roof that is not under it.
+export function underRoof(dir, margin = 0) {
+  for (const b of BUILDINGS) {
+    if (dir.dot(b.dir) > Math.cos(b.r + margin)) return b;
+  }
+  return null;
+}
+
 // The way out of a building's wall at a point, in the tangent plane there.
 // False when there is no sensible direction to give — standing exactly on the
 // centre.
@@ -498,7 +524,7 @@ export function inScenery(dir, margin = 0) {
 // is worth keeping rather than quietly deleting. The old rule was that the water
 // and the house were the only solid things on the planet: a lake because you
 // would be IN it, the house because it is a building with an inside, and
-// everything else — trees, stumps, the bench, the cast — walkable straight
+// everything else — trees, stumps, the cast — walkable straight
 // through, on the grounds that this is a place you wander and the things in it
 // are what you came for rather than obstacles to be routed around.
 //
@@ -553,7 +579,7 @@ export function solids() { return SOLIDS; }
 // `feet` is how high off the ground the thing asking is, and it is what turns a
 // wall into a step. A prop with a `top` stops blocking once your feet are level
 // with it — you are ON it rather than walking at it — and a prop without one is
-// a wall at any height, which is every tree and the bench. The default is the
+// a wall at any height, which is every tree. The default is the
 // floor, so anything that does not think about height (the cast, a tap looking
 // for somewhere to put you) gets the old answer: everything blocks.
 export function inSolid(dir, margin = 0, feet = 0) {

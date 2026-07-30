@@ -2093,6 +2093,814 @@ export function buildTrashBagAlt(h) {
   return buildTrashBagModel(h, PAL.trashBagAlt, 1);
 }
 
+// ------------------------------------------------------- the yellow cabinet
+//
+// A compact two-drawer cupboard from Chiikawa's room: rounded in every view,
+// standing on four short feet, with the little upward bites in the bottom edge
+// of each drawer doing the work of handles. The body and each drawer are single
+// extruded silhouettes rather than stacks of boxes, so those bites remain real
+// negative space when the cabinet is viewed from either side.
+
+function cabinetRoundedRect(w, h, r, notchW = 0, notchH = 0) {
+  const s = new THREE.Shape();
+  const x0 = -w / 2;
+  const x1 = w / 2;
+  const rr = Math.min(r, w / 2, h / 2);
+  s.moveTo(x0 + rr, 0);
+
+  if (notchW > 0 && notchH > 0) {
+    const n = Math.min(notchW / 2, w * 0.22);
+    const nr = Math.min(r * 0.36, notchH * 0.38, n * 0.32);
+    s.lineTo(-n - nr, 0);
+    s.quadraticCurveTo(-n, 0, -n, nr);
+    s.lineTo(-n, notchH - nr);
+    s.quadraticCurveTo(-n, notchH, -n + nr, notchH);
+    s.lineTo(n - nr, notchH);
+    s.quadraticCurveTo(n, notchH, n, notchH - nr);
+    s.lineTo(n, nr);
+    s.quadraticCurveTo(n, 0, n + nr, 0);
+  }
+
+  s.lineTo(x1 - rr, 0);
+  s.quadraticCurveTo(x1, 0, x1, rr);
+  s.lineTo(x1, h - rr);
+  s.quadraticCurveTo(x1, h, x1 - rr, h);
+  s.lineTo(x0 + rr, h);
+  s.quadraticCurveTo(x0, h, x0, h - rr);
+  s.lineTo(x0, rr);
+  s.quadraticCurveTo(x0, 0, x0 + rr, 0);
+  s.closePath();
+  return s;
+}
+
+function cabinetExtrude(shape, depth, bevel) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    steps: 1,
+    curveSegments: 5,
+    bevelEnabled: true,
+    bevelSegments: 3,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+  });
+  geo.translate(0, 0, -depth / 2);
+  return geo;
+}
+
+export function buildYellowCabinet(h) {
+  const g = new THREE.Group();
+  const body = fillMat(PAL.yellowCabinet);
+  const side = fillMat(PAL.yellowCabinetSide);
+  const drawer = fillMat(PAL.yellowCabinetDrawer);
+  const recess = fillMat(PAL.yellowCabinetRecess);
+
+  const W = h * 1.04;
+  const D = h * 0.86;
+  const FOOT = h * 0.12;
+  const bodyH = h - FOOT;
+  const corner = h * 0.105;
+  const bodyBevel = h * 0.026;
+
+  // ExtrudeGeometry assigns its broad front/back faces material 0 and the
+  // wrapped side wall material 1. That small tone step is the cabinet's light:
+  // the room uses unlit materials, so without it a yellow box seen at an angle
+  // would still be one flat yellow shape.
+  part(g, (pad) => {
+    const geo = cabinetExtrude(
+      cabinetRoundedRect(W + pad * 2, bodyH + pad * 2, corner + pad),
+      D + pad * 2,
+      bodyBevel,
+    );
+    geo.translate(0, -pad, 0);
+    return geo;
+  }, [body, side], (m) => { m.position.y = FOOT; });
+
+  // Four stubby tapered feet, inset just enough that the carcass overhangs
+  // them in every view. A four-sided cylinder, turned by an eighth-turn, gives
+  // the softly squared footprint from the reference without building seams.
+  const footTop = h * 0.090;
+  const footBottom = h * 0.072;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      part(g, (pad) => new THREE.CylinderGeometry(
+        footTop + pad, footBottom + pad, FOOT + pad * 2, 4),
+      side, (m) => {
+        m.position.set(sx * W * 0.37, FOOT / 2, sz * D * 0.35);
+        m.rotation.y = Math.PI / 4;
+      }, INK * 0.78);
+    }
+  }
+
+  const panelW = W * 0.82;
+  const panelH = bodyH * 0.36;
+  const panelDepth = h * 0.026;
+  const panelBevel = h * 0.010;
+  const notchW = panelW * 0.24;
+  const notchH = panelH * 0.17;
+  const panelZ = D / 2 + bodyBevel * 0.35 + panelDepth / 2;
+
+  // Lower, then upper. The gap and the exposed carcass around them are both
+  // wider than the ink line, so the fronts read as two drawers rather than a
+  // decoration printed on the body.
+  for (const bottom of [FOOT + bodyH * 0.075, FOOT + bodyH * 0.535]) {
+    part(g, (pad) => {
+      const geo = cabinetExtrude(
+        cabinetRoundedRect(
+          panelW + pad * 2,
+          panelH + pad * 2,
+          h * 0.055 + pad,
+          Math.max(h * 0.08, notchW - pad * 2),
+          Math.max(h * 0.025, notchH - pad),
+        ),
+        panelDepth + pad * 2,
+        panelBevel,
+      );
+      geo.translate(0, -pad, 0);
+      return geo;
+    }, [drawer, side], (m) => {
+      m.position.set(0, bottom, panelZ);
+    }, INK * 0.72);
+
+    // The coloured back of the hand-hold. Its surrounding dark edge comes
+    // from the drawer's concave ink shell, so this patch needs no second shell.
+    const grip = new THREE.Mesh(
+      new THREE.BoxGeometry(notchW * 0.78, notchH * 0.46, h * 0.010),
+      recess,
+    );
+    grip.position.set(0, bottom + notchH * 0.56,
+      panelZ + panelDepth / 2 + h * 0.006);
+    g.add(grip);
+  }
+
+  return {
+    group: g,
+    fills: [body, side, drawer, recess],
+    top: h,
+    rx: W / 2 + bodyBevel,
+    rz: D / 2 + bodyBevel,
+  };
+}
+
+// --------------------------------------------------------- the kitchen unit
+//
+// A single small enamel unit: blank white carcass, rounded worktop, two burners
+// and a sink with its own high hook of a faucet. Like the yellow cabinet above,
+// the broad parts are extruded rounded silhouettes. The worktop turns that same
+// construction on its back so the corners are rounded in PLAN as the reference
+// draws them, rather than only on the front face.
+
+function kitchenTopPart(group, w, d, thick, radius, y, mat,
+  x = 0, z = 0, turn = 0, weight = INK) {
+  return part(group, (pad) => {
+    const ww = w + pad * 2;
+    const dd = d + pad * 2;
+    const geo = cabinetExtrude(
+      cabinetRoundedRect(ww, dd, radius + pad),
+      thick + pad * 2,
+      Math.min(thick * 0.22, radius * 0.18),
+    );
+    // cabinetRoundedRect starts at y=0. Centre that plan before laying it down;
+    // after the quarter-turn its old y is the room's z and its extrusion is y.
+    geo.translate(0, -dd / 2, 0);
+    geo.rotateX(Math.PI / 2);
+    return geo;
+  }, mat, (m) => {
+    m.position.set(x, y, z);
+    m.rotation.y = turn;
+  }, weight);
+}
+
+export function buildKitchenUnit(h) {
+  const g = new THREE.Group();
+  const top = fillMat(PAL.kitchenTop);
+  const body = fillMat(PAL.kitchenBody);
+  const side = fillMat(PAL.kitchenSide);
+  const basin = fillMat(PAL.kitchenBasin);
+  const detail = fillMat(PAL.kitchenDetail);
+
+  const W = h * 2.10;
+  const D = h * 0.84;
+  const PLINTH = h * 0.055;
+  const TOP = h * 0.13;
+  const bodyH = h - PLINTH - TOP * 0.58;
+  const corner = h * 0.085;
+
+  // The plain carcass. Its top is deliberately buried inside the worktop; a
+  // white hairline between two white pieces would read as a crack in the unit.
+  part(g, (pad) => {
+    const geo = cabinetExtrude(
+      cabinetRoundedRect(W * 0.97 + pad * 2, bodyH + pad * 2, corner + pad),
+      D * 0.94 + pad * 2,
+      h * 0.018,
+    );
+    geo.translate(0, -pad, 0);
+    return geo;
+  }, [body, side], (m) => { m.position.y = PLINTH; });
+
+  // A thin recessed toe strip keeps the cabinet from reading as a white block
+  // dropped directly on the floor.
+  kitchenTopPart(g, W * 0.94, D * 0.90, PLINTH * 0.58, corner * 0.72,
+    PLINTH * 0.29, side, 0, 0, 0, INK * 0.72);
+
+  // The overhanging worktop, rounded in plan and thick enough for its lower lip
+  // to remain visible from Chiikawa's eye level.
+  kitchenTopPart(g, W, D, TOP, h * 0.10, h - TOP / 2, top);
+
+  const topY = h + h * 0.004;
+
+  // Two burners on the left. The four little radial rests are separate rounded
+  // tabs, matching the flower-like trivets in the modelling sheet.
+  for (const bx of [-W * 0.34, -W * 0.10]) {
+    part(g, (pad) => new THREE.CylinderGeometry(
+      h * 0.090 + pad, h * 0.090 + pad, h * 0.018 + pad * 2, 20),
+    detail, (m) => {
+      m.position.set(bx, topY + h * 0.010, 0);
+    }, INK * 0.48);
+
+    for (let i = 0; i < 4; i++) {
+      const a = Math.PI / 4 + i * Math.PI / 2;
+      const r = h * 0.120;
+      kitchenTopPart(
+        g,
+        h * 0.125,
+        h * 0.050,
+        h * 0.016,
+        h * 0.020,
+        topY + h * 0.010,
+        detail,
+        bx + Math.cos(a) * r,
+        Math.sin(a) * r,
+        -a,
+        INK * 0.42,
+      );
+    }
+  }
+
+  // A pale inset basin on the right. It sits only a hair above the worktop;
+  // the dark hull around that hair is what the eye reads as the recessed rim.
+  const sinkX = W * 0.275;
+  const sinkW = W * 0.36;
+  const sinkD = D * 0.54;
+  kitchenTopPart(g, sinkW, sinkD, h * 0.014, h * 0.075,
+    topY + h * 0.004, basin, sinkX, D * 0.015, 0, INK * 0.52);
+
+  // The high J-shaped faucet grows from the back edge of the sink and bends
+  // FORWARD over its bowl. Its silhouette is slimmer from a straight-on view,
+  // but the direction is functional and unambiguous: water now falls into the
+  // basin instead of beside it. A single tube keeps the elbow seamless.
+  const fx = sinkX + sinkW * 0.17;
+  const fz = -D * 0.31;
+  const faucetPoints = [
+    new THREE.Vector3(fx, h + h * 0.015, fz),
+    new THREE.Vector3(fx, h + h * 0.29, fz),
+    new THREE.Vector3(fx, h + h * 0.43, fz + h * 0.010),
+    new THREE.Vector3(fx, h + h * 0.49, fz + h * 0.085),
+    new THREE.Vector3(fx, h + h * 0.46, fz + h * 0.185),
+    new THREE.Vector3(fx, h + h * 0.36, fz + h * 0.205),
+  ];
+  const faucetCurve = new THREE.CatmullRomCurve3(faucetPoints);
+  part(g, (pad) => new THREE.TubeGeometry(
+    faucetCurve, 34, h * 0.034 + pad, 9, false),
+  top, null, INK * 0.62);
+
+  // A broad collar at the root anchors the thin pipe to the countertop.
+  part(g, (pad) => new THREE.CylinderGeometry(
+    h * 0.060 + pad, h * 0.068 + pad, h * 0.030 + pad * 2, 16),
+  top, (m) => {
+    m.position.set(fx, h + h * 0.015, fz);
+  }, INK * 0.55);
+
+  return {
+    group: g,
+    fills: [top, body, side, basin, detail],
+    top: h * 1.49,
+    rx: W / 2 + INK,
+    rz: D / 2 + INK,
+  };
+}
+
+// --------------------------------------------------------------- the fridge
+//
+// A small two-door refrigerator: shorter freezer above, larger cold cabinet
+// below, both proud of a rounded carcass with their handles gathered around the
+// centre seam. Its proportions come from the seven-view sheet rather than a
+// real appliance; broad corners and short handles keep it toy-like beside the
+// equally compact kitchen unit.
+
+function fridgeDoorShape(w, h, topRadius, bottomRadius) {
+  const s = new THREE.Shape();
+  const x0 = -w / 2;
+  const x1 = w / 2;
+  const tr = Math.min(topRadius, w / 2, h / 2);
+  const br = Math.min(bottomRadius, w / 2, h / 2);
+  s.moveTo(x0 + br, 0);
+  s.lineTo(x1 - br, 0);
+  s.quadraticCurveTo(x1, 0, x1, br);
+  s.lineTo(x1, h - tr);
+  s.quadraticCurveTo(x1, h, x1 - tr, h);
+  s.lineTo(x0 + tr, h);
+  s.quadraticCurveTo(x0, h, x0, h - tr);
+  s.lineTo(x0, br);
+  s.quadraticCurveTo(x0, 0, x0 + br, 0);
+  s.closePath();
+  return s;
+}
+
+export function buildFridge(h) {
+  const g = new THREE.Group();
+  const body = fillMat(PAL.fridgeBody);
+  const side = fillMat(PAL.fridgeSide);
+  const door = fillMat(PAL.fridgeDoor);
+  const handle = fillMat(PAL.fridgeHandle);
+
+  const W = h * 0.64;
+  const D = h * 0.58;
+  const BASE = h * 0.040;
+  const bodyH = h - BASE;
+  const bodyR = h * 0.070;
+  const bodyBevel = h * 0.020;
+
+  // One rounded carcass supplies the back and side views. As with the kitchen
+  // unit, its broad faces and wrapped wall use neighbouring whites so its depth
+  // survives the room's unlit material language.
+  part(g, (pad) => {
+    const geo = cabinetExtrude(
+      cabinetRoundedRect(W + pad * 2, bodyH + pad * 2, bodyR + pad),
+      D + pad * 2,
+      bodyBevel,
+    );
+    geo.translate(0, -pad, 0);
+    return geo;
+  }, [body, side], (m) => { m.position.y = BASE; });
+
+  // A thin recessed base trim, visible from every view in the reference.
+  kitchenTopPart(
+    g,
+    W * 0.94,
+    D * 0.92,
+    BASE * 0.62,
+    bodyR * 0.52,
+    BASE * 0.31,
+    side,
+    0,
+    0,
+    0,
+    INK * 0.68,
+  );
+
+  // The doors nearly ARE the front rather than panels set into it. Their outer
+  // corners follow the round carcass, while the four corners touching the
+  // centre seam are much flatter so the join reads as one straight division.
+  const panelW = W * 0.965;
+  const lowerBottom = BASE + h * 0.010;
+  // Leave enough REAL space for both ink shells at the middle. The earlier
+  // five-thousandths gap cleared the white faces but not their outlines, so the
+  // two doors visibly occupied the same strip.
+  const lowerH = h * 0.470;
+  const upperBottom = h * 0.555;
+  const upperH = h * 0.405;
+  const panelDepth = h * 0.030;
+  const outerR = h * 0.070;
+  const seamR = h * 0.020;
+  const panelZ = D / 2 + bodyBevel * 0.30 + panelDepth / 2;
+
+  const panel = (bottom, ph, topR, bottomR) => part(g, (pad) => {
+    const geo = cabinetExtrude(
+      fridgeDoorShape(
+        panelW + pad * 2,
+        ph + pad * 2,
+        topR + pad,
+        bottomR + pad,
+      ),
+      panelDepth + pad * 2,
+      h * 0.010,
+    );
+    geo.translate(0, -pad, 0);
+    return geo;
+  }, [door, side], (m) => {
+    m.position.set(0, bottom, panelZ);
+  }, INK * 0.72);
+  panel(lowerBottom, lowerH, seamR, outerR);
+  panel(upperBottom, upperH, outerR, seamR);
+
+  // Two small vertical pulls on the left, one immediately to either side of
+  // the door seam. They are rounded plaques rather than bars so their pale
+  // centres remain visible inside the fridge's heavy furniture line.
+  const handleW = h * 0.062;
+  const handleH = h * 0.125;
+  const handleDepth = h * 0.020;
+  const handleZ = panelZ + panelDepth / 2 + handleDepth / 2 + h * 0.003;
+  const handleX = -panelW * 0.385;
+  for (const cy of [
+    upperBottom + upperH * 0.18,
+    lowerBottom + lowerH * 0.82,
+  ]) {
+    part(g, (pad) => {
+      const geo = cabinetExtrude(
+        cabinetRoundedRect(
+          handleW + pad * 2,
+          handleH + pad * 2,
+          handleW * 0.38 + pad,
+        ),
+        handleDepth + pad * 2,
+        h * 0.005,
+      );
+      geo.translate(0, -handleH / 2 - pad, 0);
+      return geo;
+    }, handle, (m) => {
+      m.position.set(handleX, cy, handleZ);
+    }, INK * 0.52);
+  }
+
+  return {
+    group: g,
+    fills: [body, side, door, handle],
+    top: h,
+    rx: W / 2 + bodyBevel,
+    rz: D / 2 + bodyBevel,
+  };
+}
+
+// ------------------------------------------------------ pudding in a coupe
+//
+// An outdoor-scale pudding served in a stemmed dessert cup. It is revolved
+// geometry rather than stacked cylinders: the cup needs a shallow bowl with a
+// visible inner lip, and the custard needs the gentle flare and rounded edge
+// that distinguish a soft pudding from a yellow tin.
+
+function puddingLathe(points, segments = 48) {
+  const geo = new THREE.LatheGeometry(
+    points.map(([r, y]) => new THREE.Vector2(r, y)),
+    segments,
+  );
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function puddingBowlGeo(h, pad = 0) {
+  const inner = Math.min(pad * 0.72, h * 0.012);
+  return puddingLathe([
+    [h * 0.090 + pad, h * 0.290 - pad],
+    [h * 0.235 + pad, h * 0.320 - pad],
+    [h * 0.445 + pad, h * 0.410],
+    [h * 0.550 + pad, h * 0.500 + pad],
+    [h * 0.555 + pad, h * 0.555 + pad],
+    [h * 0.505 - inner, h * 0.555 - inner],
+    [h * 0.455 - inner, h * 0.505],
+    [h * 0.285 - inner, h * 0.425],
+    [h * 0.115 - inner, h * 0.340],
+    [h * 0.090 + pad, h * 0.290 - pad],
+  ]);
+}
+
+function puddingBodyGeo(h, pad = 0) {
+  const geo = puddingLathe([
+    [0, h * 0.455 - pad],
+    [h * 0.380 + pad, h * 0.455 - pad],
+    [h * 0.420 + pad, h * 0.485],
+    [h * 0.412 + pad, h * 0.575],
+    [h * 0.399 + pad, h * 0.720],
+    [h * 0.387 + pad, h * 0.855],
+    [h * 0.385 + pad, h * 0.875],
+    [h * 0.350 + pad, h * 0.935 + pad],
+    [0, h * 0.935 + pad],
+  ]);
+
+  // A seamless custard gradient, stored on the body itself so the colour
+  // changes do not create dark outline seams between separate yellow bands.
+  const position = geo.getAttribute('position');
+  const colours = new Float32Array(position.count * 3);
+  const stops = [
+    [0.455, new THREE.Color(PAL.puddingCustardLow)],
+    [0.575, new THREE.Color(PAL.puddingCustard)],
+    [0.720, new THREE.Color(PAL.puddingCustardLight)],
+    [0.855, new THREE.Color(PAL.puddingCustard)],
+    [0.935, new THREE.Color(PAL.puddingCustardShadow)],
+  ];
+  const colour = new THREE.Color();
+  for (let i = 0; i < position.count; i += 1) {
+    const y = position.getY(i) / h;
+    let upper = 1;
+    while (upper < stops.length - 1 && y > stops[upper][0]) upper += 1;
+    const lower = Math.max(0, upper - 1);
+    const span = Math.max(stops[upper][0] - stops[lower][0], 0.0001);
+    const t = THREE.MathUtils.clamp((y - stops[lower][0]) / span, 0, 1);
+    colour.lerpColors(stops[lower][1], stops[upper][1], t);
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geo;
+}
+
+function puddingCaramelGeo(h, pad = 0) {
+  return puddingLathe([
+    [0, h * 0.905 - pad],
+    [h * 0.345 + pad, h * 0.905 - pad],
+    [h * 0.375 + pad, h * 0.930],
+    [h * 0.365 + pad, h * 0.985 + pad],
+    [h * 0.335 + pad, h + pad],
+    [0, h + pad],
+  ]);
+}
+
+export function buildPuddingCup(h) {
+  const g = new THREE.Group();
+  const cup = fillMat(PAL.puddingCup);
+  // White lets the geometry's vertex colours remain true; the regular hourly
+  // room/world tint can still multiply this material in the usual way.
+  const custard = fillMat('#FFFFFF');
+  custard.vertexColors = true;
+  const caramel = fillMat(PAL.puddingCaramel);
+
+  // Low oval foot and a slender stem, both deliberately tucked under the bowl
+  // so the silhouette reads as one dessert cup rather than three stacked toys.
+  part(g, (pad) => new THREE.CylinderGeometry(
+    h * 0.315 + pad,
+    h * 0.315 + pad,
+    h * 0.045 + pad * 2,
+    40,
+  ), cup, (m) => { m.position.y = h * 0.025; });
+  part(g, (pad) => new THREE.CylinderGeometry(
+    h * 0.067 + pad,
+    h * 0.052 + pad,
+    h * 0.260 + pad * 2,
+    24,
+  ), cup, (m) => { m.position.y = h * 0.170; });
+
+  part(g, (pad) => puddingBowlGeo(h, pad), cup);
+  part(g, (pad) => puddingBodyGeo(h, pad), custard);
+  part(g, (pad) => puddingCaramelGeo(h, pad), caramel);
+
+  return {
+    group: g,
+    fills: [cup, custard, caramel],
+    top: h,
+    rx: h * 0.555 + INK,
+    rz: h * 0.555 + INK,
+  };
+}
+
+// --------------------------------------------------- Hachiware's little guitar
+//
+// A compact three-string acoustic guitar. Its detailed face is authored in XY,
+// then the complete instrument is laid into XZ like the other floor props so
+// the room may either leave it flat or tip it naturally against a wall. The
+// body is one genuinely thick extruded silhouette; a separate honey-coloured
+// face leaves the darker side wood visible around its edge when viewed obliquely.
+function guitarBodyShape(s, pad = 0) {
+  const cx = -0.300 * s;
+  const cy = 0.240 * s;
+  const k = 1 + pad / Math.max(s * 0.250, 0.001);
+  const x = (n) => cx + (n * s - cx) * k;
+  const y = (n) => cy + (n * s - cy) * k;
+  const shape = new THREE.Shape();
+
+  // The reference is intentionally asymmetric: the lower/main bout on the
+  // left is broad and full, while the upper bout meeting the neck is visibly
+  // smaller, but only modestly so. The earlier revision exaggerated that
+  // difference and made the instrument look pear-shaped.
+  shape.moveTo(x(0.020), y(0.340));
+  shape.bezierCurveTo(x(-0.005), y(0.395), x(-0.080), y(0.440), x(-0.160), y(0.420));
+  shape.bezierCurveTo(x(-0.235), y(0.400), x(-0.250), y(0.350), x(-0.300), y(0.350));
+  shape.bezierCurveTo(x(-0.350), y(0.350), x(-0.370), y(0.465), x(-0.470), y(0.465));
+  shape.bezierCurveTo(x(-0.565), y(0.465), x(-0.600), y(0.360), x(-0.600), y(0.240));
+  shape.bezierCurveTo(x(-0.600), y(0.120), x(-0.565), y(0.015), x(-0.470), y(0.015));
+  shape.bezierCurveTo(x(-0.370), y(0.015), x(-0.350), y(0.130), x(-0.300), y(0.130));
+  shape.bezierCurveTo(x(-0.250), y(0.130), x(-0.235), y(0.080), x(-0.160), y(0.060));
+  shape.bezierCurveTo(x(-0.080), y(0.040), x(-0.005), y(0.085), x(0.020), y(0.140));
+  shape.lineTo(x(0.020), y(0.340));
+  shape.closePath();
+  return shape;
+}
+
+function guitarHeadShape(s, pad = 0) {
+  const cx = 0.480 * s;
+  const cy = 0.240 * s;
+  const k = 1 + pad / Math.max(s * 0.075, 0.001);
+  const x = (n) => cx + (n * s - cx) * k;
+  const y = (n) => cy + (n * s - cy) * k;
+  const shape = new THREE.Shape();
+
+  shape.moveTo(x(0.385), y(0.292));
+  shape.quadraticCurveTo(x(0.405), y(0.310), x(0.430), y(0.316));
+  shape.lineTo(x(0.535), y(0.325));
+  shape.quadraticCurveTo(x(0.565), y(0.325), x(0.570), y(0.295));
+  shape.lineTo(x(0.570), y(0.185));
+  shape.quadraticCurveTo(x(0.565), y(0.155), x(0.535), y(0.155));
+  shape.lineTo(x(0.430), y(0.164));
+  shape.quadraticCurveTo(x(0.405), y(0.170), x(0.385), y(0.188));
+  shape.closePath();
+  return shape;
+}
+
+function guitarExtrude(shape, depth, bevel, back = 0) {
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    steps: 1,
+    bevelEnabled: true,
+    bevelSegments: 2,
+    bevelSize: bevel,
+    bevelThickness: bevel,
+    curveSegments: 12,
+  });
+  geo.translate(0, 0, back);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function guitarRoundedRect(cx, cy, w, h, r) {
+  const shape = new THREE.Shape();
+  const l = cx - w / 2;
+  const rr = cx + w / 2;
+  const b = cy - h / 2;
+  const t = cy + h / 2;
+  shape.moveTo(l + r, b);
+  shape.lineTo(rr - r, b);
+  shape.quadraticCurveTo(rr, b, rr, b + r);
+  shape.lineTo(rr, t - r);
+  shape.quadraticCurveTo(rr, t, rr - r, t);
+  shape.lineTo(l + r, t);
+  shape.quadraticCurveTo(l, t, l, t - r);
+  shape.lineTo(l, b + r);
+  shape.quadraticCurveTo(l, b, l + r, b);
+  shape.closePath();
+  return shape;
+}
+
+export function buildGuitar(h) {
+  const g = new THREE.Group();
+  const topWood = fillMat(PAL.guitarTop);
+  const neckWood = fillMat(PAL.guitarNeck);
+  const sideWood = fillMat(PAL.guitarSide);
+  const darkWood = fillMat(PAL.guitarDark);
+
+  // `h` is the guitar's complete end-to-end size. `s` is the modelling unit
+  // used by the silhouette above, whose authored span is 1.19 units.
+  const s = h / 1.19;
+  const depth = h * 0.065;
+  const bevel = h * 0.010;
+  const cy = s * 0.240;
+  const front = depth + bevel + h * 0.003;
+
+  // Darker side/back wood under a honey-coloured soundboard. The body uses a
+  // solid recessed ink rim rather than an inverted hull: its broad curved face
+  // is shallow enough that a back-face outline can peek out as detached slivers
+  // at oblique angles. Here the larger dark body ends just behind the real one,
+  // leaving one continuous border without ever crossing its front surface.
+  const bodyOutline = new THREE.Mesh(
+    guitarExtrude(
+      guitarBodyShape(s, INK),
+      depth + INK * 0.40,
+      bevel + INK * 0.15,
+      -INK * 0.80,
+    ),
+    darkWood,
+  );
+  const bodyShell = new THREE.Mesh(
+    guitarExtrude(guitarBodyShape(s), depth, bevel),
+    sideWood,
+  );
+  g.add(bodyOutline, bodyShell);
+  const soundboard = new THREE.Mesh(
+    new THREE.ShapeGeometry(guitarBodyShape(s, -INK_SMALL * 0.42), 12),
+    topWood,
+  );
+  soundboard.position.z = front;
+  g.add(soundboard);
+
+  // A real neck and headstock rather than one flat extension of the body.
+  const neckStart = -0.010 * s;
+  const neckEnd = 0.420 * s;
+  const neckLength = neckEnd - neckStart;
+  part(
+    g,
+    (pad) => new THREE.BoxGeometry(
+      neckLength + pad * 2,
+      s * 0.082 + pad * 2,
+      depth * 0.62 + pad * 1.2,
+    ),
+    neckWood,
+    (m) => {
+      m.position.set(
+        (neckStart + neckEnd) / 2,
+        cy,
+        front - depth * 0.31,
+      );
+    },
+    INK_SMALL,
+  );
+  part(
+    g,
+    (pad) => guitarExtrude(
+      guitarHeadShape(s, pad),
+      depth * 0.72 + pad,
+      bevel * 0.72 + pad * 0.20,
+      front - depth * 0.72 - pad * 0.50,
+    ),
+    neckWood,
+    null,
+    INK_SMALL,
+  );
+
+  // Sound hole and bridge sit slightly proud of the soundboard so neither can
+  // z-fight with the light top face.
+  const hole = new THREE.Mesh(
+    new THREE.CircleGeometry(s * 0.077, 32),
+    darkWood,
+  );
+  hole.position.set(-0.205 * s, cy, front + h * 0.004);
+  g.add(hole);
+
+  const bridge = new THREE.Mesh(
+    new THREE.ShapeGeometry(guitarRoundedRect(
+      -0.455 * s,
+      cy,
+      s * 0.025,
+      s * 0.120,
+      s * 0.012,
+    ), 8),
+    darkWood,
+  );
+  bridge.position.z = front + h * 0.007;
+  g.add(bridge);
+
+  // Three short dark string marks cross only the soundboard. As in the
+  // reference, they begin after the bridge and stop before the neck rather
+  // than physically connecting to either end.
+  const stringYs = [-0.043, 0, 0.043];
+  for (const off of stringYs) {
+    const stringY = cy + off * s;
+    const curve = new THREE.LineCurve3(
+      new THREE.Vector3(-0.420 * s, stringY, front + h * 0.012),
+      new THREE.Vector3(-0.025 * s, stringY, front + h * 0.012),
+    );
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 16, h * 0.0040, 6, false),
+      darkWood,
+    ));
+  }
+
+  // Two headstock marks and three tuning pegs on each edge. The two mirrored
+  // rows keep the headstock balanced from both the front and back views.
+  for (const off of [-0.042, 0.042]) {
+    const slot = new THREE.LineCurve3(
+      new THREE.Vector3(0.470 * s, cy + off * s, front + h * 0.014),
+      new THREE.Vector3(0.525 * s, cy + off * s, front + h * 0.014),
+    );
+    g.add(new THREE.Mesh(
+      new THREE.TubeGeometry(slot, 8, h * 0.0065, 7, false),
+      darkWood,
+    ));
+  }
+  for (const side of [-1, 1]) {
+    for (const x of [0.435, 0.485, 0.535]) {
+      const peg = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 10, 8),
+        darkWood,
+      );
+      peg.scale.set(h * 0.011, h * 0.021, h * 0.011);
+      peg.position.set(x * s, cy + side * s * 0.105, front - depth * 0.10);
+      g.add(peg);
+    }
+  }
+
+  // The model above was easiest to draw facing +Z in XY. Centre its body across
+  // the floor, turn that face upward, and reverse its length so the head is the
+  // -X end raised by the room's standard positive leaning pose.
+  const laidFlat = new THREE.Group();
+  g.position.y = -cy;
+  laidFlat.add(g);
+  laidFlat.rotation.x = -Math.PI / 2;
+
+  // Keep this second turn on its own holder. Combining X and Y in one Euler
+  // makes their application order easy to reverse accidentally, which points
+  // the plain back into the room after the outer wall-lean is applied.
+  const oriented = new THREE.Group();
+  oriented.add(laidFlat);
+  oriented.rotation.y = Math.PI;
+  oriented.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(oriented);
+  oriented.position.y -= box.min.y;
+
+  // Keep the authored lay-flat rotations on an inner holder. The returned
+  // group deliberately starts at zero rotation because the room applies its
+  // wall-lean to `group.rotation.z`; composing that pose onto the same Euler
+  // that performed the lay-flat turn can leave the guitar flat on the floor.
+  const floorGroup = new THREE.Group();
+  floorGroup.add(oriented);
+  floorGroup.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(floorGroup);
+  return {
+    group: floorGroup,
+    fills: [topWood, neckWood, sideWood, darkWood],
+    top: box.max.y,
+    rx: Math.max(box.max.x, -box.min.x),
+    rz: Math.max(box.max.z, -box.min.z),
+  };
+}
+
 // ---------------------------------------------------------- the nightstand
 //
 // A bedside cabinet: four feet, a carcass, a top slab that overhangs it, two
@@ -3252,6 +4060,11 @@ export const BUILD = {
   shelf: buildShelf,
   lantern: buildLantern,
   bulb: buildBulb,
+  yellowcabinet: buildYellowCabinet,
+  kitchenunit: buildKitchenUnit,
+  fridge: buildFridge,
+  puddingcup: buildPuddingCup,
+  guitar: buildGuitar,
   nightstand: buildNightstand,
   trashbag: buildTrashBag,
   trashbag2: buildTrashBagAlt,

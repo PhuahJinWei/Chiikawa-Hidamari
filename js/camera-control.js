@@ -49,6 +49,10 @@ import {
   inBuilding, buildingNormal, keepOutside, inScenery, buildings,
   inSolid, solidNormal, keepOffSolids, groundUnder,
 } from './sphere.js';
+// One place decides whether a pond will carry somebody — see pondsFrozen. The
+// rig asks it about your feet; character.js asks the same function about
+// theirs, which is what stops you and a friend disagreeing about the same pond.
+import { pondsFrozen } from './weather.js';
 
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -112,7 +116,17 @@ const SIGHT_SAMPLES = 4;
 const _bearing = new THREE.Vector3();
 const _sight = new THREE.Vector3();
 
+// Whether a spot is WATER — which a frozen pond is not.
+//
+// The three readers below are the whole of what the rig asks about ponds while
+// you are on your feet: may I step here, where does a tap resolve to, and am I
+// somehow standing in one. All three take the same answer, so the gate sits on
+// this one function and the two beside it rather than at each use.
+//
+// `inLake` underneath is untouched, and everything that PLACES a permanent
+// thing goes on refusing the pond whether or not it is frozen. See pondsFrozen.
 function isWet(dir, margin) {
+  if (pondsFrozen()) return false;
   for (const lake of CONFIG.lakes) if (inLake(dir, lake, margin)) return true;
   return false;
 }
@@ -188,6 +202,8 @@ function roofOver(dir) {
 }
 
 function keepDry(spot) {
+  // Nothing to keep dry on a frozen pond: a tap out on the ice means the ice.
+  if (pondsFrozen()) return spot;
   for (const lake of CONFIG.lakes) {
     if (!inLake(spot, lake, CONFIG.player.shoreKeep)) continue;
     dirFromLatLon(lake.lat, lake.lon, _lakeC);
@@ -685,7 +701,7 @@ export class PlanetCamera {
       }
     }
 
-    // A trunk, a stump or the bench. Identical in shape to the wall above, and
+    // A trunk or a stump. Identical in shape to the wall above, and
     // deliberately a separate branch rather than a shared one: the two lists
     // answer different questions and a prop has no doorway, no inside and no
     // second face to decide between, so the only thing it would share is six
@@ -747,7 +763,13 @@ export class PlanetCamera {
     // that slipped through. Walk straight out. Without this the block is a trap
     // rather than a wall: every direction lands wet, so nothing is ever allowed
     // and there is no way back to dry ground.
+    //
+    // ...and on ice this rescue is the trap. Standing in the middle of a frozen
+    // pond is exactly where somebody may be, and left ungated this would shove
+    // them at the shore every frame they stood there — a rescue from a place
+    // that no longer needs rescuing from.
     for (const lake of CONFIG.lakes) {
+      if (pondsFrozen()) break;
       if (!inLake(A, lake, CONFIG.player.shoreKeep)) continue;
       if (lakeNormal(A, lake, _toward)) this._tryStep(A, step, _toward, true);
       return;

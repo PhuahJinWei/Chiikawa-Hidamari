@@ -3,8 +3,8 @@
 //
 // Two kinds of thing live here now. The characters, the ground, the scenery
 // and the house are drawn art: assets.js loads the files and the paint* function
-// only frames them. Everything still waiting to be drawn — the bench,
-// the sky, and the stamps light and shadow are made from — is painted in code as
+// only frames them. Everything still waiting to be drawn — the sky, and the
+// stamps light and shadow are made from — is painted in code as
 // before. Replacing one of those is a local change: load an image and hand back
 // paintSheet(img) instead, and nothing downstream notices.
 
@@ -1853,6 +1853,514 @@ export function paintFocusMark() {
   return c;
 }
 
+// ---------------------------------------------------------------------- rain
+//
+// ONE DROP, as the sprite every falling point is cut from.
+//
+// It is a STREAK and not a dot, and the lean is drawn INTO it rather than
+// applied to it. Point sprites face the screen and cannot be turned, so a
+// vertical drawing is rain falling straight down whatever the wind is doing —
+// and the fix that suggests itself, rotating the sprite in a shader, buys a
+// custom material for a lean nobody measures. Instead the drawing leans by
+// RAIN_LEAN and falling.js gives the MOTION the same lean, so what falls and what
+// is drawn agree wherever the camera is roughly level, which is where it lives.
+//
+// Pale rather than blue, which is the thing to keep if this is ever redrawn.
+// What you see when you look at rain is not water, it is the light on it — a
+// bright scratch against whatever is behind. Painted the pond's blue, a drop
+// vanishes into the sky it fell out of and reappears over the grass as lint.
+//
+// Soft at the top and solid at the bottom: a drop is a smear of where it has
+// just been with the water at the end of it, and that asymmetry is most of what
+// says "falling" in a still frame.
+export const RAIN_LEAN = 0.20;
+
+export function paintRainDrop() {
+  const S = 64;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+
+  const lean = RAIN_LEAN * S * 0.5;
+  const x0 = S / 2 + lean;
+  const x1 = S / 2 - lean;
+
+  const grad = g.createLinearGradient(x0, S * 0.06, x1, S * 0.94);
+  grad.addColorStop(0.00, 'rgba(242,248,255,0)');
+  grad.addColorStop(0.45, 'rgba(242,248,255,0.55)');
+  grad.addColorStop(0.88, 'rgba(242,248,255,0.95)');
+  grad.addColorStop(1.00, 'rgba(242,248,255,0)');
+
+  g.strokeStyle = grad;
+  g.lineCap = 'round';
+  g.lineWidth = S * 0.085;
+  g.beginPath();
+  g.moveTo(x0, S * 0.06);
+  g.lineTo(x1, S * 0.94);
+  g.stroke();
+
+  return c;
+}
+
+// WHERE ONE LANDS is `paintRipple` further up this file, and it is already
+// exactly right: two rings, the inner one fainter, drawn for the splash a
+// fishing float makes. A second painter was written here and deleted, which is
+// worth a line rather than nothing — the two drawings came out the same because
+// they are the same mark. A drop hitting a puddle and a float hitting a pond
+// make one shape, and having two of it would mean tuning it twice.
+//
+// A PUDDLE in the same drawn language as the rest of the world: one flat pale
+// blue shape, an irregular warm-brown pen line and a few economical water
+// marks. The old painter built a realistic wet halo from overlapping radial
+// gradients, then faded four more gradients together for the water. On this
+// otherwise flat anime field that read as an airbrushed stain.
+//
+// The edge is inked now for the same reason the pond's is: this world owns one
+// visible pen, and a patch of water with no pen belongs to another picture.
+// What keeps a puddle from becoming a tiny pond is scale and detail — no shore,
+// no depth gradient, just a shallow flat face and three quiet ripples.
+//
+// `seed` picks which puddle this is. Called a handful of times at build so the
+// hollows on the planet are not all the same hollow.
+export function paintPuddle(seed = 1) {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const rnd = makeRandom(seed * 7919 + 13);
+  const mid = S / 2;
+
+  // A smooth irregular ellipse. Frequencies two, three and five keep it from
+  // becoming either a perfect oval or a many-pointed splat; the seeded phases
+  // give the three shared textures recognisably different outlines.
+  const rx = S * (0.365 + rnd() * 0.020);
+  const ry = S * (0.285 + rnd() * 0.018);
+  const phase2 = rnd() * TAU;
+  const phase3 = rnd() * TAU;
+  const phase5 = rnd() * TAU;
+  const points = [];
+  const count = 28;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * TAU;
+    const wobble = 1
+      + Math.sin(a * 2 + phase2) * 0.070
+      + Math.sin(a * 3 + phase3) * 0.045
+      + Math.sin(a * 5 + phase5) * 0.024;
+    points.push({
+      x: mid + Math.cos(a) * rx * wobble,
+      y: mid + Math.sin(a) * ry * wobble,
+    });
+  }
+
+  // Quadratic midpoints round off the sampled outline while preserving its
+  // hand-wandered silhouette.
+  const puddlePath = () => {
+    const first = points[0];
+    const next = points[1];
+    g.beginPath();
+    g.moveTo((first.x + next.x) / 2, (first.y + next.y) / 2);
+    for (let i = 1; i <= count; i++) {
+      const p = points[i % count];
+      const q = points[(i + 1) % count];
+      g.quadraticCurveTo(p.x, p.y, (p.x + q.x) / 2, (p.y + q.y) / 2);
+    }
+    g.closePath();
+  };
+
+  puddlePath();
+  g.fillStyle = PAL.puddleFace;
+  g.fill();
+  g.strokeStyle = PAL.waterInk;
+  g.lineWidth = S * 0.022;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.stroke();
+
+  // A broad, flat sky catch rather than a gradient. It is clipped to the water
+  // and kept faint enough that the puddle still reads as one colour.
+  g.save();
+  puddlePath();
+  g.clip();
+  g.globalAlpha = 0.16;
+  g.fillStyle = PAL.waterGlint;
+  g.beginPath();
+  g.ellipse(
+    mid - S * 0.10, mid - S * 0.09,
+    S * 0.18, S * 0.075, -0.12, 0, TAU,
+  );
+  g.fill();
+  g.restore();
+
+  // Short bowed strokes are the anime shorthand for a still water surface.
+  const ripple = (x, y, len, bend, alpha) => {
+    g.globalAlpha = alpha;
+    g.beginPath();
+    g.moveTo(x - len / 2, y);
+    g.quadraticCurveTo(x, y + bend, x + len / 2, y);
+    g.stroke();
+  };
+  g.strokeStyle = PAL.waterInk;
+  g.lineWidth = S * 0.012;
+  ripple(mid - S * 0.18, mid + S * 0.03, S * 0.18, S * 0.018, 0.52);
+  ripple(mid + S * 0.19, mid - S * 0.04, S * 0.14, -S * 0.015, 0.46);
+  ripple(mid + S * 0.04, mid + S * 0.14, S * 0.22, S * 0.016, 0.40);
+
+  // Two bright pen flicks where the overcast sky catches the shallow water.
+  g.strokeStyle = PAL.waterGlint;
+  g.lineWidth = S * 0.014;
+  ripple(mid - S * 0.10, mid - S * 0.12, S * 0.13, -S * 0.010, 0.82);
+  ripple(mid + S * 0.04, mid - S * 0.10, S * 0.055, -S * 0.006, 0.68);
+  g.globalAlpha = 1;
+
+  return c;
+}
+
+// ----------------------------------------------------------------------- ice
+//
+// THE CRACKS IN A FROZEN POND, painted onto the same tiling sheet the wave
+// lines use — see the nami layer in water.js.
+//
+// Riding that layer rather than bringing geometry of its own is most of why
+// freezing costs nothing: the pond already has a surface-lines pass with a
+// repeating texture and an offset, so a frozen pond is that pass with its drift
+// stopped and a different drawing in it. Waves become cracks, and no mesh is
+// built, sorted or lit that was not there in summer.
+//
+// FEW, LONG, AND FAINT. The instinct is to draw a shattered windscreen and it
+// is wrong twice: heavy cracks read as a pond somebody has broken rather than
+// one that has frozen, and a dense web at this tile size turns into grey noise
+// the moment it repeats. What reads as ice is a handful of long lines meeting
+// at shallow angles with a lot of clear surface between them.
+//
+// Seamless, because the sheet tiles: every line that leaves an edge is drawn
+// again entering the opposite one.
+export function paintIceCracks() {
+  const S = 512;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const rand = makeRandom(8123);
+
+  g.strokeStyle = PAL.iceCrack;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+
+  // One crack: a nearly straight run across the tile with a few kinks in it.
+  // Drawn three times over — once in place and once each side — so a line that
+  // runs off an edge arrives back on the other.
+  const crack = (x0, y0, ang, len, width, alpha) => {
+    const pts = [];
+    let x = x0;
+    let y = y0;
+    let a = ang;
+    const steps = 5;
+    pts.push([x, y]);
+    for (let i = 0; i < steps; i++) {
+      a += (rand() - 0.5) * 0.5;
+      x += Math.cos(a) * (len / steps);
+      y += Math.sin(a) * (len / steps);
+      pts.push([x, y]);
+    }
+    g.globalAlpha = alpha;
+    g.lineWidth = width;
+    for (const dx of [-S, 0, S]) {
+      for (const dy of [-S, 0, S]) {
+        g.beginPath();
+        g.moveTo(pts[0][0] + dx, pts[0][1] + dy);
+        for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0] + dx, pts[i][1] + dy);
+        g.stroke();
+      }
+    }
+    return pts;
+  };
+
+  // The long ones first, then a few short spurs hanging off wherever they
+  // happened to end — which is what a crack does. Nothing is placed against
+  // anything else; they simply cross, and crossing is what makes it read.
+  for (let i = 0; i < 5; i++) {
+    const pts = crack(
+      rand() * S, rand() * S,
+      rand() * Math.PI * 2,
+      S * (0.5 + rand() * 0.5),
+      S * 0.005,
+      0.30,
+    );
+    const spurs = 1 + Math.floor(rand() * 2);
+    for (let k = 0; k < spurs; k++) {
+      const from = pts[1 + Math.floor(rand() * (pts.length - 1))];
+      crack(from[0], from[1], rand() * Math.PI * 2, S * (0.10 + rand() * 0.14), S * 0.0035, 0.22);
+    }
+  }
+
+  g.globalAlpha = 1;
+  return c;
+}
+
+// ------------------------------------------------------------------- rainbow
+//
+// THE BAND OF COLOUR, painted flat and then bent round the sky by scene.js —
+// see buildRainbow, which is where the arc actually becomes an arc.
+//
+// The canvas is the band UNROLLED: across it (v) runs from the outside of the
+// arc to the inside, and along it (u) runs from one foot to the other. That
+// separation is the whole reason this is a 2D texture rather than a gradient,
+// because the two axes are doing completely different jobs:
+//
+//   ACROSS is the spectrum, and it has to fade at BOTH edges. A rainbow has no
+//   outline — it has a middle where the colour is and two sides where it stops
+//   being colour and starts being sky. Give it a hard edge and it reads as a
+//   painted stripe, which is the failure mode this drawing exists to avoid.
+//
+//   ALONG is where it stops. A real arc thins and gives out toward its feet
+//   rather than being cut off, and it is the one part of a rainbow everybody
+//   has seen and nobody can describe. Baked here, the geometry never has to
+//   know: scene.js draws the whole span and this decides how much of it shows.
+export function paintRainbow() {
+  const W = 512;
+  const H = 96;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+
+  // The spectrum, outer to inner, with a stop either side at zero alpha so the
+  // colour melts into the sky rather than meeting it.
+  const bands = PAL.rainbow;
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(255,255,255,0)');
+  bands.forEach((hex, i) => {
+    // Inside the fades, not across the whole height: the first and last bands
+    // need room to arrive at full strength or the red and the violet are never
+    // seen at their own colour.
+    //
+    // The margin was a seventh at first and the arc came out a pale green-blue
+    // wash with a pink edge — six bands, of which two were being spent getting
+    // to and from nothing. A tenth leaves every band a share of the width and
+    // still keeps a soft edge on both sides, which is the thing that must not
+    // be traded away: a rainbow with an outline is a sticker.
+    const t = 0.10 + (i / (bands.length - 1)) * 0.80;
+    grad.addColorStop(t, hex);
+  });
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+
+  // ...and the ends taken off. `destination-in` keeps what is already painted
+  // and multiplies its alpha by what is painted now, which is exactly "fade
+  // this out toward both ends" and cannot disturb the colours.
+  const fade = g.createLinearGradient(0, 0, W, 0);
+  fade.addColorStop(0.00, 'rgba(0,0,0,0)');
+  fade.addColorStop(0.22, 'rgba(0,0,0,0.55)');
+  fade.addColorStop(0.50, 'rgba(0,0,0,1)');
+  fade.addColorStop(0.78, 'rgba(0,0,0,0.55)');
+  fade.addColorStop(1.00, 'rgba(0,0,0,0)');
+  g.globalCompositeOperation = 'destination-in';
+  g.fillStyle = fade;
+  g.fillRect(0, 0, W, H);
+
+  return c;
+}
+
+// ---------------------------------------------------------------------- snow
+//
+// ONE FLAKE, and the whole of the difference between snow and rain is in this
+// drawing rather than in any of the numbers around it.
+//
+// A raindrop is a STREAK — a smear of where it has just been, because it is too
+// fast to see. A flake is a THING: slow enough to follow all the way down, so
+// it gets a shape and an edge instead of a motion blur. Draw it as a small
+// streak and you get very slow rain, which is the one wrong answer that looks
+// almost right.
+//
+// Round and soft rather than a six-armed crystal, and that is the reference's
+// call rather than a shortcut. At the size these ever appear on screen a
+// crystal is four grey pixels and a suggestion; what the anime draws is a soft
+// dot with a bright middle, which reads as snow at any distance.
+//
+// A little off-centre inside its own square, so that a field of them is not a
+// field of identical marks on a grid. Point sprites cannot be rotated, so this
+// is the only variation available to the drawing itself — the rest comes from
+// the drift, which falling.js gives each flake individually.
+export function paintSnowflake() {
+  const S = 64;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const mid = S / 2;
+
+  const soft = g.createRadialGradient(mid, mid, 0, mid, mid, S * 0.46);
+  soft.addColorStop(0.00, 'rgba(251,253,255,0.98)');
+  soft.addColorStop(0.42, 'rgba(251,253,255,0.86)');
+  soft.addColorStop(0.72, 'rgba(251,253,255,0.34)');
+  soft.addColorStop(1.00, 'rgba(251,253,255,0)');
+  g.fillStyle = soft;
+  g.fillRect(0, 0, S, S);
+
+  // One brighter core, off centre. It is what stops a flake reading as a blur:
+  // a soft dot alone is fog, and a soft dot with something solid in it is a
+  // piece of snow.
+  const cx = mid - S * 0.04;
+  const cy = mid - S * 0.05;
+  const core = g.createRadialGradient(cx, cy, 0, cx, cy, S * 0.16);
+  core.addColorStop(0.00, 'rgba(255,255,255,1)');
+  core.addColorStop(1.00, 'rgba(255,255,255,0)');
+  g.fillStyle = core;
+  g.fillRect(0, 0, S, S);
+
+  return c;
+}
+
+// A SNOWMAN, which is the only thing in this world that the cast MAKE.
+//
+// That is worth saying before the drawing, because it decides how it looks.
+// Everything else standing on this planet either grew there or was built by
+// whoever built the planet; this was patted together by three friends who were
+// out in the snow, and it has to look patted rather than modelled. So: two
+// stacked balls that are not quite round and not quite stacked, drawn with the
+// same pen everything else here is drawn with, and a face made of the smallest
+// possible number of marks.
+//
+// `slump` runs 0 to 1 and is how far gone it is. At 0 it stands; at 1 it is the
+// sad little lump left over when the snow it was made of has mostly gone. It is
+// ONE DRAWING WITH A PARAMETER rather than two sheets, because the whole point
+// of a melting snowman is that you cannot say when it stopped being one — a
+// cross-fade between two states would put a moment on it.
+export function paintSnowman(slump = 0) {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+  const mid = S / 2;
+
+  // The head sinks into the body and the body spreads, which is what melting
+  // does: it does not shrink evenly, it loses height and keeps width. Reading
+  // the two radii off one number is what makes every stage in between look like
+  // a stage rather than an interpolation.
+  const base = S * (0.21 + slump * 0.05);
+  const headR = S * 0.145 * (1 - slump * 0.55);
+  const bodyY = S * (0.70 - slump * 0.06);
+  const headY = bodyY - base * (0.92 - slump * 0.72);
+
+  const ink = PAL.line;
+  const lw = S * 0.022;
+
+  // A ball: the snow, a cool shade under its right-hand side so it reads as
+  // round, and the pen round the outside. Squashed a little in y, because a
+  // ball of snow sitting on the ground is not a circle.
+  const ball = (x, y, r, squash) => {
+    g.save();
+    g.translate(x, y);
+    g.scale(1, squash);
+    g.beginPath();
+    g.arc(0, 0, r, 0, TAU);
+    g.fillStyle = PAL.snowBody;
+    g.fill();
+    // The shading, clipped to the ball so it cannot leak past the outline.
+    g.save();
+    g.clip();
+    const sh = g.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r * 1.35);
+    sh.addColorStop(0.00, 'rgba(255,255,255,0)');
+    sh.addColorStop(1.00, PAL.snowShade);
+    g.fillStyle = sh;
+    g.fillRect(-r, -r, r * 2, r * 2);
+    g.restore();
+    g.lineWidth = lw / Math.min(1, squash);
+    g.strokeStyle = ink;
+    g.stroke();
+    g.restore();
+  };
+
+  ball(mid, bodyY, base, 0.86 + slump * 0.24);
+  if (headR > S * 0.02) ball(mid, headY, headR, 0.94);
+
+  // THE FACE, and it goes on the head while there is a head. Two coal eyes and
+  // nothing else — no carrot, no arms, no scarf. Every one of those is a second
+  // object with its own colour, and at the size this is ever seen they turn a
+  // snowman into a cluttered smudge. Two dots read from across a field.
+  if (headR > S * 0.05) {
+    g.fillStyle = ink;
+    for (const dx of [-1, 1]) {
+      g.beginPath();
+      g.arc(mid + dx * headR * 0.36, headY - headR * 0.12, S * 0.016, 0, TAU);
+      g.fill();
+    }
+    // ...and a mouth, which is one short arc and appears only while the head is
+    // big enough to carry it. It is the difference between a snowman and two
+    // balls of snow with dots on.
+    g.strokeStyle = ink;
+    g.lineWidth = lw * 0.8;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.arc(mid, headY + headR * 0.06, headR * 0.34, 0.35 * Math.PI, 0.65 * Math.PI);
+    g.stroke();
+  }
+
+  return c;
+}
+
+// THE CLOUD DECK — one overcast sky, painted once, hung over whatever hour it
+// currently is and multiplied by that hour's own tint.
+//
+// ONE TEXTURE FOR THE WHOLE DAY, and it is worth saying why rather than five to
+// match the five skies. A grey deck is grey at every hour; what changes between
+// a rained-out afternoon and a rained-out midnight is only how much light is on
+// it, and the hour already publishes exactly that number as `tint`. Painting
+// five would be painting the same cloud under five brightnesses that a multiply
+// gives for free — and worse, it would put a HARD SWAP at every phase boundary,
+// so dragging the clock through a storm would step the sky between five greys.
+// Multiplied, it moves continuously with everything else.
+//
+// Which is also why it is painted so nearly white. It has to survive being
+// taken down to a night sky, and anything already grey here arrives at midnight
+// as black.
+//
+// Equirectangular like paintSky, and wrapped by hand: every blob is drawn three
+// times, a width left and right of itself, so the seam down the back of the
+// dome has cloud across it rather than a join.
+export function paintCloudDeck() {
+  const S = SKY_SCALE;
+  const W = SKY_DESIGN.w * S;
+  const H = SKY_DESIGN.h * S;
+  const c = makeCanvas(W, H);
+  const g = c.getContext('2d');
+  const rnd = makeRandom(4471);
+
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0.00, PAL.cloudTop);
+  grad.addColorStop(0.62, PAL.cloudTop);
+  grad.addColorStop(1.00, PAL.cloudLow);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+
+  // The folds. Barely darker than the deck they lie on — see PAL.cloudFold. The
+  // squeeze toward the top of an equirectangular sheet is what `1 - v` is for:
+  // a blob painted round up there arrives at the zenith stretched into a band,
+  // so they are drawn progressively wider the higher they sit.
+  for (let i = 0; i < 90; i++) {
+    const v = 0.06 + rnd() * 0.80;
+    const y = v * H;
+    const x = rnd() * W;
+    const r = H * (0.05 + rnd() * 0.12);
+    const wide = r * (1.9 + (1 - v) * 3.4);
+    for (const dx of [-W, 0, W]) {
+      const blob = g.createRadialGradient(x + dx, y, 0, x + dx, y, 1);
+      blob.addColorStop(0.00, 'rgba(127,140,158,0.40)');
+      blob.addColorStop(1.00, 'rgba(127,140,158,0)');
+      g.save();
+      g.translate(x + dx, y);
+      g.scale(wide, r);
+      g.fillStyle = blob;
+      g.beginPath();
+      g.arc(0, 0, 1, 0, TAU);
+      g.fill();
+      g.restore();
+    }
+  }
+
+  // ...and a pale band low down, where the light gets in under the cloud. The
+  // one thing that stops an overcast sky reading as a lid.
+  const under = g.createLinearGradient(0, H * 0.68, 0, H);
+  under.addColorStop(0, 'rgba(238,243,248,0)');
+  under.addColorStop(1, 'rgba(238,243,248,0.55)');
+  g.fillStyle = under;
+  g.fillRect(0, H * 0.68, W, H * 0.32);
+
+  return c;
+}
+
 // Where the light is coming from in a lit drawing, and how big it is, so that
 // the glow put over it can be placed by the art rather than by numbers typed
 // into scene.js. Move the house's door to the other side, or give it a second
@@ -2345,37 +2853,6 @@ export function paintTreeBark() {
 //
 // The house is drawn art and needs nothing here — see assets.js for the two
 // sheets and scene.js for how the lit one comes up after dark.
-
-export function paintBench() {
-  const W = 192;
-  const H = 128;
-  const c = makeCanvas(W, H);
-  const g = c.getContext('2d');
-  g.lineJoin = 'round';
-  g.lineWidth = 5;
-  g.strokeStyle = PAL.line;
-  g.fillStyle = PAL.treeTrunk;
-
-  for (const y of [50, 68]) {
-    g.beginPath();
-    g.rect(24, y, 144, 13);
-    g.fill();
-    g.stroke();
-  }
-  g.beginPath();
-  g.rect(30, 86, 14, 34);
-  g.fill();
-  g.stroke();
-  g.beginPath();
-  g.rect(148, 86, 14, 34);
-  g.fill();
-  g.stroke();
-  g.beginPath();
-  g.rect(24, 26, 144, 12);
-  g.fill();
-  g.stroke();
-  return c;
-}
 
 // The floating Z over somebody asleep. It stood here once and was removed with
 // the note "nobody sleeps any more"; somebody sleeps again — see

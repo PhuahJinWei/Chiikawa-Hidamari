@@ -94,6 +94,86 @@ const chiikawa = {
     { t: 'もう…、ねなきゃ…', expr: 'sleepy' },
     { t: 'ふぁ…、おやすみ…', expr: 'sleepy' },
   ],
+  // THE WEATHER, named after the weathers exactly as the four above are named
+  // after the hours — see the ambient pick in dialogue.js, which reaches for
+  // these FIRST and falls back to the hour where a bank has nothing. So a
+  // character with no words for drizzle is not a hole, it is somebody who has
+  // nothing to say about drizzle, and adding a bucket is the whole of adding
+  // one. `clear` is deliberately absent from all three: a bright day is what
+  // the time-of-day lines already describe.
+  //
+  // Chiikawa is the one who worries about it, which is why his rain bank turns
+  // and his shelter bank does not: he is anxious out in it and quietly content
+  // once he is in, and those two together are more of a character than either
+  // is on its own.
+  cloudy: [
+    { t: 'そら、くもってきた…', expr: 'worried' },
+    { t: 'あめ、ふるのかな…', expr: 'worried' },
+  ],
+  drizzle: [
+    { t: 'あ…、ぽつぽつ してる…', expr: 'surprise' },
+    { t: 'ぬれちゃう まえに…', expr: 'worried' },
+  ],
+  rain: [
+    { t: 'ざあざあ だ…', expr: 'worried' },
+    { t: 'ここなら、ぬれないね…', expr: 'happy' },
+    { t: 'あめの おと…、すきかも', expr: 'happy' },
+    { t: 'はやく やまないかな…', expr: 'worried' },
+  ],
+  storm: [
+    { t: 'こ、こわい…', expr: 'worried', w: 2 },
+    { t: 'ひかった…! いまの…', expr: 'surprise' },
+  ],
+  clearing: [
+    { t: 'あ…、やんだ…!', expr: 'happy', w: 2 },
+    { t: 'そら、あかるく なってきた…', expr: 'happy' },
+    { t: 'そと、でてみる…?', expr: 'happy' },
+  ],
+  // THE RAINBOW, reached the moment one comes out — see `bow` in main.js. This
+  // is the smallest bucket any of them has and the one that had to be got
+  // right: it is the payoff for having sat out a whole shower, and every line
+  // in it is somebody looking up rather than commenting.
+  //
+  // `delight` is spent here, which is only the third place in the whole app it
+  // is reached — the other two being your arrival and a present put in their
+  // hands. That is the company this moment is meant to keep.
+  rainbow: [
+    { t: 'にじ…! にじだ…!', expr: 'delight', w: 2 },
+    { t: 'わァ…', expr: 'delight' },
+    { t: 'きれい…、ずっと みてたい…', expr: 'happy' },
+    { t: '（…いいこと、あるかも）', expr: 'happy' },
+  ],
+  // Reached by the bolt itself rather than by the ambient chatter — see
+  // `strike` in main.js. There is no sound in this app, so the flinch has to
+  // carry the whole of the thunder, and the flinch is this.
+  thunder: [
+    { t: 'ひゃあっ…!', expr: 'surprise', w: 2 },
+    { t: 'い、いまの…!', expr: 'surprise' },
+    { t: 'こわいよぉ…', expr: 'worried' },
+  ],
+  // Losing their footing on a frozen pond — see `slip` in main.js, which is the
+  // only thing that reaches this. Short, because a stumble is short: anything
+  // with a sentence in it reads as a speech about having fallen over.
+  slip: [
+    { t: 'わっ…!', expr: 'surprise', w: 2 },
+    { t: 'つるつる…', expr: 'worried' },
+    { t: 'あ、あぶない…', expr: 'worried' },
+  ],
+  // SNOW IS THE OTHER WAY ROUND FROM RAIN, and Chiikawa's bank is where you can
+  // see it plainest. His rain lines worry; his snow lines do not worry at all.
+  // It is the one weather in this world he is uncomplicatedly pleased about,
+  // and giving him a single anxious snow line would take that away.
+  snow: [
+    { t: 'ゆき…! ゆきだ…!', expr: 'surprise', w: 2 },
+    { t: 'つもってきた…', expr: 'happy' },
+    { t: 'てのひらで、とけちゃう…', expr: 'happy' },
+    { t: 'しろい…、きれい…', expr: 'happy', w: 2 },
+    { t: 'ちょっと さむいけど…、へへ', expr: 'happy' },
+  ],
+  blizzard: [
+    { t: 'まえが みえない…!', expr: 'worried', w: 2 },
+    { t: 'さ、さむい…!', expr: 'worried' },
+  ],
   dozing: [
     { t: 'すぅ…、すぅ…', expr: 'sleepy', w: 2 },
     { t: 'むにゃ…', expr: 'sleepy' },
@@ -216,6 +296,66 @@ const hachiware = {
     { t: 'さすがに ねむくなってきたなぁ', expr: 'sleepy' },
     { t: 'ぼく、そろそろ かえるね。おやすみ!', expr: 'sleepy' },
   ],
+  // Hachiware does weather the way Hachiware does everything: cheerfully, and
+  // with a fact about it. The storm line is the one worth keeping if these are
+  // ever cut down — counting the gap between the flash and the sound is exactly
+  // the thing he would know, and it is the only place in the app that mentions
+  // the thunder anybody can only see.
+  cloudy: [
+    { t: 'くもってきたねぇ。ひとあめ くるかも', expr: 'normal' },
+    { t: 'かぜが しめってきた。あめの まえの においだよ', expr: 'normal' },
+  ],
+  drizzle: [
+    { t: 'ぽつぽつ きたね。まだ へいきかな', expr: 'normal' },
+    { t: 'こういう こさめ、きらいじゃないんだ', expr: 'happy' },
+  ],
+  rain: [
+    { t: 'よく ふるねぇ! なかで まってようか', expr: 'happy' },
+    { t: 'あまやどりも、たまには たのしいよ', expr: 'happy', w: 2 },
+    { t: 'あめの おとって、ずっと きいてられるよね', expr: 'happy' },
+    { t: 'あめの ひは、そとが しずかに なるんだ', expr: 'normal' },
+  ],
+  storm: [
+    { t: 'すごい あらしだ! ここなら あんしんだよ', expr: 'surprise' },
+    { t: 'ひかってから おとが くるまでが、とおさなんだって', expr: 'surprise' },
+  ],
+  clearing: [
+    { t: 'あ、あがったみたい! でてみようよ!', expr: 'happy', w: 2 },
+    { t: 'あめあがりの くうき、いちばん すきなんだ', expr: 'happy' },
+  ],
+  // Hachiware looks up and then tells you about it, which is the only way
+  // Hachiware knows how to enjoy anything. The second line is his best: it is
+  // true, it is the kind of thing he would know, and it is also — quietly — an
+  // argument for standing next to your friends to look at something.
+  rainbow: [
+    { t: 'にじだ! ほら、あそこ!', expr: 'surprise', w: 2 },
+    { t: 'にじってね、みる ばしょで かたちが ちがうんだって', expr: 'surprise' },
+    { t: 'あめが ふったから、みられたんだね', expr: 'happy', w: 2 },
+    { t: 'いいもの みちゃったなぁ', expr: 'happy' },
+  ],
+  thunder: [
+    { t: 'うわっ! いまの おおきかったね!', expr: 'surprise' },
+    { t: 'だいじょうぶ、ここまでは こないよ', expr: 'worried' },
+  ],
+  slip: [
+    { t: 'おっとっと!', expr: 'surprise', w: 2 },
+    { t: 'つるつるだ〜!', expr: 'happy' },
+  ],
+  // Hachiware in the snow is Hachiware organising something, which is exactly
+  // what he would be doing. The middle line is the one that matters — it is the
+  // only place in the app where somebody says out loud what the gathering is
+  // for, and it wants to sound like an idea he has just had.
+  snow: [
+    { t: 'ゆきだ! つもるかなぁ', expr: 'happy', w: 2 },
+    { t: 'ねえ、ゆきだるま つくらない?', expr: 'happy', w: 2 },
+    { t: 'ゆきの けっしょうって、ぜんぶ かたちが ちがうんだって', expr: 'surprise' },
+    { t: 'あしあとが ついてく! おもしろいね', expr: 'happy' },
+    { t: 'さむいけど、こういう ひも いいよね〜', expr: 'happy' },
+  ],
+  blizzard: [
+    { t: 'これは さすがに なかに はいろう!', expr: 'surprise', w: 2 },
+    { t: 'こんな ふぶき、はじめて みたよ', expr: 'surprise' },
+  ],
   dozing: [
     { t: 'すー…、すー…', expr: 'sleepy', w: 2 },
     { t: 'ん〜…、あしたね〜…', expr: 'sleepy' },
@@ -323,6 +463,59 @@ const usagi = {
   midnight: [
     { t: 'ハァ…（ねる）', expr: 'sleepy' },
     { t: 'ウラ…', expr: 'sleepy' },
+  ],
+  // Usagi has no home to run to — see `hide` in household.js, which sends him
+  // through whichever door is nearest — and the bank is written for somebody
+  // who is a guest in the rain and completely unbothered about it. He is the
+  // only one of the three who is louder when it clears than when it started.
+  cloudy: [
+    { t: 'ウラ…?', expr: 'normal' },
+    { t: 'フゥン', expr: 'normal' },
+  ],
+  drizzle: [
+    { t: 'ウラ?', expr: 'surprise' },
+    { t: 'ヤ…', expr: 'normal' },
+  ],
+  rain: [
+    { t: 'ウラ〜〜…', expr: 'normal', w: 2 },
+    { t: 'プルルルルル…', expr: 'normal' },
+    { t: 'ヤハ!', expr: 'happy' },
+    { t: 'ハァ…', expr: 'sleepy' },
+  ],
+  storm: [
+    { t: 'ウラ゛ア゛ア゛!!', expr: 'surprise' },
+    { t: 'ヤ、ヤハ…', expr: 'worried' },
+  ],
+  clearing: [
+    { t: 'ウラ!!', expr: 'happy', w: 2 },
+    { t: 'ヤハ〜〜ッ!!', expr: 'happy' },
+  ],
+  // Usagi points. That is the whole of it, and it is the right amount: three
+  // characters looking at one thing, and the one with no words for it is the
+  // one who noticed it first.
+  rainbow: [
+    { t: 'ウラ!! ウラ!!', expr: 'surprise', w: 3 },
+    { t: 'ヤ…ハ…', expr: 'happy' },
+    { t: 'ウララ〜〜', expr: 'happy' },
+  ],
+  thunder: [
+    { t: 'ウラ゛ッ!!', expr: 'surprise', w: 2 },
+    { t: 'ヒョ!!', expr: 'surprise' },
+  ],
+  slip: [
+    { t: 'ウラ゛!?', expr: 'surprise', w: 2 },
+    { t: 'ヤ!!', expr: 'surprise' },
+  ],
+  // Usagi has been waiting for this all year.
+  snow: [
+    { t: 'ウラ!!!', expr: 'surprise', w: 3 },
+    { t: 'ヤハ〜〜〜ッ!!', expr: 'happy', w: 2 },
+    { t: 'ウラララララ!!', expr: 'happy' },
+    { t: 'プルルルルル…', expr: 'normal' },
+  ],
+  blizzard: [
+    { t: 'ウラ゛…', expr: 'worried' },
+    { t: 'ヤ…', expr: 'normal' },
   ],
   dozing: [
     { t: 'プルルルルル…', expr: 'sleepy', w: 2 },

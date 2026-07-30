@@ -5,6 +5,7 @@
 import { CONFIG } from './config.js';
 import { AMBIENT_MIX } from './lines.js';
 import { activePhase } from './daylight.js';
+import { activeWeather } from './weather.js';
 
 // How long a line rests on screen once it has finished typing. Grows with the
 // line, because a reader does — see CONFIG.dialogue.holdBase for why it stopped
@@ -95,7 +96,17 @@ export class Dialogue {
     // right up until you set the hour by hand, and then they are 「おはよう」
     // under a sky full of stars. The bank names its buckets after the phases
     // for exactly this reason, so there is nothing to translate.
-    if (key === 'timeOfDay') key = activePhase();
+    //
+    // ...and the WEATHER gets first refusal on that same slot, by exactly the
+    // same argument one step further along: 「ひなたが あったかい…」 in a
+    // downpour is the identical mistake as 「おはよう」 under a starfield. The
+    // buckets are named after the weathers too, so this is one more lookup and
+    // no translation — and a bank with nothing to say about rain simply falls
+    // through to the hour, the same half-drawn courtesy the sheets get.
+    if (key === 'timeOfDay') {
+      const sky = activeWeather();
+      key = this.has(sky) ? sky : activePhase();
+    }
     this.say(key, now);
   }
 

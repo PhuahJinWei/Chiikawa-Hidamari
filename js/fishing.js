@@ -30,6 +30,7 @@
 import * as THREE from 'three';
 import { CONFIG, PAL } from './config.js';
 import { inLake, lakeReach } from './sphere.js';
+import { pondsFrozen } from './weather.js';
 import { paintBobber, paintExclaim, paintRipple } from './art.js';
 import { WATER_STENCIL } from './water.js';
 import { FISH_ITEM } from './items.js';
@@ -254,6 +255,15 @@ export class Fishing {
 
   tryCast(spot, playerDir) {
     if (this.active) return false;
+    // NOT THROUGH ICE. Refused rather than reworded, and refused at the very
+    // top so the verb itself disappears: every gate in this method answers the
+    // 「つりをする」 pill, so a frozen pond simply stops offering it, the same way
+    // standing indoors does. A rod that could be cast onto a surface people are
+    // walking across would be the loudest possible contradiction.
+    //
+    // Cutting a hole to fish through is a lovely thing to build one winter. It
+    // is a verb of its own, not a special case of this one.
+    if (pondsFrozen()) return false;
     const school = this.globe.fish;
     if (!school) return false;
     const pond = school.pond;

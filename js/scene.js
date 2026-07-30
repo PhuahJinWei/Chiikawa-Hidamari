@@ -9,7 +9,7 @@ import { CAST } from './cast.js';
 import {
   paintSky, paintGlobe, paintHorizon,
   paintShadow, SHADOW_ROOM, paintLampGlow, litSpot, paintWalkMarker, paintFocusMark,
-  paintBench, paintSheet, sheetBounds, makeRandom, SKY_DESIGN,
+  paintSheet, sheetBounds, makeRandom, SKY_DESIGN,
   starStamp, STAR_SEED,
   paintHouseSkin, paintHouseWindowFrame, paintHousePlateBlock,
   paintHouseDoorFrame, paintDoorway,
@@ -17,7 +17,11 @@ import {
   archPath, DOOR_SHEET, WINDOW_SHEET,
   paintCaveSkin, paintCaveWall, paintCaveFloor, paintCaveMouth, paintCaveMouthInner,
   paintCaveDay, paintCaveNight, MOUTH_SHEET, paintZzz,
+  paintCloudDeck, paintRainbow,
 } from './art.js';
+import { Weatherfall } from './falling.js';
+import { Snowfield, BASE as FIELD_BASE } from './snowfield.js';
+import { WEATHERS, WEATHER_CAST } from './weather.js';
 import { BUILD } from './furniture.js';
 import {
   buildTree, buildStump, buildGrassBlades, inkMaterials,
@@ -25,7 +29,7 @@ import {
 } from './foliage.js';
 import {
   IMG, TREE_VARIANTS, FLOWER_VARIANTS,
-  MUSHROOM_VARIANTS, SKY_DISC_ART,
+  MUSHROOM_VARIANTS, SKY_DISC_ART, WORLD_SNOW,
 } from './assets.js';
 import { LOOK, PHASES } from './daylight.js';
 import { PLATEAU, restoreGLSL, RESTORE_APPLY } from './light-model.js';
@@ -33,7 +37,7 @@ import { RENDER_SPAN } from './character.js';
 import {
   UP, orientBillboard, dirFromLatLon, inLake, setBuildings, inBuilding, setScenery,
   setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, growWeight,
-  lakeReach, perchAlongRay, inSolid,
+  lakeReach, perchAlongRay, inSolid, underRoof,
 } from './sphere.js';
 import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
@@ -80,7 +84,6 @@ const SPRITE_SIZE = {
   // width, so it would lie entirely inside the building and never darken a
   // blade of grass anybody could see.
   cave: { h: 4.0, shadow: false, small: false },
-  bench: { h: 0.9, shadow: true, small: false },
   // BUILT, and therefore measured here rather than off a drawing.
   //
   // `aspect` is width over height and `drawn` is how much of that width the ink
@@ -110,6 +113,10 @@ const SPRITE_SIZE = {
   bush1: { h: 0.72, shadow: false, small: true },
   bush2: { h: 0.70, shadow: false, small: true },
   stump: { h: 0.60, shadow: true, small: true, aspect: 2.52592593, drawn: 0.96480938 },
+  // Giant beside the cast but still smaller than the anime's two-Usagi-tall
+  // version. Built at 2.85, it stands about 1.4 Usagis high; the coupe's bowl
+  // supplies the 1.11 width-to-height ratio.
+  puddingcup: { h: 2.85, shadow: true, small: false, aspect: 1.11, drawn: 1.0 },
 };
 
 // Trees, bushes and stumps only — the small stuff is merged ground cover. Every
@@ -191,13 +198,7 @@ const NEAR_PLANE = 0.3;
 // The flowers, mushrooms and grass are not here either, and never could be —
 // they are merged ground cover with no per-prop position to register.
 //
-// The bench is measured off its drawing's ink and not its canvas, the same way
-// the landmark footprints are, because the margin a painter happens to leave
-// around a bench is not part of the bench. It takes `canvasFor` rather than a
-// canvas because it is the ONLY kind here that wants one — the built kinds
-// answer from their own geometry and have no drawing left to ask — and handing
-// the lookup in keeps this the one branch that touches a pixel.
-function solidRadius(type, h, w, canvasFor) {
+function solidRadius(type, h) {
   if (PROP_VARIANTS.tree.includes(type)) {
     // Roots or leaves, whichever reaches your eye first — worked out from the
     // built profile rather than from either one of them, see treeSolidRadius.
@@ -211,11 +212,7 @@ function solidRadius(type, h, w, canvasFor) {
     );
   }
   if (type === 'stump') return stumpRadius(h);
-  if (type === 'bench') {
-    const cv = canvasFor(type);
-    const b = sheetBounds(cv);
-    return (w * ((b.maxX - b.minX + 1) / cv.width)) / 2;
-  }
+  if (type === 'puddingcup') return h * 0.555;
   return 0;
 }
 
@@ -861,10 +858,53 @@ export function markRadius(rx, rz, lean = 0) {
 // then the windows come on.
 const LAMP_ONSET = 0.42;
 
+// How much of the weather gets under a roof. Not all of it and not none: a room
+// is enclosed, so what the sky is doing arrives only through the openings — but
+// it does arrive, and it is most of why sheltering from rain is worth doing.
+// The corners go gloomy, and a gloomy corner is what leaves the lamp the
+// brightest thing in the place.
+//
+// Two thirds rather than a half because the openings here are large: both
+// interiors are lit through a doorway you can walk through and, in the house, a
+// window as well. It cannot make the room too dark to be in — see the restore
+// model in light-model.js, where anything a lamp reaches comes back to daylight
+// however deep the dark under it is.
+const INDOOR_WEATHER = 0.66;
+
+// How much snow it takes to bury the meadow completely — see _bury.
+//
+// A THIRD, which is much earlier than the ground is fully white and is the
+// point rather than an accident. Snow fills a meadow in before it has finished
+// covering the bare ground between: the shortest things go under first, and by
+// the time you would call a field white there has been nothing green in it for
+// a while. Setting this to 1 was tried and reads as a lawn slowly dissolving.
+const BURY_BY = 0.34;
+
+// ...and how much of the same snow settles on a tree. See litBySun: a tree
+// catches it on its upper surfaces and stays a tree, where the ground simply
+// becomes snow.
+const TREE_FROST = 0.66;
+
+// How far clear of a walker's own berth an outdoor bed has to lie, in units.
+// See sleepSpotFor, and the three hundredths of a unit that kept Usagi awake
+// all night. Half a unit, which is far enough that nudging a house or a walk
+// margin cannot quietly close the gap again, and near enough that the meadow is
+// still where it was drawn to be.
+const BED_CLEAR = 0.6;
+
 function clampUnit(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
 
 const _discDir = new THREE.Vector3();
+
+// The rainbow's own scratch — see _aimBow. Its own set rather than the shared
+// ones because it runs from update(), after _applyBlend has finished with those
+// and while several other things are still using them.
+const _bowSun = new THREE.Vector3();
+const _bowAxis = new THREE.Vector3();
+const _bowUp = new THREE.Vector3();
+const _bowRight = new THREE.Vector3();
+const _bowM = new THREE.Matrix4();
 
 // Scratch for asking where the camera is relative to the house — its anchor in
 // the world, and the ray out to the lens. Borrowed once at build time to hold
@@ -1013,6 +1053,133 @@ function skyDirFromTexel(px, py, texW, texH, out) {
     Math.cos(theta),
     Math.sin(phi) * Math.sin(theta),
   );
+}
+
+// THE SNOW ITSELF, as a second surface over the planet.
+//
+// Everything up to now made the world WHITE; this is what makes it DEEP. It is
+// an ordinary sphere at the planet's own radius, pushed outward per vertex by
+// the depth map — see snowfield.js — so the silhouette fattens as it settles,
+// the cast are cut off at the snow line by nothing more than the depth buffer,
+// and a trodden trail becomes a trench with walls you can see over.
+//
+// It costs one draw call, and the geometry can be COARSE, which is the economy
+// the whole idea rests on: the crisp edge of a footprint is already drawn by
+// the mask darkening the ground's own colour, so this only has to be lumpy. It
+// is cut against the narrowest thing it must show — see shellSegs.
+//
+// The displacement is three.js's own `displacementMap`, not a patched shader.
+// A sphere's normals are radial, so "along the normal" IS "outward", and the
+// engine's own vertex fetch does the work. What that buys beyond the code it
+// saves: how much snow there is becomes one number written from JS each frame
+// (`displacementScale`), and how much is HERE stays the mask everything else
+// already reads.
+//
+// ------------------------------------------------------- what it must not cover
+//
+// A pond is not somewhere snow lies, and neither is the inside of a house. The
+// 2D tint could be careless about that — what it whitened under a pond was the
+// BED, with water drawn over the top — but a shell cannot: it would dome over
+// the water and put a white lid on both lakes.
+//
+// So the faces are simply removed at build. Static, decided once, and free
+// forever after — no per-vertex mask, no test in the shader, and no way for it
+// to come undone later. The seam it leaves at a pond's rim is not a seam to
+// hide either: snow banked at the shore dropping away to a lower, flatter
+// surface is exactly what a frozen pond in a snowfield looks like.
+function snowShellGeo(R, seg) {
+  const geo = new THREE.SphereGeometry(R, seg, seg / 2);
+  const pos = geo.attributes.position;
+  const idx = geo.index.array;
+  const keep = [];
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  const mid = new THREE.Vector3();
+  for (let i = 0; i < idx.length; i += 3) {
+    a.fromBufferAttribute(pos, idx[i]);
+    b.fromBufferAttribute(pos, idx[i + 1]);
+    c.fromBufferAttribute(pos, idx[i + 2]);
+    // The middle of the triangle, as a direction. A whole face is kept or
+    // dropped together — testing corners would leave a ragged fringe of
+    // half-faces round every pond, which is worse than a slightly generous
+    // hole.
+    mid.copy(a).add(b).add(c).normalize();
+    if (CONFIG.lakes.some((l) => inLake(mid, l, 0.02))) continue;
+    // THE WHOLE FOOTPRINT and not the wall band — see underRoof, and the note
+    // there about the bug this line was. `inBuilding` stood here, which lets
+    // the room through as free floor, so the hole came out as a RING under the
+    // walls with every face over the boards left in place. Snow rose through
+    // the floor of both houses and cut the furniture off at the shins.
+    //
+    // Cut at the outer wall exactly. A triangle whose centroid falls just
+    // outside still reaches a little way in, but only as far as the wall band,
+    // where the wall itself is standing in front of it — so the seam is hidden
+    // by the building rather than needing a margin to clear it, and the snow
+    // outside comes right up to the wall the drifts are banked against.
+    if (underRoof(mid)) continue;
+    keep.push(idx[i], idx[i + 1], idx[i + 2]);
+  }
+  geo.setIndex(keep);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+// THE ARC, as a strip of sky.
+//
+// Built around +Z with its crown toward +Y, and then simply TURNED into place —
+// see where it is aimed. That is what makes a rainbow that follows the sun cost
+// one quaternion a frame instead of a rebuilt mesh: the shape of a rainbow
+// never changes, only where it is pointing.
+//
+// A band on a SPHERE and not a flat ring, and the difference is not subtle at
+// this size. The arc spans well over a hundred degrees of sky; a flat annulus
+// hung at any distance would be dead right at its middle and increasingly wrong
+// toward its feet, since the further from the centre of the view a flat thing
+// gets, the less its own plane has to do with the direction you are looking. On
+// the sphere every point of the band is at the angle it should be, because the
+// angle is what it was built from.
+//
+// `seg` is generous because the band is thin and long: too few and the arc's
+// inner edge shows as a polygon, which is the one artifact a soft-edged
+// gradient cannot hide.
+function bowGeo(radius, width, span, dist, seg = 128) {
+  const pos = new Float32Array((seg + 1) * 2 * 3);
+  const uv = new Float32Array((seg + 1) * 2 * 2);
+  const idx = [];
+  const inner = radius - width / 2;
+  const outer = radius + width / 2;
+  for (let i = 0; i <= seg; i++) {
+    const u = i / seg;
+    // Bearing round the axis, centred on the crown, so the drawn span is the
+    // TOP of the circle and the two ends are its feet.
+    const b = (u - 0.5) * span;
+    // The circle's own plane: +Y at the crown, +X to the sides.
+    const sx = Math.sin(b);
+    const sy = Math.cos(b);
+    for (let j = 0; j < 2; j++) {
+      // v runs 0 at the OUTER edge, which is where the red is — see
+      // paintRainbow, whose first colour stop is the outside of the arc.
+      const r = j ? inner : outer;
+      const k = i * 2 + j;
+      const sr = Math.sin(r);
+      pos[k * 3] = sx * sr * dist;
+      pos[k * 3 + 1] = sy * sr * dist;
+      pos[k * 3 + 2] = Math.cos(r) * dist;
+      uv[k * 2] = u;
+      uv[k * 2 + 1] = j;
+    }
+    if (i < seg) {
+      const a = i * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeBoundingSphere();
+  return geo;
 }
 
 // How much further than a landmark's own wall each kind of scenery keeps, in
@@ -1401,6 +1568,70 @@ export class Globe {
     // out and _applyLight needing it — see SKY_DOOR.
     this.skyLow = new THREE.Color(0xFFFFFF);
 
+    // WHAT IS IN THE AIR, as the grade weather.js publishes. Clear from the
+    // start, which is the identity — every field of it is a multiplier resting
+    // at 1 or an addend resting at 0, so a world nobody has told about the
+    // weather behaves exactly as it did before there was any.
+    this.wx = WEATHERS.clear;
+    // HOW WHITE THE GROUND IS, where the ground's own shader can read it — see
+    // _litGround, which mixes it into the paint before any light touches it.
+    // A uniform object rather than a number for the reason the two darks are:
+    // that is the shape three.js wants, and sharing the one object is what
+    // makes changing it a single write rather than a walk.
+    //
+    // Its colour lives beside it because the two are one decision, and because
+    // it is emphatically NOT white — see PAL.snowGround for why that matters
+    // more here than anywhere else in the palette.
+    this.snowAt = { value: 0 };
+    this.snowTint = { value: new THREE.Color(PAL.snowGround) };
+    // ...and what the shell shows where somebody has walked. See the shell's
+    // own branch in _litGround.
+    this.troddenTint = { value: new THREE.Color(PAL.snowTrodden) };
+    // ...and WHERE it is, which is the ground's alone. See snowfield.js.
+    //
+    // The two are multiplied in the ground's shader: `snowAt` is how much snow
+    // the sky has managed to lay and `field` is how much of it is still at this
+    // point on the planet after somebody walked through it. Everything else
+    // that reads the snow — the trees, the coats, the snowmen — takes the
+    // scalar alone, because a tree does not stand in one place on a map, it
+    // stands in the weather.
+    this.field = new Snowfield(CONFIG.globe.radius);
+    this.snowMap = { value: this.field.texture };
+    // ...and how far under the meadow currently is, so the walk that buries it
+    // can be skipped on the frames where the answer has not moved. -1 rather
+    // than 0 so the very first call always runs and the meadow starts out
+    // standing at whatever the cover already is.
+    this._buriedAt = -1;
+    this._buried = [];
+    // The scenery that has a snow drawing of its own, each with both of its
+    // textures — see WORLD_SNOW in assets.js and _winter below. Empty while
+    // none of that art has been drawn, which costs one `if` a winter.
+    this._snowCards = [];
+    this._wintered = false;
+    // ...and the one colour that comes out of it: what a full wash multiplies
+    // the world by, worked out once here and lerped toward per frame.
+    this._wxCast = new THREE.Color(WEATHER_CAST);
+    this._wxMul = new THREE.Color(0xFFFFFF);
+    // Where the day's own cross-fade currently stands. `_applyBlend` is not
+    // called on a settled frame — updateDaylight walks away the moment there is
+    // nothing left to fade — so the weather, which changes on its own clock,
+    // needs a way to ask for the same frame to be painted again at whatever
+    // point in the day it already was. See setWeather.
+    this._blendAt = 1;
+    // How far the lightning has lifted the world THIS frame, 0 while there is
+    // none. Its own value rather than folded into the grade, because a bolt is
+    // an event on the frame clock and the grade is a fact about the sky.
+    this._flash = 0;
+    // What the sky was worth last time it was painted — see setWeather, which
+    // is called every frame and has to be able to answer "nothing has moved"
+    // without doing the lighting walk to find out. Deliberately a value no real
+    // signature can take, so the very first call always paints.
+    this._wxSig = -1;
+    // How far over the ponds have gone, 0 to 1 — see iceLook in weather.js.
+    // Held here because two things read it on different clocks: the hour's
+    // blend, which paints the surface, and update(), which stops it moving.
+    this.iceAt = 0;
+
     // WHO IS LYING DOWN, keyed by character. One entry per drawn sleeper, made
     // as the world is built and never added to afterwards — a bed is a place in
     // a room, so it exists exactly as long as the room does.
@@ -1491,6 +1722,63 @@ export class Globe {
 
     this.stars = this._buildStars();
     this.skyRig.add(this.stars);
+
+    // THE CLOUD DECK — one overcast sky hung over whatever hour it is, faded in
+    // by how much cloud the weather says there is. See paintCloudDeck for why
+    // it is one texture rather than five.
+    //
+    // A THIRD DOME AND NOT A TINT ON THE FIRST TWO, and the reason is that no
+    // multiply can do this job. Greying a blue sky by multiplying it leaves it
+    // a darker blue — a multiply cannot take saturation OUT of anything, only
+    // brightness. An overcast sky is not a dim clear one; it is a different
+    // sky, and the honest way to draw a different sky is to draw one.
+    //
+    // Its renderOrder is above both discs at -9 and -8, which is what lets it
+    // cover the sun: the deck is nearer than the card at 170 but nothing out
+    // here writes depth, so order is the only thing deciding. Depth test stays
+    // ON so the planet and everything on it still occludes it.
+    this.deck = new THREE.Mesh(
+      new THREE.SphereGeometry(168, 40, 22),
+      new THREE.MeshBasicMaterial({
+        map: skyTexFrom(paintCloudDeck()), side: THREE.BackSide,
+        transparent: true, opacity: 0, depthWrite: false, depthTest: true,
+      }),
+    );
+    this.deck.renderOrder = -7;
+    this.deck.frustumCulled = false;
+    this.deck.visible = false;
+    this.skyRig.add(this.deck);
+
+    // THE RAINBOW, which hangs in FRONT of the cloud it came out of — renderOrder
+    // -6, one past the deck. That is the right way round both optically and as a
+    // picture: the arc is the light getting through, so a deck drawn over it
+    // would be greying the one thing in the sky that is supposed to be the
+    // reason you looked up.
+    //
+    // Nearer than the deck as well as later, so the depth test agrees with the
+    // order rather than fighting it, and near enough that the planet's own
+    // horizon cuts its feet off — which is what puts a rainbow BEHIND the hills
+    // instead of standing on top of them.
+    const wx = CONFIG.weather;
+    this.bow = new THREE.Mesh(
+      bowGeo(wx.bowRadius, wx.bowWidth, wx.bowSpan, 152),
+      new THREE.MeshBasicMaterial({
+        map: texFrom(paintRainbow()),
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        depthTest: true,
+      }),
+    );
+    this.bow.renderOrder = -6;
+    this.bow.frustumCulled = false;
+    this.bow.visible = false;
+    this.skyRig.add(this.bow);
+    // How much of it is showing, eased — see _aimBow. Its own value rather than
+    // read straight off the grade because the grade steps with the front and a
+    // rainbow must not.
+    this._bowAt = 0;
 
     // ------------------------------------------------------- the far distance
     //
@@ -1769,7 +2057,6 @@ export class Globe {
     // is a glow in the air rather than light on a surface and has no building
     // in the middle of it.
     const source = {
-      bench: paintBench,
       // The house is two drawings of one building. `house` is the daylight
       // sheet and takes the ordinary sprite path; `houseNight` is only ever
       // reached through NIGHT_ART, which is why it is not a landmark type of
@@ -1823,6 +2110,24 @@ export class Globe {
       return t;
     };
 
+    // ...and the same drawing with snow on it, for the kinds that have one —
+    // see WORLD_SNOW in assets.js, which is the list, and _winter below, which
+    // does the swapping.
+    //
+    // Cached exactly like the summer one and built at the same moment, so a
+    // winter that arrives four hours into a session costs a pointer swap rather
+    // than a decode. That matters more here than for the characters' coats:
+    // there are twenty-six bushes, they all change on one frame, and the frame
+    // they change on is one somebody is looking at.
+    //
+    // Empty until the art exists, and then this whole mechanism switches itself
+    // on with no other edit anywhere.
+    const snowTex = new Map();
+    for (const key of Object.keys(WORLD_SNOW)) {
+      const img = IMG[`${key}Snow`];
+      if (img) snowTex.set(key, texFrom(paintSheet(img, false)));
+    }
+
     // Everything that stands on the planet, worked out before anything is
     // built. It is only used to raise the cards further down, but two things up
     // here need to know what is coming: the ground cover has to keep off the
@@ -1838,13 +2143,12 @@ export class Globe {
     // and the wall you cannot walk through. One measurement, three readers,
     // no way to disagree.
     //
-    // Each clears its OWN drawn width rather than a number written here, so the
-    // bench clears a bench's worth of ground and a redrawn bench clears whatever
-    // it now covers. Taken from the art's alpha bounds and not from the canvas:
-    // the margin a drawing happens to leave around itself is not part of the
-    // building. The house is the exception — it stopped being a drawing, so it
-    // states its radius in CONFIG instead, and a measurement taken off a retired
-    // card would be a measurement of nothing.
+    // Each clears its OWN drawn width rather than a number written here. Taken
+    // from the art's alpha bounds and not from the canvas: the margin a drawing
+    // happens to leave around itself is not part of the building. The house is
+    // the exception — it stopped being a drawing, so it states its radius in
+    // CONFIG instead, and a measurement taken off a retired card would be a
+    // measurement of nothing.
     const footprints = CONFIG.landmarks.map((l) => {
       const size = SPRITE_SIZE[l.type];
       let r;
@@ -1875,8 +2179,8 @@ export class Globe {
 
     // The same measurement, handed to the one part of the app that has to stop
     // you: what keeps a flower from sprouting through a wall is exactly what
-    // should keep YOU from walking through it. Only the solid ones — see the
-    // note in CONFIG about why a bench is not a wall.
+    // should keep YOU from walking through it. Only the solid ones are handed
+    // over here.
     setBuildings(footprints.filter((f) => f.solid));
 
     // Is there a building standing on this spot, and how wide is its wall?
@@ -2229,13 +2533,43 @@ export class Globe {
     // lamp's light from the WALL rather than from the middle of the room. What
     // it stops being is a reason for the skin to ignore lamps altogether: a
     // lantern carried up to the house now lands its circle on the wall.
+    // SNOW SETTLES ON THE BUILT SCENERY, and this is where it does it. See the
+    // same mix on the ground in _litGround.
+    //
+    // It rides in here rather than in a list of its own because `litBySun` is
+    // already exactly the right gate: the only things it patches are the built
+    // trees and stumps, which after the meadow has been buried are the last
+    // green left on a white planet. Measured from orbit with the ground white
+    // and the grass gone under, nine fully summer canopies read as a different
+    // picture pasted over the top.
+    //
+    // A MIX HERE AND A REDRAW FOR THE CARDS, and the split is by what a thing
+    // IS rather than by which was easier. A tree is a lathe — there is no
+    // drawing of it to swap, and a lathe frosts perfectly well because its
+    // shape already carries the light. A bush is a drawing, and this world
+    // redraws its drawings: snow on a bush is not the bush with its colour
+    // moved, it is a bush with snow lying on top and its flowers gone under,
+    // which no mix reaches. See WORLD_SNOW in assets.js and _winter below.
+    //
+    // FROSTED AND NOT COVERED — `uSnow * TREE_FROST` rather than the full
+    // value. A tree is a vertical thing with leaves that shed; it catches snow
+    // on its upper surfaces and stays a tree. Taking it the whole way to the
+    // ground colour makes a white lollipop, which is the thing this world has
+    // trees for the opposite of. Two thirds is the point where they read as
+    // having snow ON them rather than as being made of it.
     const litBySun = (material) => {
       material.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, this.sunUniforms);
+        shader.uniforms.uSnow = this.snowAt;
+        shader.uniforms.uSnowTint = this.snowTint;
         shader.vertexShader = `varying vec3 vLampN;\n${shader.vertexShader}`
           .replace('#include <project_vertex>',
             'vLampN = mat3( modelMatrix ) * normal;\n#include <project_vertex>');
-        shader.fragmentShader = `${SUN_DECL}${shader.fragmentShader}`
+        shader.fragmentShader = `${SUN_DECL}uniform float uSnow;
+uniform vec3 uSnowTint;
+${shader.fragmentShader}`
+          .replace('#include <map_fragment>', `#include <map_fragment>
+        diffuseColor.rgb = mix( diffuseColor.rgb, uSnowTint, uSnow * ${TREE_FROST.toFixed(2)} );`)
           .replace('#include <opaque_fragment>', SUN_ADD);
       };
     };
@@ -2616,10 +2950,28 @@ export class Globe {
       }
     }
 
+    // WHAT THE SNOW BURIES, collected as it is built.
+    //
+    // The ground going white is only half of a white world, and the missing
+    // half is loud. Whitening the SURFACE and leaving everything growing out of
+    // it alone was measured from orbit and reads as grey dirt with a green
+    // fuzz on it and flowers in bloom — not as snow at all, because the one
+    // thing snow certainly does is cover the things that are shorter than it.
+    //
+    // Buried rather than whitened, and that is the choice worth recording. A
+    // white grass blade is a drawn shape that has lost its colour; grass under
+    // snow is grass you cannot see. The second is both cheaper and truer, and
+    // it is what brings the meadow back untouched when the thaw comes.
+    //
+    // The blades go in here too, which is why this is a list rather than the
+    // `covers` array on its own: they are separate merged geometry built a few
+    // lines up, and they are the greenest thing on the planet.
     for (const cover of covers) {
       this.world.add(cover);
       this.tintables.push(cover.material);
+      this._buried.push(cover);
     }
+    this._buried.push(blades);
 
     // The flat flowers stood here — a hundred white clusters lying on the grass
     // as decals, in six drawings. They are gone, and their job went two ways:
@@ -2736,6 +3088,13 @@ export class Globe {
       };
     }
     built.stump = { build: buildStump, seed: 60 };
+    // Unlike the foliage, the pudding keeps its clean illustrated colours in
+    // snow rather than taking the tree-frost mix. It still wears the outdoor
+    // hour and nearby lamplight through the shared tintable path below.
+    built.puddingcup = {
+      build: (_key, h) => BUILD.puddingcup(h),
+      sun: false,
+    };
     // A tree's materials and geometry are shared by every tree wearing that
     // drawing, so they arrive here once per tree and must be registered once
     // per drawing. Tinting the same material twice is merely wasted work, but
@@ -2787,13 +3146,11 @@ export class Globe {
       // does not. The same guard against a prop standing inside a building,
       // which cannot happen while the scatter keeps its berth but would be a
       // wall inside a wall if it ever did.
-      const sr = solidRadius(item.type, h, w, canvasFor);
+      const sr = solidRadius(item.type, h);
       if (sr > 0 && !inBuilding(item.dir)) {
         const entry = { dir: item.dir, r: sr / R };
         // ...and whether it is short enough to get on top of. A stump is the
-        // only thing out here that is: a tree has no top you could reach and the
-        // bench is a card, which is a thing with no top at all — it turns to
-        // face you, so a player stood on one would be stood on a line.
+        // only thing out here that is: a tree has no top you could reach.
         //
         // Both numbers come off the same lathe the stump is built from. `top` is
         // its cut face and `topR` the radius OF that face, which is narrower
@@ -2837,6 +3194,14 @@ export class Globe {
       mesh.position.y = h / 2 - (w * w) / (8 * R);
       holder.add(mesh);
       this.tintables.push(mesh.material);
+      // A card with a snow drawing of its own is remembered along with BOTH of
+      // its textures, so the swap later is a choice between two things already
+      // in hand rather than a lookup by type on every prop on the planet.
+      if (snowTex.has(item.type)) {
+        this._snowCards.push({
+          mesh, summer: tex(item.type), winter: snowTex.get(item.type),
+        });
+      }
       // The prop catches the lamplight by being on that list, and there is no
       // longer an exception for a prop that IS a lamp.
       //
@@ -3031,7 +3396,7 @@ export class Globe {
           // thing out here with real normals to light — it is a lathe now, not
           // a card. It carries the lamp term too; litBySun does both, which it
           // has to, since a material has only one onBeforeCompile.
-          litBySun(m);
+          if (recipe.sun !== false) litBySun(m);
         }
         mesh.visible = false;
       }
@@ -3482,6 +3847,16 @@ export class Globe {
           // its own angle — which is a thing hills do, and cheaper than a second
           // material to say it.
           shell.add(crop);
+          // ...and it goes under the snow with the rest of the meadow — see
+          // _bury. It shares the meadow's material but is its own mesh on its
+          // own hill, so the walk that shortens the grass has to be told about
+          // it by hand. Left out, the one green thing on a white planet is the
+          // fringe round the cave, which is exactly where the eye goes.
+          //
+          // The same scale works on it for the same reason: `crop` is built
+          // standing on the cave's own sphere, so shrinking it about the
+          // shell's origin shortens each blade along its own normal.
+          this._buried.push(crop);
           // ...and it goes off with the rock when you fly over the top, or you
           // would be looking down into the room through a hovering lawn.
           houseOuter.push(crop);
@@ -4351,6 +4726,14 @@ export class Globe {
             // no second measurement to keep in step with the first.
             rx: built.rx,
             rz: built.rz,
+            // ...AND HOW TALL IT IS, carried for the same reason and read by the
+            // same file. The focus asks whether a piece is on screen, and a
+            // piece sitting near your feet has its BASE below the frame while
+            // its body is plainly in it — the ground a metre away is 70 degrees
+            // down and the camera only looks 48. Without a height there is no
+            // second point to test, and 「ひろう」 would refuse everything you
+            // had just set down at arm's length.
+            top: built.top || 0,
             homeLift: f.lift || 0,
             // The STANCE — the sasumata lean. It began as a home-only pose,
             // the way homeLift is a home-only height, and it is not one any
@@ -4682,6 +5065,53 @@ export class Globe {
     // LAST, because it walks the two tint lists and every one of them has to
     // have been filled — and because it reads `itemLights`, which the interior
     // loop above is what builds.
+    // THE RAIN, built last of the things that stand on the planet and before
+    // the hour is installed over them, which is the whole reason it is here
+    // rather than anywhere more convenient.
+    //
+    // Two orderings have to hold at once. The puddles are scattered by
+    // rejection against the lakes, the buildings and the solids, so every one
+    // of those registries has to be full before this runs — a puddle dealt
+    // before the props were placed would be a pool of water under a stump. And
+    // its materials join `tintables`, so it has to be built BEFORE the sweep
+    // below, which is the one pass that patches the hour into a shader. A
+    // material that misses that sweep is not slightly wrong at night; it is
+    // full daylight brightness at midnight, and standing water is exactly the
+    // sort of pale flat thing that shows it worst.
+    this.rain = new Weatherfall(CONFIG.globe.radius, this.tintables);
+    for (const o of this.rain.objects) this.world.add(o);
+
+    // ...AND THE DEPTH IT LIES AT, built here because it needs both of the
+    // things immediately above it: the map it is displaced by, and the lakes
+    // and buildings whose faces it has to be missing. See snowShellGeo.
+    //
+    // NOT in `tintables`. It is a genuinely lit Lambert surface like the ground
+    // rather than flat art wearing a multiply, so it takes the same treatment
+    // the ground takes and for the same reason — see _litGround, whose second
+    // argument exists for this one caller.
+    const shellW = CONFIG.weather;
+    this.shell = new THREE.Mesh(
+      snowShellGeo(CONFIG.globe.radius, shellW.shellSegs),
+      new THREE.MeshLambertMaterial({
+        color: PAL.snowGround,
+        // three's own vertex displacement. A sphere's normals are radial, so
+        // "along the normal" is "outward", and how deep the snow is HERE is the
+        // same map the ground is tinted by — one field, two readers, and no way
+        // for the white and the deep to disagree about where a drift is.
+        displacementMap: this.field.texture,
+        // Written per frame from the cover — see updateRain. Zero in summer,
+        // which parks the whole shell under the turf.
+        displacementScale: 0,
+        displacementBias: -shellW.shellTuck,
+      }),
+    );
+    // Under the turf until there is snow to lift it out, so a summer planet
+    // never sees it. `visible` is switched from the same place the scale is.
+    this.shell.visible = false;
+    this.shell.renderOrder = 0;
+    this.world.add(this.shell);
+    this._litGround(this.shell.material, false);
+
     this._installHourTint();
     // ...and the ground, for the same reason: the lamp arrays are sized off a
     // scattered world. See the note where it is built.
@@ -4970,8 +5400,46 @@ export class Globe {
     if (_sleepTan.lengthSq() < 1e-9) _sleepTan.set(1, 0, 0);
     _sleepTan.normalize().applyAxisAngle(_sleepAt, m.at);
     const arc = m.out / R;
-    return out.copy(_sleepAt).multiplyScalar(Math.cos(arc))
+    out.copy(_sleepAt).multiplyScalar(Math.cos(arc))
       .addScaledVector(_sleepTan, Math.sin(arc)).normalize();
+
+    // ...AND OUT OF ANYWHERE A WALKER REFUSES TO GO, which is a wider circle
+    // than the wall and is the whole of why this correction exists.
+    //
+    // Measured, and it is the narrowest miss in the project: Usagi's meadow
+    // landed 3.89 units from the middle of Chiikawa's house, against a wander
+    // berth of 3.92. Three hundredths inside the fence, and the consequence is
+    // total — a walk is planned by stepping toward the target and stopping at
+    // the first sample the walker may not stand in, so a bed inside the berth
+    // gets every plan trimmed short of itself. He never lay down at all. He
+    // spent the whole of every night circling the outside of somebody else's
+    // house, re-planning on the retry clock, and the only thing on screen to
+    // show for it was Usagi loitering by Chiikawa's front door until dawn.
+    //
+    // The file's own opening note warned about exactly this for the doorstep —
+    // "four hundredths inside the fence is enough to hang the whole errand" —
+    // and the meadow was placed by hand from a lat and lon without anybody
+    // checking it against a berth that is worked out somewhere else entirely.
+    //
+    // CORRECTED HERE RATHER THAN IN THE ROUTE, because two things read this and
+    // they must not disagree: the walk that takes him there, and the drawing
+    // that is laid down where he stops. Fix it in the router alone and he walks
+    // to one spot and the picture of him asleep appears at another.
+    for (const home of this.homes) {
+      if (!home.building) continue;
+      const keep = home.building.r + CONFIG.wander.wallKeep + BED_CLEAR / R;
+      const along = out.dot(home.sprite.normal);
+      if (along <= Math.cos(keep)) continue;
+      _sleepTan.copy(out).addScaledVector(home.sprite.normal, -along);
+      // Dead centre, so no bearing of its own to keep; the door's own line is
+      // the one with any meaning, and it puts him out the front.
+      if (_sleepTan.lengthSq() < 1e-9) _sleepTan.copy(home.building.gapDir);
+      if (_sleepTan.lengthSq() < 1e-9) continue;
+      _sleepTan.normalize();
+      out.copy(home.sprite.normal).multiplyScalar(Math.cos(keep))
+        .addScaledVector(_sleepTan, Math.sin(keep)).normalize();
+    }
+    return out;
   }
 
   // Lie somebody down, or stand them back up.
@@ -5172,12 +5640,51 @@ export class Globe {
   // from the same slot as every other light in the world, and a lantern carried
   // out of a door draws one circle that runs off the boards and onto the grass
   // without meeting a seam.
-  _litGround(material) {
+  // `snowMix` is what separates the two surfaces that come through here. The
+  // GROUND is painted grass and is mixed toward the snow colour by the depth
+  // map; the SHELL is already snow and has nothing to mix — and, having no
+  // `map` of its own, has no `vMapUv` for that line to read either, so asking
+  // for it would not merely be redundant, it would fail to compile.
+  //
+  // Everything else — the whole lamp restore — is shared, and has to be: a
+  // lantern set down in deep snow lights the shell you can see, and would light
+  // the ground underneath it if the two disagreed about lamplight.
+  _litGround(material, snowMix = true) {
     const N = this.lampUniforms ? this.lampUniforms.uLampK.value.length : 0;
     if (!N) return;
     // Outdoors for good — the globe is the outdoors — so the mask is the plain
     // constant one. A lamp taken inside stops lighting the turf on the frame it
     // crosses the threshold, which is what `uLampIn` is for.
+    // THE SNOW GOES ON BEFORE THE LIGHT, and that ordering is the whole of why
+    // it is one line here rather than a second surface over the planet.
+    //
+    // `diffuseColor` is the ground's own colour — what the paint says, before
+    // the sun and the lamps have had anything to say about it. Lerping THAT
+    // toward the snow colour means the white ground is lit by exactly the same
+    // light the green ground was: it has the same terminator, it goes the same
+    // blue at midnight, and a lantern set down on it makes the same disc.
+    //
+    // Doing it afterwards, to `outgoingLight`, was the obvious alternative and
+    // is wrong in a way that is easy to predict and impossible to unsee: the
+    // snow would be one flat value everywhere, so the dark half of the planet
+    // would be as bright as the lit half and the whole world would go
+    // paper-flat the moment it settled.
+    //
+    // A shell of white geometry over the sphere was the other alternative, and
+    // this note used to say it would need four things for itself that the line
+    // above gets free. IT NOW EXISTS AND SO IT DOES — see snowShellGeo. The two
+    // are not rivals: this line is what makes the world WHITE and the shell is
+    // what makes it DEEP, and each is bad at the other's job. A tint has no
+    // silhouette and cannot bury anybody; a shell that had to carry the crisp
+    // edge of every footprint would need geometry a phone could not hold.
+    //
+    // Of the four it was said to need, three are simply shared — it comes
+    // through this very function for its lamps, takes the same hour, and reads
+    // the same map. The fourth, the hole for the ponds, is cut once at build.
+    //
+    // The lakes ARE covered by this tint, and that is a known simplification
+    // rather than an oversight: what it whitens under a pond is the BED, which
+    // the water is drawn over anyway.
     const ADD = `${restoreGLSL(N, '1.0 - uLampIn[ i ]')}
        vec3 lampGround = diffuseColor.rgb * lampT * uGroundLit;
        outgoingLight = max( mix( outgoingLight, lampGround, lampCover ), outgoingLight );
@@ -5186,11 +5693,74 @@ export class Globe {
       Object.assign(shader.uniforms, this.lampUniforms);
       shader.uniforms.uPlateau = this.plateau;
       shader.uniforms.uGroundLit = this.groundLit;
+      shader.uniforms.uSnow = this.snowAt;
+      shader.uniforms.uSnowTint = this.snowTint;
+      shader.uniforms.uSnowMap = this.snowMap;
       shader.vertexShader = `varying vec3 vLampAt;\n${shader.vertexShader}`
+        // AFTER `<displacementmap_vertex>`, which matters for the shell and
+        // changes nothing for the ground. `transformed` is where the vertex has
+        // actually ended up, and on the shell that is a vertex the snow has
+        // pushed outward — so a lamp measures its distance to the top of the
+        // drift rather than to the turf underneath it. Hooking the earlier
+        // chunk would have lit deep snow as though it were flat.
         .replace('#include <project_vertex>',
           'vLampAt = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n#include <project_vertex>');
-      shader.fragmentShader = `${this._lampUniformsGLSL}uniform float uGroundLit;\n${shader.fragmentShader}`
+      shader.fragmentShader = `${this._lampUniformsGLSL}uniform float uGroundLit;
+uniform float uSnow;
+uniform vec3 uSnowTint;
+uniform sampler2D uSnowMap;
+${shader.fragmentShader}`
+        // Right after the map has been sampled and before a single light has
+        // been applied. `<map_fragment>` is where diffuseColor becomes the
+        // painted ground; everything downstream of it is lighting.
+        //
+        // TIMES THE FIELD, which is the whole of footprints and the patchy
+        // melt. `uSnow` is how much the sky has laid and the map is how much of
+        // it is still here — so a trodden path is a place where the second
+        // number is low, the mix falls short, and the ground the trail is cut
+        // into shows through wearing the same hour and the same lamplight as
+        // the snow either side of it.
+        //
+        // `vMapUv` and not a varying of ours: the ground has a `map`, so three
+        // has already interpolated exactly the coordinate the planet's own
+        // paint is sampled at, and reusing it is what guarantees the two agree
+        // about where a point on the world is. A second set of UVs would be a
+        // second chance to be a quarter turn out.
         .replace('#include <opaque_fragment>', ADD);
+      if (snowMix) {
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <map_fragment>', `#include <map_fragment>
+        diffuseColor.rgb = mix(
+          diffuseColor.rgb, uSnowTint, uSnow * texture2D( uSnowMap, vMapUv ).r );`);
+      } else {
+        // THE SHELL'S OWN READING OF THE SAME MAP, and it is what makes a trail
+        // legible rather than merely present.
+        //
+        // Geometry alone was not enough, and the measurement is worth keeping.
+        // With the shell dipping into a footprint and nothing else, the trail
+        // came back as a few green fragments where the dip happened to clear
+        // the turf — because only the very core of a soft print goes deep
+        // enough, and a fifth of a unit of relief on a planet fifty round is
+        // invisible at any distance. What reads is COLOUR, and the shell had
+        // none of its own: one flat white lid over everything.
+        //
+        // So the walls of a trail are trodden snow and the floor is the ground
+        // showing through the dip. Between them the path is as bold as it was
+        // before there was any depth, and now it has sides.
+        //
+        // Its own varying rather than `vMapUv`, since the shell has no `map` to
+        // have made one — but the same UVs, off the same sphere, sampling the
+        // same field the ground does. The two cannot disagree about where a
+        // footprint is because there is only one footprint.
+        shader.vertexShader = `varying vec2 vShellUv;\n${shader.vertexShader}`
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvShellUv = uv;');
+        shader.uniforms.uTrodden = this.troddenTint;
+        shader.fragmentShader = `varying vec2 vShellUv;\nuniform vec3 uTrodden;\n${shader.fragmentShader}`
+          .replace('#include <map_fragment>', `#include <map_fragment>
+        float packed = clamp(
+          ( texture2D( uSnowMap, vShellUv ).r - 0.22 ) / 0.6, 0.0, 1.0 );
+        diffuseColor.rgb = mix( uTrodden, diffuseColor.rgb, packed );`);
+      }
     };
   }
 
@@ -5362,8 +5932,31 @@ export class Globe {
   // `r` is the ring's radius. See markRadius, which is where it comes from.
   setWalkMarker(dir, dtMs, lift = 0, r = WALK_MARK.r) {
     if (dir) {
+      // ON TOP OF THE SNOW, not under it. This is the one place the shell's
+      // depth has to leak back into the old contract: every other decal on this
+      // planet is something the snow should cover — a shadow, a puddle, a
+      // splash — and being buried is the correct answer for all of them. The
+      // focus ring is not part of the world at all, it is the app pointing at
+      // something, and a ring that vanished in deep snow would read as the
+      // controls having stopped working.
+      //
+      // Lifted to where the OPEN FIELD stands rather than to the local depth.
+      // Sampling the mask here would be a canvas read per frame to sink the
+      // ring into whatever hollow it is standing over; carrying it at the
+      // field's own height instead leaves it floating a few centimetres inside
+      // a footprint, which nothing about a translucent ring makes visible.
+      //
+      // The height is the shell's, worked out the same way the shell is —
+      // `cover * depth * mask` less the tuck, at the mask a fresh fall lays.
+      // Lifting by the bare depth was near enough while the tuck was nothing
+      // and is not now: at full cover that is 0.37 against a snow surface at
+      // 0.22, and a ring hanging a seventh of a Chiikawa above the ground is
+      // not on the ground. Floored at zero, since below the emergence cover
+      // the shell is under the turf and the old contract is the right one.
       this.walkMark.position.copy(dir)
-        .multiplyScalar(CONFIG.globe.radius + lift);
+        .multiplyScalar(CONFIG.globe.radius + lift
+          + Math.max(0, this.snowAt.value * CONFIG.weather.depth * FIELD_BASE
+            - CONFIG.weather.shellTuck));
       this.walkMark.quaternion.setFromUnitVectors(UP, dir);
       this._markSize(r);
     }
@@ -5966,16 +6559,49 @@ export class Globe {
   // Everything that can be interpolated, at a point in the cross-fade. The sky
   // is the one thing that cannot — you cannot average two paintings — which is
   // what the second dome is for.
+  // THE WEATHER MULTIPLIES THE HOUR, and every line below that reads `w` is
+  // doing exactly that and nothing cleverer.
+  //
+  // It lives inside this method rather than in a pass of its own, and the
+  // reason is the same one that put the hour's own values here: several of
+  // these numbers are read by things further down that would otherwise be
+  // working from the ungraded version. The tint feeds `darkOut`, which feeds
+  // every material on the planet; `skyLow` feeds the pond and the doorway
+  // light; the lamp value feeds the whole of _lightState. Grading afterwards
+  // would mean either re-running all of it or picking which parts to correct,
+  // and picking is how a lighting system ends up with five copies of one rule.
+  //
+  // A weather with nothing in it costs the multiplications and changes no
+  // pixel, which is what makes this safe to leave switched on.
   _applyBlend(t) {
     const { from: a, to: b, swapDisc } = this.blend;
+    // Held for setWeather, which has to be able to ask for this same frame
+    // again when the sky changes without the day having moved.
+    this._blendAt = t;
+
+    const w = this.wx;
+    // The cast colour at this strength: white at wash 0, the full overcast at
+    // wash 1. A multiply and not a lerp toward grey — see WEATHER_CAST for why
+    // that difference is the whole design.
+    const mul = this._wxMul.set(0xFFFFFF).lerp(this._wxCast, w.wash);
+    // A bolt goes the other way, and it is the one thing in the app that
+    // brightens the world past its own hour. Applied as a lift toward white on
+    // the same multiply, so a flash reaches every surface the dark does with no
+    // second path through the lighting.
+    if (this._flash > 0) mul.lerp(WHITE, this._flash);
 
     _cA.set(a.ambient[0]);
     this.ambient.color.copy(_cA.lerp(_cB.set(b.ambient[0]), t));
-    this.ambient.intensity = a.ambient[1] + (b.ambient[1] - a.ambient[1]) * t;
+    this.ambient.intensity = (a.ambient[1] + (b.ambient[1] - a.ambient[1]) * t)
+      * w.amb * (1 + this._flash * 1.4);
 
     _cA.set(a.dir[0]);
     this.sun.color.copy(_cA.lerp(_cB.set(b.dir[0]), t));
-    this.sun.intensity = a.dir[1] + (b.dir[1] - a.dir[1]) * t;
+    // The directional collapses where the ambient barely moves, and that ratio
+    // IS overcast: cloud removes the sun, which is a disc, and leaves the sky,
+    // which is a dome. Take them down together and a grey day comes out as a
+    // dark one instead of a flat one.
+    this.sun.intensity = (a.dir[1] + (b.dir[1] - a.dir[1]) * t) * w.dir;
 
     // ...and the same light again for everything the real one cannot reach —
     // see this.sunUniforms. Copied off the light rather than blended a second
@@ -5985,7 +6611,7 @@ export class Globe {
     this.sunUniforms.uSunLevel.value = this.sun.intensity * SUN_LIT.strength;
 
     _cA.set(a.tint);
-    this.tint.copy(_cA).lerp(_cB.set(b.tint), t);
+    this.tint.copy(_cA).lerp(_cB.set(b.tint), t).multiply(mul);
     // One write, where this was a walk over every unlit material on the planet
     // — see _installHourTint. `this.tint` stays exactly what it was and is
     // still read by half a dozen things that blend against it (the far range,
@@ -6018,13 +6644,22 @@ export class Globe {
     // it, and what a doorway lets into a room is the sky itself. The first two
     // are asking what fraction of this surface is not the surface; the third is
     // asking what colour the light is.
-    _cH.set(a.skyLow).lerp(_cA.set(b.skyLow), t);
+    _cH.set(a.skyLow).lerp(_cA.set(b.skyLow), t).multiply(mul);
     // Kept, because _applyLight needs it after this method has finished with
     // its scratch colours — see the doorway light there.
+    //
+    // Graded with everything else, which is what makes the two things
+    // downstream of it honest in the rain: a pond under a grey sky mirrors a
+    // grey sky, and the light a doorway lets into a room on a wet afternoon is
+    // the colour of a wet afternoon.
     this.skyLow.copy(_cH);
 
     if (this._hazeMat) {
-      this._hazeMat.color.copy(this.tint).lerp(_cH, a.haze + (b.haze - a.haze) * t);
+      // Rain is the most air there ever is, so the far range dissolves further
+      // into the sky than any hour on its own takes it. Clamped, because the
+      // haze is a mix factor and a storm at dusk adds past 1.
+      const haze = Math.min(1, a.haze + (b.haze - a.haze) * t + w.haze);
+      this._hazeMat.color.copy(this.tint).lerp(_cH, haze);
     }
 
     // The water, which is a mirror rather than a surface and so cannot take the
@@ -6034,7 +6669,15 @@ export class Globe {
       waterHour(
         this.ponds, this.tint, _cH,
         a.mirror + (b.mirror - a.mirror) * t,
-        a.glint + (b.glint - a.glint) * t,
+        // The glints go with the sun, because that is what they are. A pond
+        // sparkling under a rain cloud is the one thing that would give the
+        // grade away as a filter laid over the picture rather than as less
+        // light reaching it.
+        (a.glint + (b.glint - a.glint) * t) * w.glint,
+        // ...and how far over it has gone. Laid on top of the hour rather than
+        // replacing it, so a frozen pond is still part of whatever evening the
+        // field around it is having — see the freeze in waterHour.
+        this.iceAt,
       );
     }
 
@@ -6045,6 +6688,15 @@ export class Globe {
     // value to dim from.
     _cA.set(a.tintIn);
     this._tintInBase.copy(_cA).lerp(_cB.set(b.tintIn), t);
+    // ...and the weather reaches in here too, though not all the way. A room is
+    // enclosed, so what the sky does to it arrives only through the openings —
+    // but it does arrive, and it is most of why sheltering from rain is worth
+    // doing: the corners go properly gloomy, which is what leaves the lamp the
+    // brightest thing in the place. See the restore model in light-model.js —
+    // whatever a lamp reaches comes back to daylight regardless, so darkening
+    // this cannot dim the lit half of the room, only deepen the unlit half.
+    _cA.set(0xFFFFFF).lerp(mul, INDOOR_WEATHER);
+    this._tintInBase.multiply(_cA);
 
     // The inside face of the windows used to be painted the sky's own colour
     // here — the one thing in the room that said what hour it was out there.
@@ -6060,22 +6712,73 @@ export class Globe {
     // them from here as well left whoever was in the doorway wearing the sky
     // for a frame, then correcting.
 
-    this._setLamps(a.lamps + (b.lamps - a.lamps) * t);
+    // THE HOUR'S LAMP VALUE, WITH THE WEATHER ADDED. This one line is the whole
+    // of "the houses light up when it rains", and it is worth being clear that
+    // nothing new was built for it.
+    //
+    // `lamps` already means "how dark is it out, and therefore is a lit window
+    // worth drawing" — it is the dusk curve — and the wired bulbs already
+    // follow it multiplied by whether anybody is home. A rained-out afternoon
+    // IS a dusk by that measure, so raising the number lights exactly the
+    // houses somebody has run into and leaves the empty one dark. Nobody had to
+    // be taught to reach for a switch, and the rule that a dark lamp always has
+    // a hand behind it survives untouched: a hand still wins, for as long as
+    // the day lets it.
+    //
+    // The RAW hour goes along beside it, and that is not tidiness. _setLamps
+    // hands the switches back to the clock at each turn of the day, and it
+    // decides whether the day has turned by asking whether this number crossed
+    // LAMP_ONSET. Given the graded value it would call the start of every
+    // shower a dusk and the end of one a dawn — and a dawn takes back every
+    // light anybody switched by hand.
+    const hourLamps = a.lamps + (b.lamps - a.lamps) * t;
+    this._setLamps(Math.min(1, hourLamps + w.lamps), hourLamps);
 
     _cA.set(a.skyMid);
-    this.renderer.setClearColor(_cA.lerp(_cB.set(b.skyMid), t), 1);
+    this.renderer.setClearColor(_cA.lerp(_cB.set(b.skyMid), t).multiply(mul), 1);
 
     this.skyB.material.opacity = t;
 
+    // The cloud deck over the lot of it, wearing the hour as a multiply — see
+    // paintCloudDeck. `this.tint` and not the graded one: the deck IS the thing
+    // doing the darkening, so grading it as well would take the sky down twice
+    // and leave a rained-out noon darker than the ground under it.
+    const cloud = w.sky;
+    const decked = cloud > 0.004;
+    if (decked !== this.deck.visible) this.deck.visible = decked;
+    if (decked) {
+      _cA.set(a.tint).lerp(_cB.set(b.tint), t);
+      // ...lifted toward white before the hour goes on, which is the one thing
+      // that lets a snow sky and a rain sky share a texture.
+      //
+      // They are not the same grey and the difference is not subtle: a rain
+      // cloud is the darkest sky this world has, and a snow cloud is one of the
+      // palest, because the ground under it is white and throws the light
+      // straight back up at it. Painting a second deck was the alternative;
+      // this is one lerp and it moves continuously, so a front turning from
+      // rain to snow BRIGHTENS as it turns rather than swapping skies.
+      if (w.deckLift > 0) _cA.lerp(WHITE, w.deckLift);
+      if (this._flash > 0) _cA.lerp(WHITE, this._flash);
+      this.deck.material.color.copy(_cA);
+      this.deck.material.opacity = cloud;
+    }
+
     // Faded rather than switched, so dusk brings them up instead of turning
     // them on. `stars` is a flag, and only night sets it.
-    this._setStarAlpha((a.stars ? 1 - t : 0) + (b.stars ? t : 0));
+    //
+    // ...and taken out again by cloud, on top of the deck already covering
+    // them. Both, because they are additively blended: a bright star reads
+    // straight through a deck at 60% and a sky with stars in it is a clear one
+    // whatever else is drawn over it.
+    this._setStarAlpha(((a.stars ? 1 - t : 0) + (b.stars ? t : 0)) * (1 - w.veil));
 
     if (!this.discA) return;
+    const seen = this._discShow();
     if (swapDisc) {
-      this.discA.material.opacity = 1 - t;
-      this.discB.material.opacity = t;
+      this.discA.material.opacity = (1 - t) * seen;
+      this.discB.material.opacity = t * seen;
     } else {
+      this.discA.material.opacity = seen;
       _cA.set(a.disc);
       this.discA.material.color.copy(_cA.lerp(_cB.set(b.disc), t));
       this._placeDisc(
@@ -6088,8 +6791,277 @@ export class Globe {
     }
   }
 
-  // Lights on indoors. `v` is the raw phase-to-phase number from daylight.js;
-  // what comes out of LAMP_ONSET and the smoothstep is a curve that stays at
+  // WHERE THE RAINBOW STANDS, and how much of it there is.
+  //
+  // Turned to face AWAY FROM THE SUN, which is the only fact about a rainbow's
+  // position that anybody carries around: it is always on the other side of the
+  // sky from the light. Everything else about the placement is composition —
+  // see bowCentreEl in CONFIG.weather for why the real 42-degree geometry is
+  // unusable on a planet whose horizon is already 34 degrees down.
+  //
+  // It runs every frame rather than on a change, and cheaply: two vectors and a
+  // basis. The sun MOVES — its texel is interpolated across every hour of the
+  // day — so a rainbow aimed once at dawn would be pointing at nothing by
+  // evening, and worse, would swing visibly if it were re-aimed only when
+  // something else happened to ask.
+  _aimBow(dtMs, look) {
+    const w = CONFIG.weather;
+    // Eased toward what the sky says, and this is the only place the easing
+    // happens. `bowEaseMs` is the slowest fade in the app on purpose: a
+    // rainbow that snapped on would read as something being switched on.
+    const want = this.wx.bow || 0;
+    this._bowAt += (want - this._bowAt) * (1 - Math.exp(-dtMs / w.bowEaseMs));
+    const on = this._bowAt > 0.004;
+    if (on !== this.bow.visible) this.bow.visible = on;
+    if (!on) return;
+    this.bow.material.opacity = this._bowAt * w.bowAlpha;
+
+    // The sun's own direction in the sky's frame, from the same texel the disc
+    // is placed at — so the arc and the light it comes from can never disagree.
+    skyDirFromTexel(look.discAt[0], look.discAt[1], SKY_DESIGN.w, SKY_DESIGN.h, _bowSun);
+    // ...flattened to a bearing and reversed. Only the compass direction is
+    // taken from the sun; the height is the composition's.
+    _bowAxis.set(-_bowSun.x, 0, -_bowSun.z);
+    // The sun directly overhead has no bearing to be opposite of. Any will do,
+    // and it lasts one frame — noon's disc is never quite at the zenith.
+    if (_bowAxis.lengthSq() < 1e-9) _bowAxis.set(0, 0, -1);
+    _bowAxis.normalize().multiplyScalar(Math.cos(w.bowCentreEl));
+    _bowAxis.y = Math.sin(w.bowCentreEl);
+    _bowAxis.normalize();
+
+    // Stand the built band on that axis: its own +Z onto the axis, its own +Y
+    // as near to straight up as the axis allows — which is what keeps the crown
+    // at the top of the arc wherever the sun has got to.
+    _bowUp.set(0, 1, 0).addScaledVector(_bowAxis, -_bowAxis.y);
+    if (_bowUp.lengthSq() < 1e-9) _bowUp.set(1, 0, 0);
+    _bowUp.normalize();
+    _bowRight.crossVectors(_bowUp, _bowAxis).normalize();
+    _bowM.makeBasis(_bowRight, _bowUp, _bowAxis);
+    this.bow.quaternion.setFromRotationMatrix(_bowM);
+  }
+
+  // How much of the sun or moon is showing. The deck already covers it
+  // physically — it is nearer and drawn later — and this is the second half of
+  // the same fact: a disc is a bright card, and at any partial cover it reads
+  // straight through the cloud in front of it as a hot spot. Anything above
+  // light cloud takes it out entirely.
+  _discShow() {
+    return 1 - this.wx.veil;
+  }
+
+  // WHAT IS IN THE AIR, handed over by the director. See weather.js.
+  //
+  // It re-paints the frame, and that is the whole of what this method does
+  // beyond storing the value. `updateDaylight` walks away the moment the day
+  // has nothing left to fade, so on a settled afternoon nothing would ever call
+  // `_applyBlend` again and a front rolling in would move no pixel until the
+  // next hour turned. Asking for the same point in the day to be painted again
+  // is cheap — it is what every frame of a cross-fade already does — and it
+  // means the weather needs no second path into the lighting.
+  //
+  // `flash` is the lightning, 0 to 1, and is separate from the grade for the
+  // reason given where it is stored: a bolt is an event on the frame clock,
+  // where the grade is a fact about the sky.
+  // ...and it is called every frame and repaints on almost none of them.
+  //
+  // The guard is worth having rather than being tidiness. `_applyBlend` ends in
+  // `_setLamps`, which is the whole lighting walk — every lamp, every building,
+  // the interior — and `update()` already runs that once a frame through
+  // `_relight`. Repainting unconditionally would run it twice on every frame of
+  // a clear afternoon in exchange for nothing, since a grade that has not moved
+  // paints exactly the pixels that are already on screen.
+  //
+  // A signature and not an equality test, because weather.js publishes ONE
+  // grade object and mutates it in place — deliberately, so nothing downstream
+  // allocates sixty times a second — which means `wx === grade` is true from the
+  // second call onward and says nothing at all. What has to be compared is the
+  // values, and a weighted sum of them is a cheaper way of asking than eight
+  // comparisons that all have to be kept in step with the table.
+  setWeather(grade, flash = 0, ice = 0) {
+    this.wx = grade;
+    this.iceAt = ice;
+    const g = grade;
+    // `ice` is IN the signature, and it has to be. It is not part of the grade
+    // — the ponds freeze off the cover rather than off the sky — but the water
+    // is painted inside the blend, so a surface going over while nothing else
+    // about the weather moved would repaint on no frame at all and the pond
+    // would jump to ice the next time an unrelated number happened to change.
+    const sig = g.wash + g.sky * 3 + g.lamps * 7 + g.veil * 11
+      + g.amb * 13 + g.dir * 17 + g.glint * 19 + g.haze * 23 + flash * 29
+      + g.deckLift * 31 + ice * 37;
+    if (Math.abs(sig - this._wxSig) < 1e-5) return;
+    this._wxSig = sig;
+    this._flash = flash;
+    this._applyBlend(this._blendAt);
+  }
+
+  // What is falling, and what it has left lying — neither of which is part of
+  // the hour, so neither is in the blend. See falling.js.
+  //
+  // The cover is the exception and does TWO things from one number: it is
+  // handed down to the snowmen, which are made of it, and it is written into
+  // the ground's own shader, which is where the planet turns white. One write
+  // rather than a walk, for the reason every other shared uniform here is one.
+  updateRain(dtMs, opts) {
+    if (!this.rain) return;
+    // The arc, aimed and faded. It rides here rather than in the day's own
+    // blend because it has to run on EVERY frame: `updateDaylight` walks away
+    // the moment the hour has finished changing, and a rainbow arrives on a
+    // settled afternoon by definition — that is what a shower ending is.
+    //
+    // Only the sun's BEARING is read, and every hour of this day puts the disc
+    // at the same one (see discAt in daylight.js, whose first number is 300
+    // throughout), so which end of the current fade this asks is a question
+    // with one answer. It is asked of the look rather than assumed, so that
+    // moving the sun round the sky some day moves the rainbow with it.
+    this._aimBow(dtMs, this.blend.to || this.blend.from || LOOK.noon);
+
+    const cover = opts.snow || 0;
+    this.snowAt.value = cover;
+    this._bury(cover);
+    this._winter(cover);
+
+    // HOW DEEP IT STANDS, which is the whole of driving the shell: one number a
+    // frame. The mask says how much snow is at each point and this says how
+    // much there is at all, so a fall rising lifts the whole surface and a
+    // footprint stays a hollow in it throughout.
+    //
+    // Hidden outright below a sliver of cover rather than left parked under the
+    // turf, because a shell that is never seen should not be a draw call either
+    // — and at these depths it would be poking through the grass in blotches
+    // long before it read as snow.
+    if (this.shell) {
+      const deep = cover > 0.02;
+      if (deep !== this.shell.visible) this.shell.visible = deep;
+      if (deep) this.shell.material.displacementScale = cover * CONFIG.weather.depth;
+    }
+    // The field's own clock: filling trodden prints back in while it snows, and
+    // pushing the map to the GPU at most a few times a second. Both are no-ops
+    // on a planet with no snow on it.
+    this.field.update(dtMs, this.wx.flakes || 0);
+    this.rain.update(dtMs, {
+      ...opts, tint: this.tint, grade: this.wx, camera: this.camera,
+    });
+  }
+
+  // WHAT THE SNOW COVERS UP — the grass blades and the flowers, taken down as
+  // the cover comes up. See where `_buried` is collected for why they are
+  // buried rather than repainted white.
+  //
+  // They go under EARLY and completely: the ground is only a third white by the
+  // time the last blade has gone. Snow does not gradually recolour a meadow, it
+  // fills it in, and the shortest things go first — so the meadow reads as
+  // being covered rather than as fading out, which is what a linear ramp
+  // against the cover would have given.
+  //
+  // Guarded on the value rather than run every frame: this is a walk over four
+  // or five merged meshes, and for all but a few seconds of any winter the
+  // answer is the same as last frame's.
+  // THE SCENERY PUTS ITS COAT ON, at the same moment the cast do — see
+  // `dressAt`, which is one number for exactly that reason.
+  //
+  // Its own guard rather than riding on _bury's, and that is not tidiness: the
+  // meadow is fully buried by a third of full cover, so _bury's own check stops
+  // moving there and anything hung on it would never fire at a higher
+  // threshold. Two questions with two different shapes get two guards.
+  //
+  // A SWAP AND NOT A FADE, for the reason every redraw in this project is one:
+  // there is no half-snowy drawing and there should not be. What hides the cut
+  // is when it happens — by `dressAt` the sky is full of snow and the ground is
+  // already going white, so a bush changing is one more thing changing rather
+  // than a thing changing on its own.
+  _winter(cover) {
+    const on = cover > CONFIG.weather.dressAt;
+    if (on !== this._wintered) {
+      this._wintered = on;
+      for (const c of this._snowCards) {
+        c.mesh.material.map = on ? c.winter : c.summer;
+        c.mesh.material.needsUpdate = true;
+      }
+      // A FRESH FIELD, laid once as the snow starts and wiped once as the last
+      // of it goes. See snowfield.js — this is the only place either happens.
+      //
+      // On the rising edge and not continuously, because a fall is one event:
+      // where the drifts end up is decided when the snow arrives, and re-rolling
+      // them under somebody's feet would have the world quietly rearranging
+      // itself while they stood in it. Everything after this is footprints.
+      if (on) this.field.fresh(this._driftFeatures(), makeRandom(WORLD_SEED + 907));
+      else this.field.clear();
+    }
+  }
+
+  // WHERE THE SNOW LIES UNEVENLY, as a list of spots for the field to work
+  // from. It is asked of the scene because the scene is the only thing that
+  // knows where anything is — see `fresh` in snowfield.js for what it does
+  // with them, and why the two kinds pull opposite ways.
+  //
+  // Trees and bushes THIN the snow under them, which is the one of these
+  // anybody notices without being able to name: a paler ring under every
+  // canopy is what stops the trees looking like they were laid on top of a
+  // white sheet. Buildings BANK it against their walls.
+  //
+  // Read off the same `sprites` list the cull and the sort use, so a prop moved
+  // or a prop added brings its own patch of shelter with it and nothing here
+  // has to be told.
+  _driftFeatures() {
+    const R = CONFIG.globe.radius;
+    const out = [];
+    for (const s of this.sprites) {
+      if (s.home) continue;
+      // How wide the thing actually is, taken from the card or the built
+      // shell's own measured height — the same figure the sightline test uses.
+      const reach = s.treeH ? s.treeH * 0.42 : (s.standoff || 0.6) * 1.3;
+      if (reach < 0.35) continue;
+      out.push({ dir: s.normal, r: reach, level: -(s.treeH ? 0.34 : 0.22) });
+    }
+    for (const h of this.homes) {
+      if (!h.building) continue;
+      const wall = h.building.r * R;
+      out.push({
+        dir: h.sprite.normal,
+        r: wall + 1.9,
+        inner: wall + 0.15,
+        level: 0.30,
+      });
+    }
+    return out;
+  }
+
+  // Somebody walked. A thin passthrough so that nothing outside the scene has
+  // to know whether there is any snow to walk in — see `tread` in snowfield.js,
+  // which does nothing at all on a field that has not been laid.
+  tread(key, dir) {
+    this.field.tread(key, dir);
+  }
+
+  _bury(cover) {
+    const hide = Math.min(1, cover / BURY_BY);
+    if (Math.abs(hide - this._buriedAt) < 0.004) return;
+    this._buriedAt = hide;
+    for (const m of this._buried || []) {
+      // Visibility and not opacity, at the far end. These are cut out with
+      // alphaTest and rendered in the OPAQUE pass — see buildGroundCover, which
+      // says so and gives the reason — so an opacity below 1 does nothing at
+      // all to them. What can be done is to stop drawing them, and the shrink
+      // below is what makes that stop invisible.
+      const on = hide < 0.995;
+      if (m.visible !== on) m.visible = on;
+      if (!on) continue;
+      // Sunk into the ground rather than faded out of it, which is what being
+      // covered by snow looks like: the blades get shorter and shorter until
+      // there is nothing above the surface. Scaling toward the planet's centre
+      // is the whole of it — every one of these is built standing on the
+      // sphere, so shrinking about the origin shortens each blade along its own
+      // normal without moving where it grows.
+      m.scale.setScalar(1 - hide);
+    }
+  }
+
+  // Lights on indoors. `v` is the raw phase-to-phase number from daylight.js
+  // with the weather already added; `hourV` is the same number WITHOUT it, and
+  // the handback below is the only thing that reads the difference.
+  //
+  // What comes out of LAMP_ONSET and the smoothstep is a curve that stays at
   // nothing through the first part of dusk and then comes up in one movement.
   //
   // The shaping is not decoration. The lit sheet is a second whole drawing of
@@ -6098,7 +7070,7 @@ export class Globe {
   // does not read as dusk, it reads as a double exposure. Held off and then
   // brought up, it reads as somebody switching a light on, which is the thing
   // actually being depicted.
-  _setLamps(v) {
+  _setLamps(v, hourV = v) {
     this._lampAt = v;
     const u = (v - LAMP_ONSET) / (1 - LAMP_ONSET);
     const shape = u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u);
@@ -6148,7 +7120,17 @@ export class Globe {
     // at noon and it burns at full through the whole night, whoever wanders
     // home or does not; dawn takes it back, and the following dusk the room
     // lights itself again.
-    const evening = shape > 0;
+    // ...AND IT ASKS THE HOUR, NOT THE SKY. `hourV` is this same number with
+    // the weather taken back out, and using it here is the difference between
+    // a shower and a day.
+    //
+    // Given the graded value, the start of every rain front would look to this
+    // like a dusk and the end of one like a dawn — so a lamp anybody had
+    // switched by hand would be taken back off them the moment the sky
+    // cleared, which is the exact failure the note above spent a paragraph
+    // fixing. The day changing its mind is a thing the DAY does. Rain is
+    // weather, and weather does not reach the switches.
+    const evening = (hourV - LAMP_ONSET) > 0;
     if (this._eveningWas && !evening) {
       for (const L of this.itemLights) {
         if (!L.night) continue;
@@ -7293,7 +8275,11 @@ export class Globe {
     this.skyB.visible = false;
     if (this.discA) {
       this.discB.visible = false;
-      this.discA.material.opacity = 1;
+      // ...and only as much of it as the cloud is leaving. This used to read a
+      // flat 1, which was the whole truth while a sky could only be clear: a
+      // day settling into its next hour under a rain front would have put the
+      // sun back on screen at full strength.
+      this.discA.material.opacity = this._discShow();
     }
     bl.swapDisc = false;
     this._seg = -1;
@@ -8074,7 +9060,10 @@ export class Globe {
     // set to repeat so sliding an offset moves every highlight at once, and the
     // boil is a swap. One clock for both ponds, because two ponds sparkling out
     // of step would be two different afternoons.
-    if (this.ponds) driftWater(this.ponds, t / 1000);
+    // Frozen, this returns immediately and the surface stops moving — which is
+    // the one place this whole feature makes the app cheaper rather than
+    // dearer. See driftWater.
+    if (this.ponds) driftWater(this.ponds, t / 1000, this.iceAt);
 
     // ...and the fish under them, who mind where you are stood.
     if (this.fish) this.fish.update(t, anchor);

@@ -17,11 +17,15 @@ import { CONFIG } from './config.js';
 import {
   UP, surfacePoint, orientBillboard, localFrame, dirFromLatLon, inLake, lakeReach,
   inBuilding, keepOutside, groundCap, SHADOW_LIFT,
-  inSolid, keepOffSolids,
+  inSolid, keepOffSolids, underRoof,
 } from './sphere.js';
 import { paintSheet, sheetBounds, paintShadow, EXPRESSIONS } from './art.js';
 import { IMG } from './assets.js';
 import { WATER_STENCIL } from './water.js';
+// Asked of the director for the same reason the hour is: one place decides. A
+// pond that is ground to one walker and water to another would be a pond two
+// characters disagreed about while standing on it together.
+import { pondsFrozen } from './weather.js';
 import { fitHeld, heldMaterials } from './furniture.js';
 
 function clampUnit(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
@@ -268,6 +272,55 @@ export class Character {
     for (const name of EXPRESSIONS) this.sheet[name] = sheetTex(sheets[name] || sheets.normal);
     this.blinkTex = sheets.blink ? sheetTex(sheets.blink) : null;
 
+    // THE WINTER WARDROBE, built exactly as the one above and switched between
+    // by `setDressed`. See IMG.snow in assets.js.
+    //
+    // Built up front and never rebuilt, which is the whole reason a costume
+    // change costs nothing. Painting a sheet means a canvas, a decode and a
+    // texture upload per expression per character, and doing that at the moment
+    // the snow starts would be a visible hitch on the one frame the world is
+    // asking you to look at it. Both wardrobes are on the GPU from the start
+    // and putting a coat on is a pointer swap.
+    //
+    // THE COAT IS NEVER TAKEN OFF TO SHOW A FACE, and the fallback used to do
+    // exactly that.
+    //
+    // It fell back per expression to the SUMMER sheet, reasoning that an
+    // expression is what a line is for and a costume is not — right face, wrong
+    // clothes, the same trade every other half-drawn thing here makes. Against
+    // the actual art that reasoning trades a coat for nothing whatsoever, which
+    // is the one outcome it was not weighed against.
+    //
+    // Measured: the expressions with no snow drawing are `sleepy` and `worried`
+    // for all three, plus `delight` for two of them — and NONE of those has a
+    // distinct summer drawing either. They already resolve to the resting face.
+    // So the old chain went "no snow worried → summer worried → summer normal":
+    // the resting face with the coat taken off, to preserve an expression that
+    // was never drawn. Chiikawa is worried often, so he shed his scarf several
+    // times a minute in the middle of a snowfall.
+    //
+    // The chain now stops at the snow resting face, which is the same face
+    // wearing the right clothes. Where a snow expression HAS been drawn nothing
+    // changes; where one has not, the remedy is to draw it rather than to
+    // undress somebody.
+    const snowSheets = IMG.snow[spec.key] || {};
+    const dressedAtAll = Object.keys(snowSheets).length > 0;
+    const snowRest = snowSheets.normal ? sheetTex(snowSheets.normal) : this.sheet.normal;
+    this.snowSheet = {};
+    for (const name of EXPRESSIONS) {
+      this.snowSheet[name] = snowSheets[name] ? sheetTex(snowSheets[name])
+        : (dressedAtAll ? snowRest : this.sheet[name]);
+    }
+    // Blinking is a FACE and a coat is not, so the same rule applies one step
+    // further: with a wardrobe but no snow blink, they simply do not blink
+    // while it is on. `_applySheet` reads a null here as "nothing to overlay"
+    // and keeps whatever they are wearing, which is the point.
+    this.snowBlinkTex = snowSheets.blink ? sheetTex(snowSheets.blink)
+      : (dressedAtAll ? null : this.blinkTex);
+    // WRAPPED UP OR NOT. Written by main.js off the ground cover, and read by
+    // nothing but _pickSheet below.
+    this.dressed = false;
+
     // Sitting is a POSTURE, not an expression, and the difference decides how
     // it is drawn. An expression is what the face is doing and changes with
     // every line; a posture is what the body is doing and lasts as long as they
@@ -282,6 +335,13 @@ export class Character {
     // that character's `sheets` in cast.js, and it starts being used with no
     // other change anywhere.
     this.sitTex = sheets.sit ? sheetTex(sheets.sit) : null;
+    // ...and the same for sitting down. With a wardrobe but no snow sit sheet
+    // this is null, which _applySheet reads as "no posture drawing" and answers
+    // by keeping the standing card — so somebody sits in their coat, sunk, the
+    // way an undrawn posture has always behaved. Falling back to the SUMMER sit
+    // would have taken the coat off the moment they took a cushion.
+    this.snowSitTex = snowSheets.sit ? sheetTex(snowSheets.sit)
+      : (dressedAtAll ? null : this.sitTex);
     this.posture = 'stand';
     this.seatY = 0;
 
@@ -330,6 +390,18 @@ export class Character {
     } else {
       this.flyTex = null;
     }
+    // The glide again, wrapped up. Only the TEXTURE and not a second plane: the
+    // pose is measured from the summer drawing and both wear it, which is the
+    // same constraint assets.js checks the canvas sizes against. A winter glide
+    // on a differently proportioned canvas would arrive stretched, and there is
+    // nowhere sensible to put a second `pose.fly` — the plane is what the
+    // posture IS, and a coat does not change what shape a gliding momonga is.
+    // The glide, and the ONE posture where falling back to summer is still
+    // right: a glide is a whole different silhouette, so with no snow drawing
+    // the choice is the summer glide or no glide at all — and a momonga
+    // mid-flight is not something to answer by putting them back on their feet.
+    // It never bites in practice; `momonga-fly-snow.png` is drawn.
+    this.snowFlyTex = snowSheets.fly ? sheetTex(snowSheets.fly) : this.flyTex;
 
     this.bodyMesh = new THREE.Mesh(
       this.pose.stand.geo,
@@ -414,11 +486,12 @@ export class Character {
     // spot they stopped at rather than at a place remembered separately.
     this.asleep = false;
     this._shown = true;
-    // ON THEIR WAY TO BED, which is the one errand that does not stop for you.
-    // Written by household.js alongside `errand`, and read in exactly one place
-    // — the politeness freeze in _wander. See the note there for what it cost
-    // to learn that bedtime could not share a stroll's manners.
-    this.turningIn = false;
+    // ON AN ERRAND THAT DOES NOT STOP FOR YOU — going to bed, or getting out of
+    // the rain. Written by household.js alongside `errand`, and read in exactly
+    // one place, the politeness freeze in _wander. See the note there for what
+    // it cost to learn that a walk with a deadline could not share a stroll's
+    // manners.
+    this.hurrying = false;
     this.expression = 'normal';
     this.talking = false;
     this.blinkUntil = 0;
@@ -572,8 +645,36 @@ export class Character {
 
   setExpression(name) {
     this.expression = name;
-    this._sheetTex = this.sheet[name] || this.sheet.normal;
+    this._pickSheet();
+  }
+
+  // WHICH WARDROBE, worked out in one place because two things change it and
+  // they change at completely different rates: the face changes with every
+  // line, and the clothes change twice a winter.
+  //
+  // It was inlined in setExpression, which was fine while there was one set of
+  // drawings. With two, putting a coat on would have had to wait for somebody
+  // to say something before it showed.
+  _pickSheet() {
+    const wear = this.dressed ? this.snowSheet : this.sheet;
+    this._sheetTex = wear[this.expression] || wear.normal;
     this._applySheet();
+  }
+
+  // Wrapped up, or not. Written from the ground cover — see snowCover in
+  // weather.js — and a no-op on every frame but the two it changes on.
+  //
+  // A FLAG AND NOT A FADE, deliberately, and it is the same argument the art
+  // direction makes everywhere else here: this world redraws rather than
+  // transforms. There is no half-dressed drawing and there should not be one —
+  // cross-fading a character between two costumes is a double exposure, which
+  // is exactly what the lit house sheet is shaped to avoid. What hides the cut
+  // is WHEN it happens: the cover has to build up before anybody is dressed,
+  // and by then the sky is full of snow and the ground is going white.
+  setDressed(on) {
+    if (this.dressed === !!on) return;
+    this.dressed = !!on;
+    this._pickSheet();
   }
 
   _applySheet() {
@@ -582,11 +683,14 @@ export class Character {
     // With no such sheet this falls through and they sit, or glide, in whatever
     // their face is doing, which is the half-drawn state the whole cast is
     // designed to survive.
-    const posed = (this.posture === 'sit' && this.sitTex) ? this.sitTex
-      : (this.posture === 'fly' && this.flyTex) ? this.flyTex
+    const sit = this.dressed ? this.snowSitTex : this.sitTex;
+    const fly = this.dressed ? this.snowFlyTex : this.flyTex;
+    const blink = this.dressed ? this.snowBlinkTex : this.blinkTex;
+    const posed = (this.posture === 'sit' && sit) ? sit
+      : (this.posture === 'fly' && fly) ? fly
         : null;
     const tex = posed
-      || ((this._blinking && this.blinkTex) ? this.blinkTex : this._sheetTex);
+      || ((this._blinking && blink) ? blink : this._sheetTex);
     if (this.bodyMesh.material.map === tex) return;
     this.bodyMesh.material.map = tex;
     this.bodyMesh.material.needsUpdate = true;
@@ -804,8 +908,16 @@ export class Character {
 
     // And out of the water. A target that lands in a lake gets slid to its
     // near rim rather than rerolled, so they still head the way they meant to.
+    //
+    // ...UNLESS IT IS FROZEN, in which case the pond is simply ground and this
+    // whole correction stands down. Nothing else has to be written for the cast
+    // to use the ice: a stroll is a random bearing with the illegal places
+    // pushed out of it, so removing the push is the whole of "they may walk on
+    // it". The first winter this shipped, Usagi wandered out into the middle of
+    // a pond and stood there, and not one line was written to make him.
     const keep = cfg.waterKeep;
     for (const lake of CONFIG.lakes) {
+      if (pondsFrozen()) break;
       if (!inLake(this.target, lake, keep)) continue;
       dirFromLatLon(lake.lat, lake.lon, _lake);
       _away.copy(this.target).addScaledVector(_lake, -this.target.dot(_lake));
@@ -972,8 +1084,65 @@ export class Character {
     return false;
   }
 
-  // Whether a direction sits in one of the lakes, with a margin.
+  // THE THAW, for somebody who was standing on it.
+  //
+  // This is the one genuinely dangerous moment in the whole freeze, and it is
+  // dangerous in the way this file has been caught out by twice already: a
+  // walker whose own position is somewhere they may not be can never plan a
+  // step, because every plan is trimmed at the first illegal sample and the
+  // first sample is where they are. They do not wander badly — they stop
+  // forever. It is the same shape as a bed inside a berth, and it would arrive
+  // twenty minutes after anybody was still watching the pond.
+  //
+  // So the ice hands them back. Straight out along their own bearing from the
+  // middle, to just past the rim — the same arithmetic `_pickTarget` uses to
+  // slide a target out of water, applied to the body instead of the target.
+  //
+  // YOU are not rescued and should not be: the player standing on a thawing
+  // pond starts paddling, which is a thing the app already draws and a small
+  // joke worth having. The difference is that you can walk out and they cannot.
+  leaveWater() {
+    const keep = CONFIG.wander.waterKeep;
+    for (const lake of CONFIG.lakes) {
+      if (!inLake(this.dir, lake, keep)) continue;
+      dirFromLatLon(lake.lat, lake.lon, _lake);
+      _away.copy(this.dir).addScaledVector(_lake, -this.dir.dot(_lake));
+      // Dead in the middle, so no bearing of their own to leave along. Any will
+      // do, and being nearest the middle they have the furthest to go whichever
+      // way they are sent.
+      if (_away.lengthSq() < 1e-8) {
+        localFrame(_lake, _east, _north);
+        _away.copy(_north);
+      }
+      _away.normalize();
+      const edge = lakeReach(lake, _away, keep);
+      this.dir.copy(_lake).multiplyScalar(Math.cos(edge))
+        .addScaledVector(_away, Math.sin(edge)).normalize();
+      // Whatever they were walking toward was planned across a frozen pond, so
+      // it is not a walk any more. Dropping it puts them back on the ordinary
+      // rest-and-re-pick cycle from wherever the shore turned out to be.
+      //
+      // `target` is left alone deliberately — it is a reused vector rather than
+      // a nullable one, and `_pickTarget` copies into it. Clearing `walking` is
+      // what makes it stale rather than wrong: nothing reads a target while
+      // nobody is walking, and the next pick overwrites it.
+      this.walking = false;
+      this.errand = null;
+      return true;
+    }
+    return false;
+  }
+
+  // Whether a direction sits in WATER — which a frozen pond is not.
+  //
+  // The gate belongs here rather than at each call site because this is the one
+  // question the cast ask about ponds while they are walking, and the answer
+  // "it is ground now" is true for every one of those askers at once. `inLake`
+  // underneath is untouched and stays the plain geometric fact: everything that
+  // PLACES something permanent still avoids the pond, frozen or not, because a
+  // stump does not grow on a pond in July on the strength of a cold January.
   _inWater(dir, margin) {
+    if (pondsFrozen()) return false;
     for (const lake of CONFIG.lakes) {
       if (inLake(dir, lake, margin)) return true;
     }
@@ -997,13 +1166,21 @@ export class Character {
     // Being visited, or you have walked right up to them, or mid-conversation
     // with one of the others: stay put.
     //
-    // NOTHING HOLDS SOMEBODY WHO IS GOING TO BED. Both of these rules are right
+    // NOTHING HOLDS SOMEBODY WHO IS IN A HURRY. Both of these rules are right
     // for a STROLL, which has nowhere it needs to get to: a friend who wandered
     // over should stop, the one you came to see should not amble off
-    // mid-sentence, and two of them talking should finish. Bedtime is the only
-    // errand in this world with a deadline, so it outranks all of it — see
-    // `turningIn`, which household.js sets for exactly as long as the walk home
-    // lasts.
+    // mid-sentence, and two of them talking should finish. An errand with a
+    // DEADLINE outranks all of it — see `hurrying`, which household.js sets for
+    // exactly as long as one of those walks lasts.
+    //
+    // There are two of them, and they arrived a long way apart. Bedtime was the
+    // first and for a while the only one, which is why this flag used to be
+    // called `turningIn`. Getting out of the rain is the second, and it wants
+    // every word of the paragraph below without changing one of them: the same
+    // deadline, the same walk, the same reason a friend stood next to you must
+    // not be able to hold somebody in a downpour by being interested in them.
+    // One name for one fact, rather than two flags that would have to be
+    // checked together at all three sites below.
     //
     // The arrival spot alone was enough to break this. You are set down on the
     // doorstep 3.6 units from Chiikawa — exactly `closeArc` — so setting the
@@ -1020,11 +1197,31 @@ export class Character {
     // does. What keeps it from reading as marching is their own walk rhythm,
     // which is untouched.
     const dot = watcher ? this.dir.dot(watcher.dir) : -1;
+    // ...AND NOT INDOORS, where mere nearness is not information.
+    //
+    // `closeArc` is 3.6 and a room is about four and a half across, so under a
+    // roof you are inside that radius of everybody in it from every spot on the
+    // floor — including the doorway you came in by. The proximity half of this
+    // test therefore never goes false indoors, and a character given a walk
+    // across the room could not take a step of it while you were in there with
+    // them. Two sheltering from the same shower froze wherever the arithmetic
+    // caught them, side by side, for as long as the rain lasted.
+    //
+    // The arc was measured for the garden, where backing off a few paces is a
+    // thing you can do and choosing not to is a thing you are saying. Indoors
+    // there is nowhere to back off to, so it says nothing. The same exemption,
+    // by the same reasoning and against the same constant, is already in
+    // camera-control.js — see `tooClose` there.
+    //
+    // ATTENTIVE IS UNTOUCHED. Somebody actually turned toward you and talking
+    // still waits, indoors as much as out: that half is about what they are
+    // doing, not about how much floor happens to be between you.
+    const roofed = !!underRoof(this.dir);
     const playerHere = !!watcher && watcher.alt < cfg.noticeAlt && (
       (this.attentive && dot > Math.cos(cfg.noticeArc / R))
-      || dot > Math.cos(cfg.closeArc / R)
+      || (!roofed && dot > Math.cos(cfg.closeArc / R))
     );
-    if (!this.turningIn && (tMs < this.busyUntil || playerHere)) {
+    if (!this.hurrying && (tMs < this.busyUntil || playerHere)) {
       if (this.walking) {
         this.walking = false;
         this.restUntil = tMs + cfg.interruptRest;
@@ -1034,11 +1231,12 @@ export class Character {
 
     if (!this.walking) {
       if (tMs < this.restUntil) return;
-      // NOBODY TURNING IN WANDERS. A bedtime walk always carries an errand, so
-      // this is a guard rather than a case: if one ever arrived here without
-      // one, a random stroll is the last thing it should become — that is the
-      // difference between going to bed and pottering about at midnight.
-      if (this.turningIn && !this.errand) return;
+      // NOBODY IN A HURRY WANDERS. A walk with a deadline always carries an
+      // errand, so this is a guard rather than a case: if one ever arrived here
+      // without one, a random stroll is the last thing it should become — that
+      // is the difference between going to bed and pottering about at midnight,
+      // and between running for the door and ambling home in the wet.
+      if (this.hurrying && !this.errand) return;
       this._pickTarget(this.errand);
       // A trip that came back empty was aimed into a lake, or over a pole, or
       // straight at a tree, and pulled back to where they already stand —
@@ -1082,10 +1280,10 @@ export class Character {
       // might not be going to bed. It is the pause between the paces that made
       // midnight feel like it had not really happened.
       //
-      // Somebody turning in arrives and sets off again on the next frame. The
+      // Somebody in a hurry arrives and sets off again on the next frame. The
       // walk cycle itself is untouched, so they still walk rather than glide;
       // what is gone is the standing about.
-      if (!this.turningIn) {
+      if (!this.hurrying) {
         this.restUntil = tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin);
       }
     } else {

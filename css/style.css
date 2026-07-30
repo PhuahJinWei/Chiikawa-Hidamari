@@ -3,6 +3,75 @@
   --paper: #FFFDF7;
   --sky: #EAF6FB;
   --pink: #F6A6B6;
+
+  /* ------------------------------------------------------- THE BUTTON SHELL
+     One recipe, worn by every control on the screen: the pill stack, the thumb
+     circles, the verbs, the sheet's buttons and the front door's.
+
+     It replaced a flat 2.5px ink outline on translucent paper. Three things
+     changed and each is doing a job:
+
+     - THE RING MOVED INSIDE. A ring drawn a couple of pixels in from the edge,
+       with the face colour showing outside it, is what makes these read as
+       pressable objects rather than as outlined shapes. It is the whole trick.
+     - THE RING IS LIGHTER THAN THE INK. #7A5C57 against the face is 5.6:1, so
+       it carries icons and words safely while being soft enough that a screenful
+       of controls does not read as a cage. The ink is still the TEXT colour.
+     - THERE IS A WHITE RIM AND A SOFT DROP. Those two together are what let the
+       fill be opaque: the old translucency was doing separation-from-the-world
+       by hand, badly, and a rim does it properly at any hour and over anything.
+
+     `--ring-w` and `--ring-gap` are read from whatever element uses the recipe,
+     because a ring wants to be about a tenth of the thing it is on — see the
+     overrides on the big thumb circles. var() inside a custom property resolves
+     where it is USED, not where it is written, which is the whole reason this
+     can be one shared value instead of one per size. */
+  --face: #FDF6EA;
+  --ring: #7A5C57;
+  --rim: #FFFFFF;
+  --drop: 0 4px 10px rgba(91, 76, 68, 0.2);
+
+  --shell:
+    inset 0 0 0 var(--ring-gap, 2px) var(--face),
+    inset 0 0 0 var(--ring-w, 6px) var(--ring),
+    0 0 0 3px var(--rim),
+    var(--drop);
+
+  /* LIVE, and it used to be "filled with the ink". That said *on* well enough on
+     a checkbox and badly on a button: ink-filled reads as inverted or spent
+     rather than as the one thing the world is actually offering. A saturated
+     face with white content reads as live at a glance, which is what it is for —
+     the armed sprint, the verb under your thumb, じどう following the clock.
+     White inside the rim rather than the mauve, so the shape still has a ring
+     but the ring belongs to the accent.
+
+     THE ONE PLACE THIS DEPARTS FROM THE REFERENCE, and deliberately. Those
+     buttons are white content on a saturated bubblegum, which measures 2.17:1 —
+     less than half of legible, on the most important button in the app, on a
+     phone that gets used outdoors. So the accent is lifted until the app's own
+     ink carries on it instead: #FFAEC8 against #5B4C44 is 4.81:1, which clears AA
+     for ordinary text at any size. It is a paler pink than the reference and it
+     is still the only saturated thing on any screen it appears on, which is all
+     "live" has to be. */
+  --accent: #FFAEC8;
+
+  --shell-live:
+    inset 0 0 0 var(--ring-w, 6px) rgba(255, 255, 255, 0.82),
+    0 0 0 3px var(--rim),
+    var(--drop);
+
+  /* THE SAME IDEA, FOR CONTROLS THAT SIT ON A PANEL rather than over the world.
+     The white rim and the drop above are doing one job — holding a button off a
+     meadow — and on a paper card there is nothing to be held off. Keeping them
+     there just makes a dense panel look like it is made of stickers. So the
+     inner ring stays, because that is the language, and the separation goes,
+     because there is nothing to separate from. */
+  --shell-flat:
+    inset 0 0 0 var(--ring-gap, 2px) var(--face),
+    inset 0 0 0 var(--ring-w, 4px) var(--ring);
+
+  --shell-flat-live: inset 0 0 0 var(--ring-w, 4px) rgba(255, 255, 255, 0.8);
+
   font-family: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic', sans-serif;
 }
 
@@ -233,10 +302,12 @@ html, body {
   right: 0;
   top: 0;
   z-index: 8;
+  /* TWO CORNERS, and the split is what the bar is for: readings on the left,
+     things you press on the right. `space-between` rather than a gap, so the two
+     hold their own corners however wide either grows. */
   display: flex;
   align-items: flex-start;
-  justify-content: flex-end;
-  gap: 12px;
+  justify-content: space-between;
   padding: calc(0.75rem + env(safe-area-inset-top)) 1rem 0;
   pointer-events: none;
   opacity: 0;
@@ -245,74 +316,131 @@ html, body {
 
 .controls.is-ready { opacity: 1; }
 
+/* THINNER THAN THE REST OF THE SET, on purpose.
+
+   `--ring-w` is where the ring ENDS, measured in from the edge, and `--ring-gap`
+   is where it starts — so what you actually see is the difference between them.
+   At 5 and 2 that was 3px of mauve, and on a 46px pill three of them stacked in a
+   column that read as a fence. At 3.5 it is 1.5px: the same ring, the same
+   language, a third of the weight.
+
+   The stack is the one family that wants this. The thumb circles are 80px and 64px
+   and carry 4px happily; these are the smallest things on the screen and there are
+   up to five of them touching. Fractional widths are safe here in a way they are
+   not on a border — box-shadow spread keeps them, `border-width` floors them. */
 .ctl {
+  --ring-w: 3.5px;
+  --ring-gap: 2px;
   pointer-events: auto;
   font-family: inherit;
-  font-weight: 500;
+  font-weight: 700;
   color: var(--ink);
-  background: rgba(255, 253, 247, 0.94);
-  border: 2.5px solid var(--ink);
+  background: var(--face);
+  border: none;
+  box-shadow: var(--shell);
   cursor: pointer;
   padding: 0;
   transition: transform 0.12s ease, background 0.15s ease;
 }
 
-.ctl:active { transform: scale(0.92); background: var(--paper); }
-
-.ctl-pill {
-  min-width: 96px;
-  height: 46px;
-  border-radius: 23px;
-  font-size: 0.95rem;
-  padding: 0 1.1rem;
+/* Presses go DOWN, not just smaller. A soft-shadowed object that only shrinks
+   reads as receding; dropping it into its own shadow at the same time is what
+   makes it read as pressed. */
+.ctl:active {
+  transform: translateY(2px) scale(0.96);
+  box-shadow:
+    inset 0 0 0 var(--ring-gap, 2px) var(--face),
+    inset 0 0 0 var(--ring-w) var(--ring),
+    0 0 0 3px var(--rim),
+    0 1px 4px rgba(91, 76, 68, 0.2);
 }
 
 .ctl-stack {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 10px;
+  gap: 12px;
 }
 
-/* The drawer's handle, and the only round control up here. Round because it is
-   neither of the two things this screen has shapes for — it is not a verb you
-   press to make something happen in the world, and it is not a reading you
-   glance at — and three dots is the one glyph that can say "there is more"
-   without having to say more of what. Filled when it is open, which is the word
-   じどう and an armed sprint already use for a state that is on. */
-.ctl-more {
-  width: 46px;
-  min-width: 0;
-  height: 46px;
-  border-radius: 50%;
+/* A DISC AND A WORD UNDER IT, rather than a word inside a pill.
+
+   The pills were 96px, 118px and a clock that changed width with the hour, in a
+   column aligned to its right edge — so nothing lined up with anything and the
+   whole corner shifted whenever the day did. A fixed disc cannot do that: two
+   52px circles align forever, whatever the labels say.
+
+   The word stays because this app talks. Every other control here is a word, and
+   a bare glyph would be the only thing on screen asking to be guessed at. It sits
+   OUTSIDE the disc so the disc can stay a circle — the shell is on the disc, not
+   on the button, which is why the button itself is bare. */
+.ctl-icon {
+  pointer-events: auto;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.ctl-more svg {
-  width: 22px;
-  height: 22px;
-  fill: currentColor;
+.ctl-disc {
+  --ring-w: 4px;
+  --ring-gap: 2.5px;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--face);
+  box-shadow: var(--shell);
+  transition: transform 0.12s ease, box-shadow 0.16s ease;
 }
 
-.ctl-more[aria-expanded="true"] {
-  background: var(--ink);
-  color: var(--paper);
+.ctl-icon:active .ctl-disc {
+  transform: translateY(2px) scale(0.94);
+  box-shadow:
+    inset 0 0 0 var(--ring-gap) var(--face),
+    inset 0 0 0 var(--ring-w) var(--ring),
+    0 0 0 3px var(--rim),
+    0 1px 4px rgba(91, 76, 68, 0.2);
 }
 
-/* Away by default, AND TAKING THEIR ROOM WITH THEM. `display` rather than
-   opacity or a transform, because a pill that is merely invisible still holds
-   46px of the stack open, and the room is the entire point of folding them. */
-.ctl-stack:not(.is-more) #time,
-.ctl-stack:not(.is-more) #zukan { display: none; }
-
-/* Out of the button they live behind, which is directly above them. */
-.ctl-stack.is-more #time,
-.ctl-stack.is-more #zukan {
-  transform-origin: top right;
-  animation: act-pop 0.2s cubic-bezier(0.22, 1.2, 0.36, 1);
+.ctl-disc svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: var(--ring);
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.28s cubic-bezier(0.22, 1.2, 0.36, 1);
 }
+
+/* Coming DOWN is the same drawing upside down, which is the cheapest possible way
+   for one glyph to carry both directions and read as the same object either way. */
+.ctl-disc svg.is-down { transform: rotate(180deg); }
+
+/* Over a world that can be any colour by any hour, so it carries its own contrast
+   rather than trusting the sky behind it. */
+.ctl-cap {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #FFFFFF;
+  text-shadow:
+    -1.5px -1.5px 0 var(--ink), 0 -1.5px 0 var(--ink), 1.5px -1.5px 0 var(--ink),
+    -1.5px 0 0 var(--ink), 1.5px 0 0 var(--ink),
+    -1.5px 1.5px 0 var(--ink), 0 1.5px 0 var(--ink), 1.5px 1.5px 0 var(--ink);
+}
+
+/* Two rules stood here folding #time, #sky and #zukan in and out of the drawer.
+   All three of those elements are gone — the first two merged into the chip in
+   the other corner and the third became a tab in the sheet — so the rules were
+   describing a stack that no longer has anything to hide. */
 
 /* ---------------------------------------------------------- action buttons
 
@@ -346,20 +474,26 @@ html, body {
    hand rather than for a toolbar. Shape carries the role — round is a verb,
    pill is a state — so the two families read apart without needing two looks. */
 .act {
+  /* A ring wants to be about a tenth of the thing it is on, and these are the
+     two biggest controls on the screen — 80px and 64px against the stack's 46.
+     At the shared 5px they read as hairlines by comparison. */
+  --ring-w: 7px;
+  --ring-gap: 3px;
   position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border-radius: 50%;
-  background: rgba(255, 253, 247, 0.94);
-  border: 2.5px solid var(--ink);
-  color: var(--ink);
+  background: var(--face);
+  border: none;
+  box-shadow: var(--shell);
+  color: var(--ring);
   pointer-events: auto;
   cursor: pointer;
   touch-action: none;
   transition: transform 0.1s ease, background 0.16s ease, color 0.16s ease,
-              opacity 0.22s ease;
+              box-shadow 0.16s ease, opacity 0.22s ease;
 }
 
 .act svg {
@@ -370,7 +504,14 @@ html, body {
   stroke-linejoin: round;
 }
 
-.act:active { transform: scale(0.9); background: var(--paper); }
+.act:active {
+  transform: translateY(2px) scale(0.94);
+  box-shadow:
+    inset 0 0 0 var(--ring-gap) var(--face),
+    inset 0 0 0 var(--ring-w) var(--ring),
+    0 0 0 3px var(--rim),
+    0 1px 4px rgba(91, 76, 68, 0.2);
+}
 
 /* The arc a right thumb actually sweeps: the primary in the corner where the
    thumb rests, the secondary up and inboard along the same curve. Their centres
@@ -465,11 +606,12 @@ html, body {
   bottom: calc(132px + env(safe-area-inset-bottom));
 }
 
-/* Paper and ink, the same recipe as every other surface here: a glyph to find
-   it by and a word to read. The glyph earns its place in a column — four pills
-   are four similar shapes, and you should be able to pick the one you want out
-   of them without reading all four. */
+/* The same shell as every other control here: a glyph to find it by and a word
+   to read. The glyph earns its place in a column — four pills are four similar
+   shapes, and you should be able to pick the one you want out of them without
+   reading all four. */
 .ix {
+  --ring-w: 5px;
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -478,8 +620,9 @@ html, body {
   min-width: 96px;
   padding: 0 1.05rem 0 0.9rem;
   border-radius: 23px;
-  border: 2.5px solid var(--ink);
-  background: rgba(255, 253, 247, 0.94);
+  border: none;
+  background: var(--face);
+  box-shadow: var(--shell);
   color: var(--ink);
   font-family: inherit;
   font-size: 0.88rem;
@@ -495,13 +638,16 @@ html, body {
   transition: transform 0.1s ease, background 0.16s ease, color 0.16s ease;
 }
 
+/* Ring-coloured, like every other drawn mark — and it has to be `stroke` set
+   explicitly rather than `currentColor`, because the word beside it is ink and
+   the two no longer agree. The primary puts both back to white together. */
 .ix svg {
   flex: none;
   width: 20px;
   height: 20px;
   fill: none;
-  stroke: currentColor;
-  stroke-width: 2.3;
+  stroke: var(--ring);
+  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -562,15 +708,18 @@ html, body {
 }
 
 /* The bottom entry: the one under the thumb, and the one the world is really
-   offering. Filled with the ink, which is this app's word for that — and since
-   a single verb on offer is the common case by a long way, the ordinary stack
-   is one filled pill, exactly the control this replaced. */
+   offering. It wears the accent, which is this screen's one word for live — and
+   since a single verb on offer is the common case by a long way, the ordinary
+   stack is one accent pill with a column of quiet ones over it. */
 .ix.is-primary {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-live);
   font-size: 0.95rem;
   font-weight: 700;
 }
+
+.ix.is-primary svg { stroke: var(--ink); }
 
 /* THE STACK TAPERS. Everything above the primary shrinks to glyph + verb: a
    little shorter, a little quieter, and without the object name — so a full
@@ -652,70 +801,135 @@ html, body {
 }
 
 /* The sprint is ARMED rather than held — it stands down on its own when you
-   stop — and armed is shown the way じどう shows on: filled with the ink. */
+   stop — and armed is the accent, which is this screen's one word for live. */
 .act.is-on {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-live);
 }
 
 /* The clock. Its label is the hour you are in, so it is worth reading, and the
    extra left padding is room for the dot below. The room is held whether or not
    the dot is showing, so that switching modes moves nothing. */
-.ctl-time {
+/* ---------------------------------------------------------------- the chip
+
+   THE SKY, both halves of it, as one reading you can press.
+
+   The hour and the weather were two word-pills asking the same question, and the
+   answer is one sentence: it is noon and it is snowing. A chip says that in the
+   space one of the pills used, and — unlike a pill — a reading is SUPPOSED to
+   change its contents, so the clock changing width stopped being a button
+   twitching and became a label doing its job. */
+.chip-wrap {
   position: relative;
-  padding-left: 1.7rem;
-  transition: transform 0.12s ease, background 0.15s ease, opacity 0.16s ease;
+  /* ABOVE ITS NEIGHBOUR, said out loud. The panel is 322px wide and the right-
+     hand cluster is 52px in from the other edge, so on any phone the two overlap
+     by design — which makes the order they paint in a real decision rather than
+     an accident of which came first in the markup. */
+  z-index: 2;
+  pointer-events: auto;
 }
 
-/* Following the real clock, marked rather than spelled out — じどう next to あさ
-   would make the button change width every time you pressed it. Present but
-   transparent when off, so it fades in place instead of appearing. */
-.ctl-time::before {
+.chip {
+  --ring-w: 3.5px;
+  --ring-gap: 2px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 20px;
+  background: var(--face);
+  box-shadow: var(--shell);
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
+}
+
+.chip:active { transform: translateY(2px) scale(0.97); }
+
+.chip-mark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+.chip-mark svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--ring);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chip-word {
+  font-size: 0.82rem;
+  font-weight: 700;
+  /* So the chip does not jump a pixel sideways every time the hour ticks over
+     into a name of a different width. */
+  min-width: 2.6em;
+  text-align: left;
+}
+
+.chip-rule {
+  width: 1.5px;
+  height: 17px;
+  border-radius: 1px;
+  background: var(--ring);
+  opacity: 0.34;
+}
+
+/* A CLEAR SKY SAYS NOTHING. The weather half appears only when the weather is
+   doing something — otherwise the chip would carry a sun beside a sun, and the
+   one state that needs no comment would be the noisiest thing in the corner. */
+.chip-wrap.is-plain .chip-rule,
+.chip-wrap.is-plain .chip-mark:last-child { display: none; }
+
+/* Following the real clock, marked rather than spelled out. Two small dots under
+   the two halves, so each says for itself whether it is being driven or held. */
+.chip::after {
   content: '';
   position: absolute;
-  left: 0.85rem;
-  top: 50%;
-  width: 7px;
-  height: 7px;
-  margin-top: -3.5px;
+  left: 20px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--ring);
   opacity: 0;
   transition: opacity 0.25s ease;
-}
-
-.ctl-time.is-auto::before { opacity: 0.5; }
-
-/* ---------------------------------------------------------- the scrubber
-   The pill is the resting state and stays in normal flow, so the stack keeps
-   its size. The panel is absolute and anchored to the pill's own bottom-right
-   corner, which is both why opening it shifts nothing and why it can grow from
-   exactly the thing you pressed. */
-.time { position: relative; }
-
-.time.is-open .ctl-time {
-  opacity: 0;
   pointer-events: none;
 }
 
-/* Grows DOWNWARD from the pill's own top-right corner, now that the stack sits
-   at the top of the screen. Anchored and origin'd to the same corner the pill
-   occupies, which is what keeps opening it from moving anything else. */
-.time-panel {
+.chip-wrap.is-auto-time .chip::after { opacity: 0.45; }
+
+/* Grows DOWNWARD out of the chip's own TOP-LEFT corner — the corner the chip
+   occupies — which is what keeps opening it from moving anything else.
+
+   It holds what used to be two panels. They are stacked rather than side by side
+   because they are two answers to one question and reading them in order is the
+   point: this is the hour, and this is the sky in it. */
+.chip-panel {
   position: absolute;
-  right: 0;
+  left: 0;
   top: 0;
   width: min(322px, calc(100vw - 2rem));
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
   border: 2.5px solid var(--ink);
   border-radius: 24px;
   background: rgba(255, 253, 247, 0.96);
   box-shadow: 0 6px 18px rgba(91, 76, 68, 0.14);
   pointer-events: auto;
-  transform-origin: top right;
+  transform-origin: top left;
   transform: scale(0.4);
   opacity: 0;
   visibility: hidden;
@@ -726,7 +940,7 @@ html, body {
               visibility 0s linear 0.2s;
 }
 
-.time.is-open .time-panel {
+.chip-wrap.is-open .chip-panel {
   transform: scale(1);
   opacity: 1;
   visibility: visible;
@@ -741,12 +955,14 @@ html, body {
 /* じどう is a mode, not an hour, so it sits off the axis rather than at one end
    of it — filled when it is on, outlined when it is not. */
 .time-auto {
+  --ring-w: 3px;
   flex: none;
   width: 56px;
   height: 34px;
   border-radius: 17px;
-  border: 2.5px solid var(--ink);
-  background: transparent;
+  border: none;
+  box-shadow: var(--shell-flat);
+  background: var(--face);
   color: var(--ink);
   font-family: inherit;
   font-size: 0.66rem;
@@ -760,8 +976,9 @@ html, body {
 .time-auto:active { transform: scale(0.92); }
 
 .time-auto.is-on {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-flat-live);
 }
 
 /* The knob's diameter and the track's border, named because three separate
@@ -769,6 +986,7 @@ html, body {
    stops sit, and where the labels go. `main.js` reads the same two numbers off
    the element rather than repeating them. */
 .time-scrub {
+  width: 100%;
   --knob: 30px;
   --track-border: 2px;
   flex: 1 1 auto;
@@ -858,6 +1076,88 @@ html, body {
   font-weight: 700;
 }
 
+/* ------------------------------------------------------------------ the sky
+
+   Everything about the frame is the clock's: `.sky` carries `.time` in the
+   markup, so the pill, the panel, the grow-out-of-the-corner animation and the
+   じどう button are all shared rather than copied. What is its own is the panel's
+   CONTENTS — a grid where the clock has a track — and the width that grid needs.
+
+   Wider than the clock's 322px because eight words in two rows need it, and
+   still capped against the viewport so a narrow phone gets a panel that fits
+   rather than one that runs off the edge. */
+/* A heading and its じどう on one line, then the control under them. Two of these
+   stacked is the whole panel. */
+.chip-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chip-sec-2 { margin-top: 4px; }
+
+.chip-head {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  opacity: 0.6;
+}
+
+/* FOUR ACROSS, which is a choice about reading rather than about fitting.
+   Two rows of four sit under a thumb as one shape you take in at a glance; a
+   single row of eight is a list you have to scan, and three rows is a menu. The
+   order the buttons arrive in is main.js's — dry to wet along the first row,
+   and the snow off on its own at the end of the second, which is where it
+   belongs since it is the one that is not more or less rain. */
+.sky-grid {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+/* Outlined when it is not the sky and filled when it is — the same two states
+   じどう has, and deliberately so: every switch in this panel says what it is
+   doing the same way. */
+.sky-pick {
+  --ring-w: 3px;
+  --ring-gap: 1.5px;
+  height: 30px;
+  padding: 0 2px;
+  border: none;
+  box-shadow: var(--shell-flat);
+  border-radius: 15px;
+  background: var(--face);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+
+.sky-pick:active { transform: scale(0.92); }
+
+.sky-pick.is-on {
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-flat-live);
+}
+
+/* A `@media (max-width: 360px)` block stood here, stacking じどう off the weather
+   row so the four columns could have the panel's full width — on a 320px screen
+   they were down to 39px and かみなり was being cut off mid-word. The merged panel
+   is a column to begin with and じどう now sits up beside its heading, so the grid
+   already has the whole width at every size. The fix outlived the layout that
+   needed it. */
+
 /* ----------------------------------------------------------------- the sheet
 
    The bag and the book. One card in the middle of the screen over a scrim,
@@ -866,7 +1166,12 @@ html, body {
 
    Below the doorway veil at 12, because a door swap should black this out along
    with everything else, and well below the start screen at 20. */
-.pouch { position: relative; }
+/* `.pouch { position: relative }` stood here, left over from when a panel hung
+   off this button — and it was quietly breaking the chip. Both wrappers had
+   `position` with no z-index, so they painted in DOM order and the bag, coming
+   second, landed on top of a panel that is wide enough to reach under it. The
+   wrapper is only a place for JS to keep the button's open state now, and a
+   static element does not join that ordering at all. */
 
 .sheet {
   position: fixed;
@@ -926,11 +1231,46 @@ html, body {
 
 /* The panel says its own name now. The pill that opened it is behind a scrim
    and dimmed by the time you are reading this, so it cannot be the label. */
-.sheet-title {
+/* TWO ROOMS, ONE DOOR. The ずかん had a pill of its own in the corner that opened
+   this very card — a second entrance to a building you were already inside. As
+   tabs the relationship is the true one: what you are carrying and what you have
+   ever caught are two views of one collection.
+
+   They also replaced the title, because a tab bar already says which room you are
+   in and saying it twice was noise you only notice once it has gone. Right margin
+   clears the close button. */
+.sheet-tabs {
   flex: none;
-  margin: 0.1rem 2.4rem 0.75rem 0.35rem;
-  font-size: 0.95rem;
+  display: flex;
+  gap: 6px;
+  margin: 0 2.6rem 0.75rem 0;
+}
+
+.sheet-tab {
+  --ring-w: 3px;
+  padding: 0.34rem 0.85rem;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  box-shadow: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.82rem;
   font-weight: 700;
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.sheet-tab:active { transform: scale(0.96); }
+
+/* The one you are in wears the shell the rest of the app uses for a live control,
+   and the one you are not is a word with nothing round it — so the pair reads as
+   "here, and also over there" rather than as two buttons. */
+.sheet-tab[aria-selected="true"] {
+  opacity: 1;
+  background: var(--accent);
+  box-shadow: var(--shell-flat-live);
 }
 
 .sheet-close {
@@ -942,10 +1282,11 @@ html, body {
   display: grid;
   place-items: center;
   padding: 0;
-  border: 2.5px solid var(--ink);
+  border: none;
+  box-shadow: var(--shell-flat);
   border-radius: 50%;
-  background: var(--paper);
-  color: var(--ink);
+  background: var(--face);
+  color: var(--ring);
   cursor: pointer;
   transition: transform 0.12s ease;
 }
@@ -1037,11 +1378,13 @@ html, body {
 .count-step,
 .count-all,
 .sheet-drop {
+  --ring-w: 3px;
   font-family: inherit;
   font-weight: 700;
   color: var(--ink);
-  background: var(--paper);
-  border: 2.5px solid var(--ink);
+  background: var(--face);
+  border: none;
+  box-shadow: var(--shell-flat);
   cursor: pointer;
   transition: transform 0.12s ease, background 0.15s ease;
 }
@@ -1075,16 +1418,25 @@ html, body {
   font-size: 0.74rem;
 }
 
-/* The ink fill is this app's word for the thing under your thumb, and it is
-   safe here in a way it was not on a slot: this one is TEXT, so it flips to
-   paper and stays legible. */
+/* Quiet while a tile is in the air, because then it is a PLACE TO LET GO of
+   something rather than something to press — the drag's own pointerup lands it
+   there, and a saturated slab inviting a press would be describing the wrong
+   gesture. */
 .sheet-drop {
   height: 34px;
   padding: 0 1.1rem;
   border-radius: 17px;
   font-size: 0.82rem;
-  color: var(--paper);
-  background: var(--ink);
+}
+
+/* ...and live once the row has become a question, because then it IS something
+   to press: the confirm for an amount. Keyed off the count row being visible,
+   which is the one thing that distinguishes the two states — see showRow, which
+   unhides it only when it is asking. */
+.sheet-count:not([hidden]) ~ .sheet-drop {
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-flat-live);
 }
 
 /* Nowhere to put it down. See shakeDrop in main.js — a button that silently
@@ -1369,41 +1721,91 @@ html, body {
 /* ------------------------------------------------------------ start gate
 
    A whole screen, not a card. It is up for as long as the art takes to decode,
-   which on a cold cache is long enough to be looked at properly, and it is the
-   only place the three gestures are explained.
+   which on a cold cache is long enough to be looked at properly.
 
-   Nothing here may come out of `IMG`: this screen is what covers the wait for
-   exactly that. Both files it does use — the meadow behind it and the car on
-   the road — are fetched by the browser on its own account, outside the batch
-   loadArt() awaits, so neither can hold anything up.
+   An ILLUSTRATION again, and a redrawn one. The drawn planet and the sky read
+   live out of `LOOK` that stood here are gone with it: a drawing brings its own
+   sky and its own horizon, and a gradient underneath one is just a second sky
+   disagreeing with the first. LOOK is still what the world itself is lit by.
 
-   Everything below is placed against where that meadow is busy. Measured off
-   the drawing, as a fraction of its height: sky to 0.30, then the hills, the
-   tree and the little house from 0.36 to 0.54, open grass from 0.55 to 0.78,
-   and the three of them standing in it from 0.79 down. Sideways, the only gap
-   through that last band runs from 0.34 to 0.70 — which is where the button
-   goes. Move anything vertically and check it against those numbers. */
+   Nothing here may come out of `IMG`, because this screen is what covers the
+   wait for exactly that. Both files it does use are fetched by the browser on
+   its own account, outside the batch loadArt() awaits.
+
+   THE DRAWING IS SQUARE, where the one before it was portrait, and that is what
+   set the layout. It is hung from the bottom and the flat top of its sky carries
+   on upward in `background-color` — sampled from its own top row, which is
+   uniform. Measured off the drawing as a fraction of its height: dead flat sky to
+   0.33, soft cloud to 0.55, mountains 0.57 to 0.62, meadow from 0.66, and the
+   three of them lying in it from 0.70 down. That last one is the constraint — see
+   the panel.
+
+   HOW BIG IT IS DOES NOT COME OFF THE WIDTH, and that is the fix for the thing
+   width-fitting got wrong. `100% auto` ties a square drawing's size to the
+   viewport's width, so the narrower the phone the smaller everything in it — and
+   the cast, which is the point of the picture, shrank exactly where there was
+   least of it to see. On a 375pt phone they stood 112px tall.
+
+   Sized off the HEIGHT instead, they hold their size on a narrow screen because a
+   narrow screen is still tall. `max()` is what keeps that honest both ways: 68vh
+   wins on anything phone-shaped, and 100% wins on a tablet, where 68vh would be
+   narrower than the screen and leave the meadow with cut edges down both sides.
+   The cost is a horizontal crop on a phone — about 16% a side at 375×812 — and it
+   is free, because the cast sits between 0.26 and 0.75 and the only things out at
+   the margins are mountain ends and meadow flowers. */
 
 .start {
   position: fixed;
   inset: 0;
   z-index: 20;
   overflow: hidden;
-  /* Width-fitted and hung from the bottom, never `cover`.
-
-     The drawing is 9:16 and a phone is nearer 9:19.5, so `cover` would trim
-     about a ninth off each side — and Chiikawa runs to the very left edge of it
-     while Usagi runs to the right, so both would lose a face. Fitting the width
-     instead means nothing is ever cut off sideways. What that costs is height,
-     and the top of the drawing is flat sky, so the colour underneath simply
-     carries it on upward — sampled from its own top row, which is uniform. On a
-     screen wide enough for the reverse, the surplus sky crops off the top and
-     the three of them stay put, which is the same bargain the other way up. */
-  background: url('../asset/images/bg-menu.webp') center bottom / 100% auto no-repeat, #A5DBF4;
-  transition: opacity 0.45s ease;
+  background: url('../asset/images/bg-menu.webp') center bottom / max(100%, 68vh) auto no-repeat,
+              #C7E9FB;
+  /* Toward the three of them rather than the middle of the screen, so what the
+     zoom below converges on is the thing you are going to meet. They sit about
+     three quarters of the way down. */
+  transform-origin: 50% 74%;
 }
 
-.start.is-gone { opacity: 0; pointer-events: none; }
+/* ---- GOING IN
+
+   A `.start.is-gone { opacity: 0 }` rule stood here and was lost in a rewrite, so
+   for a while pressing はじめる did nothing at all for 480ms and then cut to the
+   world in one frame. That is what made it feel stiff — not a fade that was too
+   quick, but no fade whatsoever.
+
+   What replaced it is two layers moving at different speeds, which is the whole
+   difference between a screen being dismissed and a screen being walked through:
+
+   - THE INTERFACE LEAVES FIRST. Words and buttons are not part of the place, so
+     they lift and go in a quarter of a second — gone before the scenery has really
+     started moving, which is what stops them dissolving INTO the world.
+   - THE SCENERY PUSHES PAST. The drawing scales up a little toward the cast while
+     it fades, and the fade TRAILS the movement: the world behind is already
+     showing through while the picture is still travelling. Fade and motion ending
+     together reads as a slide; the world arriving first reads as passing through.
+
+   The whole thing is 620ms, which is the number the display:none in main.js has
+   to agree with. */
+.start.is-gone {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(1.07);
+  transition:
+    transform 0.62s cubic-bezier(0.34, 0, 0.26, 1),
+    opacity 0.44s ease-in 0.1s;
+}
+
+/* The quick layer. Safe to transition because the `rise` animation that plays at
+   load sits on the head and the foot, not on this — an animation with a `both`
+   fill would have won against anything put here. */
+.start.is-gone .start-sheet {
+  opacity: 0;
+  transform: translateY(-16px);
+  transition:
+    opacity 0.22s ease-out,
+    transform 0.3s cubic-bezier(0.4, 0, 0.7, 0.9);
+}
 
 /* ---- the panel */
 
@@ -1416,19 +1818,25 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  /* The foot is pushed up off the bottom in `vw`, not `rem`, because what it
-     has to clear is the drawing — and the drawing is scaled to the width and
-     hung from the bottom, so every band in it sits a fixed multiple of the
-     viewport *width* above the bottom edge however tall the screen is. 20vw
-     lands the button in the clean corridor between the three of them. The floor
-     is for a screen narrow enough that 20vw would tuck it under the home bar. */
-  /* The top is deeper than it looks like it needs to be. With only the name and
-     one line of gestures left up there, pinning that to the very top left the
-     block stranded above a wide gap; dropped to about a fifth of the way down,
-     it sits in the middle of the clear sky instead, which is where the drawing
-     has room for it. */
-  padding: calc(env(safe-area-inset-top) + 5rem) 1.5rem
-           max(20vw, calc(env(safe-area-inset-bottom) + 1.5rem));
+  /* The foot is pushed up off the bottom in viewport units rather than `rem`,
+     because what it has to clear is the drawing — and the drawing's bands sit at
+     fixed fractions of ITS OWN size, not at any number of millimetres. In `rem`
+     this would clear the cast on one phone and sit on their faces on another.
+
+     IT HAS TO MIRROR THE `max()` THAT SIZES THE BACKGROUND, or the two disagree
+     on exactly the screens where it matters. The drawing is `max(100%, 68vh)`
+     across and the three of them start 0.30 of that up from the bottom, so what
+     must be cleared is `max(30vw, 20.4vh)` — whichever branch is sizing the
+     picture is the branch that decides where they are. 36vw / 26vh clears each by
+     about a sixth, and the floor is for a screen small enough that even that
+     would tuck the button under a thumb.
+
+     The mountains are no longer avoided: at this scale they start 0.43 of the
+     drawing up, which is above the button on a phone, and a pale purple band with
+     one ink ridge is something a pink pill with a white rim sits on perfectly
+     legibly. The rule is nothing over ANYBODY, not nothing over the scenery. */
+  padding: calc(env(safe-area-inset-top) + 4rem) 1.5rem
+           max(36vw, 26vh, calc(env(safe-area-inset-bottom) + 2rem));
   text-align: center;
 }
 
@@ -1453,6 +1861,7 @@ html, body {
   margin: 0 0 0.55rem;
   font-size: 0.74rem;
   font-weight: 500;
+  color: var(--ink);
   /* The tracking puts a gap after the last letter too; the indent gives it back
      to the front so the line still reads as centred. */
   letter-spacing: 0.38em;
@@ -1468,76 +1877,73 @@ html, body {
   font-size: clamp(2.5rem, 14.5vw, 3.8rem);
   font-weight: 700;
   line-height: 1.22;
+  color: var(--ink);
   text-shadow: 0 2px 0 rgba(255, 255, 255, 0.85);
 }
 
 /* ---- the loading road
 
-   The car faces left, so it drives right to left: 0 parks it against the
-   right-hand kerb, 1 against the left. `--p` is written by main.js as each file
-   lands and is the only number any of this is drawn from. */
+   The car faces left, so it drives right to left: `--p` is 0 with it against the
+   right-hand kerb and 1 against the left, and it is the only number any of this
+   is drawn from. */
 
 .loadbar {
   --p: 0;
-  --car-w: 104px;
+  --car-w: 84px;
   position: relative;
   width: 100%;
-  max-width: 22rem;
+  max-width: 20rem;
   height: 18px;
-  /* The driver overhangs the road by far more than the road is tall, and is
-     absolutely placed, so the room for them has to be reserved here. Cut for
-     the tallest of the three — usagi, ears included — which at this width is
-     about 136px of drawing standing on an 18px road. */
-  margin: 8.8rem auto 0;
+  /* The driver overhangs the road by far more than the road is tall and is
+     absolutely placed, so the room for them is reserved here. Cut for the
+     tallest of the three — usagi, ears included — which at this width is about
+     110px of drawing standing on an 18px road. */
+  margin: 6.8rem auto 0;
 }
 
-/* Nearly opaque, unlike everything else laid over this screen: it is a path
-   across grass now rather than a bar on a flat panel, and a translucent one
-   picked up every flower it drove over. */
 .loadbar-road {
   position: absolute;
   inset: 0;
   border-radius: 999px;
-  background: rgba(255, 252, 242, 0.96);
-  border: 2.5px solid var(--ink);
+  background: var(--face);
+  box-shadow: var(--shell);
 }
 
-/* The centre line. It is under the trail rather than over it, so the markings
-   ahead of the car stay visible and the ones behind are paved over. */
+/* The centre line, under the trail rather than over it — so the markings ahead
+   of the car stay visible and the ones behind are paved over. */
 .loadbar-road::after {
   content: '';
   position: absolute;
-  left: 6px;
-  right: 6px;
+  left: 8px;
+  right: 8px;
   top: 50%;
   height: 2.5px;
   margin-top: -1.25px;
   border-radius: 2px;
   background: repeating-linear-gradient(90deg,
-    rgba(91, 76, 68, 0.24) 0 8px, transparent 8px 18px);
+    rgba(122, 92, 87, 0.34) 0 8px, transparent 8px 18px);
 }
 
 /* How far it has come, measured from the kerb it set off from. Anchoring the
-   trail to the right and the car to its own travel means the head of the trail
-   is dead on the car at halfway and within half a car of it at the ends — which
-   is as close as a fixed-width sprite on a fluid bar gets without one end of
-   the drive hanging off the road. Both ends of that error sit under the car's
-   own body, so neither is visible. */
+   trail to the right and the car to its own travel puts the head of the trail
+   dead on the car at halfway and within half a car of it at either end — as
+   close as a fixed-width sprite on a fluid bar gets without one end of the drive
+   hanging off the road. Both ends of that error sit under the car's own body. */
 .loadbar-done {
   position: absolute;
-  top: 3.5px;
-  bottom: 3.5px;
-  right: 3.5px;
-  width: calc((100% - 7px) * var(--p));
+  top: 4px;
+  bottom: 4px;
+  right: 4px;
+  width: calc((100% - 8px) * var(--p));
   border-radius: 999px;
-  background: linear-gradient(90deg, #F9C5B2, var(--pink));
+  background: var(--accent);
   transition: width 0.45s cubic-bezier(0.32, 0.72, 0.3, 1);
 }
 
 .loadbar-car {
   position: absolute;
-  /* Wheels a hair into the road, so it is standing on the surface rather than
-     hovering above it. Any deeper and the road swallows them. */
+  /* Wheels a hair into the road, so it stands on the surface rather than hovers
+     over it. Any deeper and the road swallows them. */
   bottom: calc(100% - 3px);
   left: calc((100% - var(--car-w)) * (1 - var(--p)));
   width: var(--car-w);
@@ -1553,7 +1959,9 @@ html, body {
   50%      { transform: translateY(-2px); }
 }
 
-/* ---- what it says underneath */
+.start.is-ready .loadbar-car { animation: none; }
+
+/* ---- what it says */
 
 .start-status {
   display: flex;
@@ -1588,6 +1996,7 @@ html, body {
   max-width: 20rem;
   font-size: 0.82rem;
   line-height: 1.8;
+  color: var(--ink);
   opacity: 0.72;
   /* The text is written from main.js, so there is nowhere to put a break by
      hand — and left alone this line spills its last kana onto a row of its own.
@@ -1599,17 +2008,25 @@ html, body {
 .start-note:empty { display: none; }
 
 .start-go {
-  /* Deep, because this gap is what lifts the road. The button is pinned to the
-     bottom by the sheet's padding so that it lands in the gap between the three
-     of them; everything above it is therefore pushed up from here, and the road
-     rides as high as this margin is tall. */
-  margin-top: 4.5rem;
+  /* 4.5rem stood here, left over from the layout before this one, where the gap
+     WAS the mechanism: the button was pinned to the bottom and everything above
+     it got pushed up from here. It is not the mechanism any more — the sheet's
+     own padding does that — and at 4.5rem it made the foot 292px tall against
+     the 398px a 320x568 screen has for both blocks. `space-between` cannot
+     compress, so it silently degraded to flex-start and hung the button 43px past
+     the padding, straight onto the cast. Measured, on the narrowest phone worth
+     supporting. A gap here is now just a gap. */
+  margin-top: 1.6rem;
+  /* THE ACCENT, because this is the most primary button in the app — there is
+     exactly one thing to do on this screen and this is it. The rest of the HUD
+     earns the accent situationally; here it is unconditional. */
+  --ring-w: 6px;
   font-family: inherit;
   font-size: 1.15rem;
   font-weight: 700;
   color: var(--ink);
-  background: var(--paper);
-  border: 3px solid var(--ink);
+  background: var(--accent);
+  border: none;
   border-radius: 999px;
   /* Narrow enough to land inside the gap between the three of them. Taking
      every row the pill covers and intersecting them, the clear channel runs
@@ -1617,7 +2034,7 @@ html, body {
      Hachiware's cheek. */
   padding: 0.85rem 1.9rem;
   cursor: pointer;
-  box-shadow: 0 4px 0 rgba(91, 76, 68, 0.85);
+  box-shadow: var(--shell-live);
   /* In the layout from the first frame and merely off, so turning it on when
      the art lands moves nothing else on the screen. */
   opacity: 0;
@@ -1630,7 +2047,6 @@ html, body {
 /* ---- the two ends of the wait */
 
 .start.is-ready .start-sub { animation: none; color: var(--ink); opacity: 0.7; }
-.start.is-ready .loadbar-car { animation: none; }
 
 .start.is-ready .start-go {
   opacity: 1;
@@ -1639,28 +2055,30 @@ html, body {
   animation: ready-ring 2.4s ease-out infinite;
 }
 
+/* The ripple went WHITE when the button went pink. A pink pulse off a pink pill
+   is a glow that reads as a rendering fault rather than as a heartbeat, and the
+   button no longer needs colour to be found — it is the only saturated thing on
+   the screen. `--shell-live` is repeated in both frames because a keyframe
+   replaces the whole property, so leaving it out of either one would drop the
+   button's own ring for that half of the cycle. */
 @keyframes ready-ring {
-  0%        { box-shadow: 0 4px 0 rgba(91, 76, 68, 0.85), 0 0 0 0 rgba(246, 166, 182, 0.6); }
-  70%, 100% { box-shadow: 0 4px 0 rgba(91, 76, 68, 0.85), 0 0 0 14px rgba(246, 166, 182, 0); }
+  0%        { box-shadow: var(--shell-live), 0 0 0 0 rgba(255, 255, 255, 0.7); }
+  70%, 100% { box-shadow: var(--shell-live), 0 0 0 16px rgba(255, 255, 255, 0); }
 }
 
-/* A stalled car and a count that stopped would both be a lie about a load that
-   is not coming. Hidden rather than removed, so the words below it stay put. */
+/* A car stopped halfway round and a count that stopped with it would both be a
+   lie about a load that is not coming. The road stays — it is scenery — and the
+   two things that were claiming progress go quiet. */
 .start.is-failed .loadbar { visibility: hidden; }
 .start.is-failed .start-pct { display: none; }
 .start.is-failed .start-sub { animation: none; }
 
 /* Shorter than a phone held upright — a small phone, or a desktop window pulled
-   up. Nothing is dropped, because there is nothing here that is not either the
-   name of the place or how to move around it; the title just gives up the room
-   it was given to sit in the middle of the sky, since on a screen this short
-   there is not much sky to sit in the middle of. */
+   up. Nothing is dropped: the title just gives up the room it was given to sit
+   in the middle of the sky, because on a screen this short there is not much sky
+   to sit in the middle of. */
 @media (max-height: 700px) {
   .start-sheet { padding-top: calc(env(safe-area-inset-top) + 1.4rem); gap: 0.6rem; }
-  /* A smaller driver as well as a shorter run-up, or the room reserved for one
-     is most of what a short screen has left. */
-  .loadbar { --car-w: 86px; margin-top: 7.2rem; }
-  .start-go { margin-top: 3rem; }
 }
 
 /* ------------------------------------------------------- landscape guard */
@@ -1689,9 +2107,22 @@ html, body {
   .start-sub,
   .start-head,
   .start-foot,
-  .loadbar-car,
   .start.is-ready .start-go { animation: none; }
 
   .loadbar-car,
   .loadbar-done { transition: none; }
+
+  /* Going in keeps its fade and gives up its travel. A fullscreen zoom is close
+     to the top of the list of things this setting is asking not to be shown, and
+     the crossfade alone still says the same thing — one screen becoming another.
+     Cutting straight to the world would be worse than either. */
+  .start.is-gone {
+    transform: none;
+    transition: opacity 0.4s ease;
+  }
+
+  .start.is-gone .start-sheet {
+    transform: none;
+    transition: opacity 0.2s ease-out;
+  }
 }

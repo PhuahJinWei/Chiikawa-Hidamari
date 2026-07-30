@@ -215,6 +215,127 @@ export const PAL = {
   // sky's own brightness, and any colour in it reads as scum.
   waterGlint: '#FDFFFF',
 
+  // ------------------------------------------------------------------- rain
+  //
+  // A raindrop is drawn as a PALE STREAK, not a blue one, and that is the whole
+  // of how rain reads in the reference. What you see falling is not water, it
+  // is the light on water — a bright scratch against whatever is behind it. Give
+  // a drop the pond's blue and it disappears into the sky it is falling out of
+  // and reappears as blue lint over the grass.
+  rainDrop: '#F2F8FF',
+  // ...and no colour for the splash where one lands, because that ring is
+  // `paintRipple` — already drawn, already white, and already the mark a
+  // fishing float makes when it hits the water. See the note where the second
+  // copy of it was deleted.
+
+  // THE CLOUD DECK — one flat overcast sky, drawn once and then multiplied by
+  // whatever the hour is wearing. That multiply is why this is so nearly white:
+  // it has to survive being taken down to a night sky, so anything already grey
+  // here arrives at midnight as black.
+  //
+  // Two stops rather than one, high to low, because a deck with no gradient in
+  // it reads as a lid rather than as weather. The low end is warmer and paler —
+  // that is where the light gets in under the cloud, and it is the only thing
+  // stopping an overcast sky from being a wall.
+  cloudTop: '#8E9AAB',
+  cloudLow: '#C4CBD4',
+  // ...and the swirl of heavier cloud scudding through it. Barely darker than
+  // the deck it is drawn on: at any more than a hint it stops being weather and
+  // becomes a painted pattern, which a sky must never look like.
+  cloudFold: '#7F8C9E',
+
+  // Standing water, drawn flat and milky like the anime's shallow blue pools.
+  // Its edge uses `waterInk`, the same warm pen as the ponds and every other
+  // outlined thing in the world; paintPuddle supplies the irregular silhouette
+  // and sparse ripple marks.
+  puddleFace: '#B9DDE6',
+
+  // ------------------------------------------------------------------- ice
+  //
+  // A FROZEN POND IS NOT SNOW, and keeping the two apart is the whole of this
+  // pair. Snow on the ground is opaque and matt — a surface that has stopped
+  // being the ground. Ice is the same water, still visible underneath, gone
+  // still and gone pale. It keeps a good deal of the pond's own blue for
+  // exactly that reason: you can see that it is the pond.
+  //
+  // So it sits BETWEEN the two — far paler than `waterDeep`, clearly bluer and
+  // darker than `snowGround` — and that gap is what makes a frozen pond read as
+  // a pond in a white field rather than as a hole cut in the snow.
+  // TRODDEN SNOW, which is the colour of the walls of a trail rather than of
+  // its floor. The floor is the ground showing through and needs no colour of
+  // its own; what the shell has to say is that the snow BESIDE a footprint has
+  // been walked on — packed down, a little grey, and out of the light.
+  //
+  // A SMALL STEP from `snowGround` and no more, because this is snow that has
+  // been stepped on rather than mud — but not as small as it first was. At
+  // #DCE4EC, twenty levels down, the walls of a trench were invisible from
+  // standing height and the path read as depth alone, which on a planet this
+  // size is nothing. This is far enough to draw the trough and near enough
+  // that a field with wind-thinned patches in it still reads as clean snow.
+  snowTrodden: '#CFDAE6',
+
+  iceFace: '#C4DCE4',
+  // The cracks are the PEN, not a colour of their own: one pen on this planet,
+  // and it does not change for ice any more than it changed for water. Drawn
+  // faint by the painter — a crack is a hairline, and anything heavier reads as
+  // the pond having been broken rather than frozen.
+  iceCrack: '#5B4C44',
+
+  // ------------------------------------------------------------------- snow
+  //
+  // WHAT THE GROUND BECOMES. Not white, and that is the single most important
+  // colour decision in the snow feature.
+  //
+  // Snow drawn at #FFFFFF is a hole in the picture: it has nowhere left to go
+  // for a highlight, it blows out the moment any lamp reaches it, and against
+  // this world's cream house and near-white characters it stops being a
+  // surface and becomes the absence of one. The reference art never does it —
+  // its snow is a very pale blue-grey with the white kept in reserve for the
+  // lit tops of things.
+  //
+  // So: pale, faintly cool, and a clear step below the house's plaster. That
+  // leaves the characters the brightest thing standing on it, which is where
+  // the eye has to go.
+  //
+  // Measured rather than picked: at #E8EEF3 the lit face of the planet rendered
+  // rgb(187,191,194), which is a perfectly good concrete and not snow. The
+  // ground is a Lambert sphere, so what you see is always the paint with a
+  // cosine taken out of it, and a colour chosen by eye in a swatch arrives on
+  // screen a fifth darker than it looked. This is that fifth put back, and it
+  // is still a clear step below the house's plaster.
+  snowGround: '#F4F8FC',
+  // A flake, which IS nearly white — it is a lit thing in the air with sky
+  // behind it, not a surface. The two being different colours is the point.
+  snowFlake: '#FBFDFF',
+  // A snowman: the same ground snow with a touch more light in it, since it is
+  // a heap that has been patted into shape and catches the sky on top. Its
+  // shading and the coal of its face come from PAL.line like everything else —
+  // there is one pen on this planet and it does not change colour for snow.
+  snowBody: '#F2F6FA',
+  snowShade: '#D3DEE7',
+
+  // ---------------------------------------------------------------- rainbow
+  //
+  // SIX BANDS, PASTEL, and both halves of that are the reference's call rather
+  // than optics.
+  //
+  // A spectrum drawn in saturated primaries is the single most garish thing
+  // that could be put in this sky. Everything else here is a soft, slightly
+  // desaturated colour — the grass, the house, the characters — and a full
+  // rainbow at full chroma would not read as light in the air, it would read as
+  // a sticker. These are the same hues with the volume down to where they sit
+  // in the same picture as the flowers.
+  //
+  // Outer to inner, which is the order they are painted in and the order the
+  // real thing runs: red on the outside of the arc, violet on the inside.
+  rainbow: [
+    '#FFB3B3',
+    '#FFD3A2',
+    '#FAF0A0',
+    '#B8E6B0',
+    '#A6D8F2',
+    '#C9BAEA',
+  ],
 
   // THE FAR DISTANCE — mountains and a treeline, hung in the sky rather than
   // standing on the planet. See paintHorizon.
@@ -254,9 +375,9 @@ export const PAL = {
   // `rock` stood here. There are no rocks on this planet — see PROP_TYPES in
   // scene.js — so there is nothing left to colour grey.
 
-  // The bench, and the bark of a built tree — see foliage3d below. grassDark
-  // and the petal trio left with the painted flowers — every flower, stem and
-  // petal on the planet is drawn art now.
+  // The bark of a built tree — see foliage3d below. grassDark and the petal
+  // trio left with the painted flowers — every flower, stem and petal on the
+  // planet is drawn art now.
   treeTrunk: '#B08968',
 
   // A tree that is built rather than drawn. These are read off the three tree
@@ -466,10 +587,58 @@ export const PAL = {
   weaponBlue: '#78AACA',
   weaponBlueHighlight: '#ACD2E4',
 
+  // Hachiware's small acoustic guitar. The top is honey-coloured spruce, while
+  // the sides and back step into warmer brown so its real thickness remains
+  // visible against the cave wall. The darkest wood belongs to the sound hole,
+  // bridge, strings and tuning hardware.
+  guitarTop: '#E7AD66',
+  guitarNeck: '#C98A49',
+  guitarSide: '#9D6138',
+  guitarDark: '#4F352A',
+
   // Chiikawa's house key: a bright toy-like yellow that stays distinct from
   // the cream paper and brass lantern, with the shared furniture ink supplying
   // the dark outline around its silhouette and square hole.
   houseKey: '#F7D23E',
+
+  // Chiikawa's little two-drawer cabinet. It shares the house key's cheerful
+  // yellow family, but leans warmer and darker so a cupboard against the cream
+  // wall does not read as a second loose key. The drawer faces catch a paler
+  // tone; the shallow hand-holds expose the darker recess beneath them.
+  yellowCabinet: '#DDAE39',
+  yellowCabinetSide: '#C99629',
+  yellowCabinetDrawer: '#EDC552',
+  yellowCabinetRecess: '#A9791E',
+
+  // The tiny kitchen unit is white without disappearing into the room's cream
+  // wall: its worktop is the brightest face, the carcass is a warmer white,
+  // and its wrapped sides step down once more. The sink and burner hardware
+  // borrow two quiet greys so their shapes remain visible without turning a
+  // gentle enamel unit into a piece of steel equipment.
+  kitchenTop: '#FFFCF7',
+  kitchenBody: '#F2EEE7',
+  kitchenSide: '#DED8CF',
+  kitchenBasin: '#E9E4DC',
+  kitchenDetail: '#D2CBC1',
+
+  // Chiikawa's compact fridge stays in the kitchen's warm-white family, but
+  // its doors are brighter than its carcass and its wrapped sides are darker.
+  // That small spread is what lets two plain white doors read as an appliance
+  // in an unlit room rather than one featureless block.
+  fridgeBody: '#E9E4DC',
+  fridgeSide: '#D6CFC5',
+  fridgeDoor: '#FAF7F0',
+  fridgeHandle: '#EEE9E1',
+
+  // The giant outdoor pudding. Its cup is a cool white so it stays distinct
+  // from the warm custard, while the caramel cap carries the same soft brown
+  // family as the reference rather than reading as chocolate icing.
+  puddingCup: '#F4F5F2',
+  puddingCustard: '#F5CA4F',
+  puddingCustardLow: '#D99322',
+  puddingCustardLight: '#FFF0A2',
+  puddingCustardShadow: '#CF8318',
+  puddingCaramel: '#765041',
 
   // Chiikawa's bear, and the drawing's own two colours. The fur is the only
   // warm mid-tone anywhere under this roof — everything else in the room is a
@@ -1001,9 +1170,18 @@ export const CONFIG = {
     // which is the entire difference between fishing and waiting.
     lureLead: 1700,
     // How long a caught fish is gone from the shoal. Long enough that the pond
-    // visibly holds one fewer for a while; never for good, because a pond you
+    // visibly holds one fewer for a moment; never for good, because a pond you
     // can empty is the wrong kind of consequence in this world.
-    diveMs: 45000,
+    //
+    // 45s once, and 20s is the better number for a reason worth keeping: this
+    // clock is only ever felt by somebody fishing the SAME STRETCH of water
+    // twice, and at 45s that person was waiting on bookkeeping. What the delay
+    // has to buy is that a second cast cannot hook the animal you just landed —
+    // and 20s buys that outright, because it is already twice the longest
+    // `biteDelay` above. Past that it stops being a rule and starts being a
+    // queue. It comes back somewhere else mid-water anyway (see the respawn in
+    // fish.js), so the pond stays a pond either way.
+    diveMs: 20000,
   },
 
   // THE UNIQUES — the bear and the teapot. Not stuff: two specific objects
@@ -1217,8 +1395,8 @@ export const CONFIG = {
         // Chiikawa's, at the origin. 0.72 radians is 5.8 units of solid sand
         // against a horizon 4.9 units off, so standing at her door the whole
         // visible world is this — which is the frame the reference actually
-        // shows. The bench at 0.66 is inside it; the nearest planted tree, at
-        // 0.95, is out past the wash with a green hillside under it.
+        // shows. The nearest planted tree, at 0.95, is out past the wash with
+        // a green hillside under it.
         { lat: 0.00, lon: 0.00, r: 0.72, fade: 0.26 },
         // Hachiware's, and a shade tighter — the mound is 4.0 units across and
         // its clearing wants to end before the small pond at 1.03 rather than
@@ -1241,8 +1419,7 @@ export const CONFIG = {
   // `solid` is a wall you cannot walk through, and it is opt-in rather than
   // automatic because a footprint and a wall are different questions. Every
   // landmark keeps ground cover from sprouting through it — that is about the
-  // drawing overlapping the flowers — but only a building should stop you, and
-  // a bench you cannot step over would read as a bug rather than as furniture.
+  // drawing overlapping the flowers — but only a building should stop you.
   //
   // How wide the wall is comes from the art, not from here: see the footprint
   // measurement in scene.js, which the ground cover already uses. The house
@@ -1298,7 +1475,7 @@ export const CONFIG = {
     // ends read that.
     //
     // AT THE ORIGIN, and moved there deliberately. It used to stand at lon
-    // 2.54 while the cast, the bench, the trees and both lakes all lived
+    // 2.54 while the cast, the trees and both lakes all lived
     // between lon -1.6 and 1.5 — the house was alone on its own side of the
     // planet, fifteen units from where anybody arrived, which is most of a
     // minute's walk to reach the one building in the world. Putting it on the
@@ -1332,21 +1509,21 @@ export const CONFIG = {
     // SEARCHED, not placed by eye. A mound this size does not fit just anywhere
     // on a world 50 units around: at the first spot tried it overlapped the big
     // lake outright. This is the most open ground on the sphere among spots at
-    // least 18 units from the house, and everything — both lakes, all three
-    // trees, the bench — clears the rock by better than two units.
+    // least 18 units from the house, and everything — both lakes and all three
+    // trees — clears the rock by better than two units.
     //
     // `radius` states the shell outright, exactly as the house does and for the
     // same reason: it is built rather than drawn, so there is no card to
     // measure and the number here drives the wall, the ground cover's keep-out
     // and the berth the scatter gives it all at once.
     { type: 'cave', lat: 0.15, lon: -2.64, h: 4.0, solid: true, radius: 4.0 },
-    // In the garden rather than against the wall: 5.3 units out leaves it a
-    // clear two past the 3.2 shell, and off the door's own bearing so it is
-    // not the first thing you walk into on the way in.
-    { type: 'bench', lat: -0.45, lon: 0.50, h: 0.9 },
     { type: 'tree3', lat: 0.74, lon: -1.60, s: 1.90 },
     { type: 'tree1', lat: -0.81, lon: -1.08, s: 1.60 },
     { type: 'tree2', lat: 0.81, lon: 0.57, s: 1.75 },
+    // A broad meadow clearing near Usagi's usual country, but well clear of
+    // both homes, both lakes and every fixed tree. Its landmark footprint
+    // keeps the random scenery and ground cover out from under the cup.
+    { type: 'puddingcup', lat: -0.25, lon: 1.25 },
   ],
 
   // `paths: [[0, 2], [2, 5], [5, 3], [2, 4], [3, 4], [0, 1]]` stood here — the
@@ -1545,10 +1722,10 @@ export const CONFIG = {
     // you like is the point of the place. Walking through a tree is not a
     // freedom anybody wanted; it reads as the tree not being there.
     //
-    // So the trees, the stumps and the bench are solid now (see SOLIDS in
-    // sphere.js), alongside the water and the house, and are solid for the cast
-    // as well — a friend strolling through a trunk you were stopped by says the
-    // rule is about you rather than about the world. The cast themselves stay
+    // So the trees and stumps are solid now (see SOLIDS in sphere.js), alongside
+    // the water and the house, and are solid for the cast as well — a friend
+    // strolling through a trunk you were stopped by says the rule is about you
+    // rather than about the world. The cast themselves stay
     // walk-through, and the ground cover with them: flowers, mushrooms and grass
     // are things you wade through rather than things in the way. If somebody
     // ends up filling the screen it is still because you chose to stand there.
@@ -1699,7 +1876,7 @@ export const CONFIG = {
     // building you are stopped, so that you come to rest AT a wall rather than
     // exactly on the line of one.
     //
-    // It is the trees, the stumps and the bench as well, which are solid now —
+    // It is the trees and stumps as well, which are solid now —
     // one number for everything that is not water, because "stop a hand's width
     // short of the thing" is one idea however many kinds of thing it covers. A
     // tree needs no more than a wall does: its registered radius already holds
@@ -1885,11 +2062,9 @@ export const CONFIG = {
     // doll's house would read as one. This low oval is only 0.46 high against
     // the room's 3.2 apex, matching the short table in the anime.
     //
-    // NOTHING in here is solid. Outside, only the house and the water stop
-    // you, on the stated grounds that a bench you could not step over reads
-    // as a bug rather than as furniture — and in a room three strides across
-    // that argument is stronger, not weaker. Small loose props and bedding do
-    // not block the room. `spin` is which way a piece faces; left out, it looks
+    // NOTHING in here is solid. In a room three strides across, small loose
+    // props and bedding do not block the room. `spin` is which way a piece
+    // faces; left out, it looks
     // across the room.
     furniture: [
       // The low table sits below the window, with its long edge following the
@@ -1900,6 +2075,15 @@ export const CONFIG = {
       // removes this physical copy from the tabletop.
       { art: 'openbook', at: 1.20, out: 1.55, h: 0.22, spin: 1.20,
         lift: 0.485, item: 'chiikawaBook' },
+      // Clock-face arrangement, viewed with the entrance at six: the yellow
+      // cabinet occupies eleven o'clock, tucked close to the wall.
+      { art: 'yellowcabinet', at: -2.62, out: 2.35, h: 0.82 },
+      // The kitchen unit is the two-o'clock end of the same far-wall run.
+      { art: 'kitchenunit', at: 2.09, out: 2.35, h: 0.74 },
+      // The fridge stands between the fork and kitchen at one o'clock. It
+      // shares the kitchen's wall depth, with a little extra lateral breathing
+      // room between the two appliances.
+      { art: 'fridge', at: 2.68, out: 2.35, h: 1.12 },
       // The house key lies near the doorway, off the centre walking line and
       // clear of the table. Chiikawa is 2.01 units tall, so 0.804 makes the
       // key's longest dimension exactly 40% of that drawn height.
@@ -2031,7 +2215,9 @@ export const CONFIG = {
       // this one physical weapon independently pickup-able, placeable, and
       // returnable — to this spot exactly, when a set-down lands near enough
       // to mean it (uniques.snap).
-      { art: 'pinkweapon', at: 2.72, out: 2.06, h: 0.52, spin: -1.99,
+      // Re-centred at twelve o'clock. The radial lean still brings its fork
+      // head to the wall; the new spin is the same `at + pi/2` relationship.
+      { art: 'pinkweapon', at: Math.PI, out: 2.06, h: 0.52, spin: -Math.PI / 2,
         lean: 1.45, lift: 0.986, item: 'chiikawaWeapon' },
       // Chiikawa's bear, LYING on the floor at the head end of the futon —
       // dropped where its owner got up, which is where a toy actually is. It
@@ -2300,6 +2486,11 @@ export const CONFIG = {
       // it cannot be kicked over either way (see nudgeLoose).
       { art: 'blueweapon', at: 2.72, out: 2.95, h: 0.52, spin: -1.99,
         lean: 1.45, lift: 0.986, item: 'hachiwareWeapon' },
+      // The guitar now rests on the floor beside the paired bags instead of
+      // being fixed to the rock. Its body is planted low and its head leans
+      // back toward the left wall, leaving the bedding path unobstructed.
+      { art: 'guitar', at: -2.70, out: 2.95, h: 1.28, spin: -1.13,
+        lean: 1.12, lift: 0.615, item: 'hachiwareGuitar' },
       // Chiikawa's former bare bulb, wired into the apex of the cave.
       //
       // `night: true` STOOD HERE and is gone from both bulbs. It meant "the
@@ -2408,12 +2599,36 @@ export const CONFIG = {
     // a third of the way round the wall is off the side of the screen when you
     // walk in — you arrive, the room looks empty, and you have to think to look
     // about. Since `atOnce` is 1, whoever is home always takes this spot and is
-    // always the first thing you see. The others only come into play if more
-    // than one is ever allowed in at once.
+    // always the first thing you see.
+    //
+    // ...AND THE OTHER TWO WERE NEVER USED, which is why they were wrong.
+    //
+    // The note above used to end "the others only come into play if more than
+    // one is ever allowed in at once", and nothing ever allowed it, so nobody
+    // ever stood on them. Sheltering does: a shower puts everybody indoors at
+    // the same moment, and Usagi has no house of his own so he barges into
+    // whichever is nearest. The first time all three were ever asked for at
+    // once, they measured 0.73, 0.74 and 1.47 units apart — three positions
+    // inside a thirty-degree arc, against a back wall, for bodies about one and
+    // a quarter units wide. Two people given the nearer pair were standing in
+    // each other.
+    //
+    // SPACED BY THE ARC BETWEEN THEM rather than by eye. Holding the first one
+    // exactly where it was, sixty degrees either side is the least that puts a
+    // full body's width between neighbours at this radius — it measures 1.40,
+    // 1.40 and 2.58 — and it costs the first spot nothing, which is the one
+    // that had a reason. The two extras are further round the wall than a
+    // phone frames on entry, and that was already true of them and is the
+    // right trade: they are the second and third person in a room you are
+    // looking around anyway, and being able to tell them apart beats being
+    // able to see them both without turning.
+    //
+    // The room's walkable radius is 2.25 units, so 0.66 of it leaves about
+    // three quarters of a unit between a shoulder and the wall.
     spots: [
       { at: 3.14, out: 0.58 },
-      { at: 2.62, out: 0.66 },
-      { at: -2.62, out: 0.66 },
+      { at: 2.09, out: 0.66 },
+      { at: -2.09, out: 0.66 },
     ],
 
     // What the windows say when nobody is in. Not nothing: a house with every
@@ -2442,7 +2657,7 @@ export const CONFIG = {
   //
   // Where the sleep drawings actually land. See MIDNIGHT_SLEEP.md for the
   // model, furniture.js's `bedOf` for the anatomy these numbers are nudges
-  // against, and peek.html?sleep=1 for the bench they were chosen on.
+  // against, and peek.html?sleep=1 for the test rig they were chosen on.
   //
   // The two indoor fits are FRACTIONS AND OFFSETS rather than positions,
   // because the thing they are placed against is not fixed: `across` and `head`
@@ -2598,6 +2813,405 @@ export const CONFIG = {
     // Idle time before the open scrubber tidies itself away. Long enough to see
     // where you landed, short enough that the screen goes back to being sky.
     closeMs: 2600,
+  },
+
+  // WHAT IS IN THE AIR, and how long it stays there. See weather.js, which
+  // owns every decision these numbers are inputs to.
+  //
+  // The hours here are HOURS OF THE WORLD, not real ones, which is what lets
+  // one set of numbers serve both clocks: on the wall clock a front takes an
+  // afternoon and on the hand-wound one it takes about half a minute, and it is
+  // the same front either way.
+  weather: {
+    // ------------------------------------------------------ how often it rains
+    //
+    // How many fronts a day, as a cumulative roll. Slightly over half of all
+    // days are dry, which is the number to turn if rain stops feeling like an
+    // event — the same argument the household's visits are rare for. A planet
+    // that rains daily is a planet where rain is scenery.
+    frontOdds: [
+      { upTo: 0.56, n: 0 },
+      { upTo: 0.90, n: 1 },
+      { upTo: 1.00, n: 2 },
+    ],
+    // ...and a plain grey day on some of the dry ones, so that "no rain" is not
+    // always "bright". Cloud is what makes sun worth having.
+    overcastChance: 0.34,
+
+    // Never before breakfast and never so late that it is still going on when
+    // they turn in. Rain at midnight is not wrong — see the note in weather.js
+    // — but everybody is asleep through it, so a front spent there is a front
+    // nobody sees.
+    firstFrontAt: 7,
+    lastFrontBy: 17,
+    dryGapMin: 2.5,
+    dryGapMax: 3.5,
+
+    // ------------------------------------------------------- the shape of one
+    //
+    // How long each stage of a front lasts, in world hours. The gather is the
+    // warning — the sky goes over, somebody looks up — and it has to be long
+    // enough to be a warning rather than a stutter before the downpour.
+    gatherMin: 0.5,
+    gatherMax: 0.9,
+    wetMin: 1.2,
+    wetMax: 2.6,
+    // The break at the end, which is the brightest part of the whole front and
+    // the longest single stage for that reason. It is also where the rainbow
+    // will hang, so it is sized to be a moment somebody could stand in rather
+    // than a transition they miss.
+    clearingMin: 0.7,
+    clearingMax: 1.1,
+    stormChance: 0.30,
+
+    // ------------------------------------------------------------------ snow
+    //
+    // HOW LIKELY A DAY IS COLD, by month. This is the only thing that decides
+    // whether a front comes down as rain or as snow, and it is a temperature
+    // rather than a season on purpose — see coldChance in weather.js.
+    //
+    // The winter numbers are high enough that snow is what winter IS rather
+    // than something that happens in it: at a third of days carrying a front,
+    // three quarters of them cold means roughly one winter day in three is a
+    // snow day. The summer numbers are not zero, and that is the point of
+    // writing them out rather than gating on a month range. Snow in July is
+    // about one day in a hundred and thirty — rare enough to be a small
+    // miracle, and reachable, which a hard gate never is.
+    coldByMonth: {
+      1: 0.78, 2: 0.74, 3: 0.36, 4: 0.12, 5: 0.04, 6: 0.02,
+      7: 0.02, 8: 0.02, 9: 0.05, 10: 0.14, 11: 0.40, 12: 0.72,
+    },
+
+    // A snow front runs LONGER than a rain one, and by a good margin. What a
+    // shower leaves is a few puddles and twenty minutes of it is plenty; what
+    // snow leaves is the whole point of it, and a fall that stops before the
+    // ground has gone white is a fall nobody will remember happening.
+    snowMin: 2.4,
+    snowMax: 4.2,
+    blizzardChance: 0.26,
+
+    // How deep the cover ever gets, and the two paces it lays and melts at.
+    //
+    // `lay` is the CEILING — 1 is a properly white world — and every snowfall
+    // heads for it however gently it is falling. How hard it snows divides into
+    // `layMs` instead: see the note in tickWeather, and the bug where ordinary
+    // snow stopped at 72% forever because the two had been confused.
+    //
+    // `layMs` is therefore the time constant AT FULL FLAKES. Ordinary snow runs
+    // at 0.72 of that, so it reads roughly: something on the ground within ten
+    // seconds, half covered by forty, and white in a couple of minutes. It was
+    // 95000, which put the halfway point past two minutes and full cover out of
+    // reach entirely — a build-up nobody could see happening, which is exactly
+    // what it was reported as.
+    lay: 1,
+    layMs: 32000,
+    // THE MELT IS THE LONGEST CLOCK IN THE APP, twenty minutes against the
+    // puddles' four, and the gap is deliberate rather than inherited. Snow's
+    // whole character is that it outstays the sky it came from: the coats stay
+    // on, the snowmen stay up, and the world is a different colour for an hour
+    // after the last flake. Shorten this and the wardrobe starts flickering,
+    // which is the one thing a costume must never do.
+    //
+    // It is now forty times the laying constant, and that asymmetry IS the
+    // feature: snow arrives while you watch and leaves while you are not.
+    meltMs: 1200000,
+
+    // WHEN THE WORLD PUTS ITS COAT ON. One number for two things that have to
+    // happen on the same frame: the cast change into their snow sheets, and any
+    // scenery with a snow drawing swaps to it — see WORLD_SNOW in assets.js.
+    //
+    // Both are CUTS rather than fades, because both are redraws, and two cuts a
+    // few seconds apart is the one arrangement that would look broken: a
+    // character standing in a coat beside a bush still in flower, or the other
+    // way round, for however long the gap lasted. One threshold makes the
+    // change a single moment in the weather rather than a sequence of them.
+    //
+    // WELL UNDER `playAt` — see below. The order only reads right one way: you
+    // notice it is cold and dress for it, and THEN you decide to go outside. At
+    // the same value the cast would set off for the gathering in summer clothes
+    // and change somewhere on the walk.
+    dressAt: 0.07,
+
+    // --------------------------------------------------------- how deep it lies
+    //
+    // HOW FAR THE SNOW STANDS PROUD OF THE GROUND at full cover, in world
+    // units — the thing that turns a white planet into a buried one. The shell
+    // rises by this much times the local depth, so the silhouette fattens, the
+    // cast are cut off at the snow line, and a trodden trail is a trench with
+    // walls.
+    //
+    // A FIFTH OF A UNIT, against a Chiikawa who is 2.02 tall — so shin-deep,
+    // and that is the ceiling rather than a starting point. Past about a third
+    // the cast stop reading as walking through snow and start reading as
+    // drowning in it, which is a different game. The reference art buries them
+    // to about here and no further.
+    // These two are SOLVED TOGETHER rather than chosen, and the first attempt
+    // at picking them by eye produced a planet with no trail on it at all.
+    //
+    // The shell sits at `R - shellTuck + cover * depth * mask`. Two points on
+    // that line have to land in the right places, and they fix both numbers:
+    //
+    //   the open field, mask 0.86   must stand ABOUT A FIFTH OF A UNIT proud,
+    //                               which is shin-deep on a 2.02-unit Chiikawa
+    //   a trodden print, mask 0.24  must fall BELOW the turf, so the ground
+    //                               shows through and the trail keeps its colour
+    //
+    // That second one is the whole lesson. At the first numbers a footprint put
+    // the shell within a thousandth of R — coincident with the ground, so it
+    // z-fought and then won, and the trail simply disappeared under a uniform
+    // white lid. A trench with no colour in it is not a trail; the depth alone
+    // is a fifth of a unit on a planet fifty round, and from any distance at all
+    // it reads as nothing. What makes a path legible is the GROUND showing, and
+    // the ground only shows if the shell is genuinely underneath it.
+    //
+    // ...AND THEN THE SHELL LEARNED A COLOUR, which retires half of that.
+    //
+    // The trail is carried by trodden snow now — see `snowTrodden` and the
+    // shell's branch of _litGround, where the mask darkens the shell itself as
+    // well as lowering it. So the ground is no longer the only thing that can
+    // say "somebody walked here", and the tuck came up from 0.12 to 0.095.
+    //
+    // What the tuck really sets is HOW MUCH OF A PATH IS WORN THROUGH, because
+    // it fixes the mask at which the shell passes under the turf: that crossing
+    // is at `shellTuck / depth`, and everywhere thinner than it shows ground.
+    // Prints compound where they overlap, so a walked line floors out at about
+    // 0.20 in the middle and climbs back to the field at its edges — which
+    // means the crossing lands somewhere across the WIDTH of every trail, and
+    // where it lands is the whole look. Measured, at full cover:
+    //
+    //   0.120   crossing 0.324, above the whole trail   a lush green ribbon,
+    //           correct by the old rule and much too much: nothing about deep
+    //           snow looks like a stripe of lawn
+    //   0.075   crossing 0.203, under the whole trail   no ground at all, a
+    //           faint grey trough you have to be told is there
+    //   0.095   crossing 0.257, across the core         a narrow worn strip
+    //           down the middle with packed snow either side
+    //
+    // The last is what a path in snow actually is, and the two neighbours are
+    // each a step too far one way. Snow pressed down, with the turf coming
+    // through only where it has been pressed hardest.
+    //
+    // Solving the pair: 0.62 of mask has to span 0.23 of height, so the scale is
+    // 0.37 and the tuck is whatever puts the field where it belongs — 0.22
+    // proud at 0.095, a shade deeper than the fifth it started at and still
+    // well inside the third that reads as drowning. The shell now emerges once
+    // the cover passes about 0.30 rather than 0.38, which is the same bargain
+    // in the same direction: thin snow has no depth to it, and this simply
+    // agrees a little earlier about when snow has stopped being thin.
+    depth: 0.37,
+    shellTuck: 0.095,
+    // How finely the shell is cut. It carries no detail of its own — the crisp
+    // edge of a trail is drawn by the mask darkening the GROUND colour, and this
+    // only has to be lumpy — so it is set against the narrowest thing it must
+    // show, which is a footprint. At 256 around a planet 50 units in girth, a
+    // segment is a fifth of a unit and a print spans about four of them.
+    shellSegs: 256,
+
+    // How fast falling snow fills a footprint back in, per second at full
+    // flakes — see _fill in snowfield.js.
+    //
+    // Slow enough that a trail you left survives the shower that laid it and is
+    // still there when you come back round the planet, and fast enough that a
+    // blizzard genuinely wipes the field. If tracks are vanishing while you
+    // watch, this is the number; the trodden depth is the other one.
+    fillRate: 0.022,
+
+    // ------------------------------------------------------------ the ponds
+    //
+    // WHEN THE WATER FREEZES, as thresholds on the snow cover rather than a
+    // clock of its own. Nothing here is a new kind of state: cold enough for
+    // deep snow is cold enough for ice, and hanging it off the cover means the
+    // pond inherits the one property that matters — the cover outlives the sky
+    // by twenty minutes, so the ice is the LAST thing to give when it thaws.
+    // Snow stops, the world starts going green again, and the pond is still
+    // frozen. That sequence is free, and it is the true one.
+    //
+    // Two thresholds and not one, because walking on it is a yes or a no and a
+    // single number would flip it wherever the cover happened to hover. It
+    // freezes late and thaws early, so the ice is a smaller window than the snow
+    // it came with.
+    freezeAt: 0.62,
+    thawAt: 0.34,
+    // How long the surface takes to go over and come back, in real ms. Slow —
+    // this is the one change in the app you should be able to watch happen to a
+    // thing you are standing next to.
+    freezeMs: 9000,
+    // ...and how far through that the ice will actually carry somebody. Late,
+    // so the pond visibly goes over BEFORE it will bear weight, and visibly
+    // softens before it stops. Standing on water that still looks like water is
+    // the one reading this must never give.
+    bearsAt: 0.88,
+
+    // How often somebody walking on the ice loses their footing, per second.
+    //
+    // RARE, and the number is doing real work. A slip is a joke, and a joke
+    // that lands every few paces is a mechanic — worse, it would make the ice
+    // read as a hazard, which is the opposite of what a frozen pond is for in a
+    // game about sitting in the sun. At a fiftieth a second somebody crossing a
+    // pond slips perhaps once, which is exactly often enough to be surprised by.
+    slipChance: 0.02,
+    // ...and how long they sit down about it. Long enough to read the line and
+    // to be plainly not-walking, short enough that it is a stumble rather than
+    // an injury.
+    slipMs: 2200,
+
+    // How much cover it takes before anybody thinks it is worth going out for.
+    // Low, because it is the FIRST white on the grass that sends children
+    // outside, not a foot of it — and because the gather takes a while to walk
+    // to and the fall should still be going on when they get there.
+    playAt: 0.18,
+
+    // ------------------------------------------------------ what falls, drawn
+    //
+    // Flakes are FEWER and BIGGER than raindrops, and both halves of that
+    // matter. A flake is a resolvable object where a raindrop is a streak, so
+    // it is drawn several times the size — and at that size the same count
+    // would be a wall of white rather than weather.
+    flakesMax: 620,
+    flakeSize: 0.115,
+    // Units a second, against rain's 15.5. It is the ratio that reads rather
+    // than the number: snow is the one thing in this world that falls slowly
+    // enough to watch a single one of them all the way down.
+    driftSpeed: 1.35,
+    // How far a flake wanders sideways as it falls, and how quickly it wanders.
+    // This is what stops 620 flakes descending in parallel like a lift, which
+    // is the one failure that makes falling snow read as a texture scrolling.
+    driftSway: 0.42,
+    driftHz: 0.22,
+
+    // ------------------------------------------------------------- snowmen
+    //
+    // How many can stand at once. Small, because a snowman is something the
+    // cast MADE and a planet dotted with a dozen of them reads as scenery that
+    // was always there. Three is a winter's worth.
+    // How long they stand about in it once they have got there, and how far
+    // round the meeting spot each of them stops. The ring is what turns three
+    // characters arriving at one point into a group rather than a pile.
+    playMin: 42000,
+    playMax: 78000,
+    ringOut: 1.5,
+    // ...and how long after the second of them arrives before the snowman is
+    // there. Long enough to have been made rather than found, short enough that
+    // somebody watching does not wander off before it happens.
+    buildMs: 9000,
+
+    // ------------------------------------------------------------- rainbow
+    //
+    // WHERE THE ARC HANGS, and every one of these is a composition rather than
+    // a measurement — which is worth saying because a rainbow is one of the few
+    // things in the sky with a real number attached to it (42 degrees, always).
+    //
+    // That number cannot be used here, and the reason is the planet. A rainbow
+    // is a cone about the ANTI-SOLAR point, which is as far below the horizon
+    // as the sun is above it; on Earth that puts a modest arc over the
+    // landscape. On a globe of radius 8 the horizon is already 34 degrees BELOW
+    // eye level, so the honest placement puts most of the circle in plain sight
+    // and the crown somewhere over your shoulder — a full ring hanging in the
+    // air, which is optically correct and reads as a mistake.
+    //
+    // So the arc keeps its BEARING from the sun — opposite it, which is the one
+    // thing anybody would notice — and takes its height from the frame. The
+    // resting view spans about 48 degrees below level to 14 above, so a crown
+    // at +10 sits comfortably in the top of the picture without having to be
+    // looked for, and feet at the horizon put it behind the hills.
+    bowCentreEl: -0.56,     // radians below level for the middle of the circle
+    bowRadius: 0.66,        // ...and how big the circle is
+    bowWidth: 0.088,        // how thick the band of colour is
+    bowSpan: 2.5,           // how much of the circle is drawn, centred on the crown
+    // How opaque it ever gets. Low — a rainbow is light in the air, and the one
+    // way to make it look painted on is to let it hide the sky behind it.
+    bowAlpha: 0.62,
+    // How quickly it comes and goes once the sky says so. Slow, and slower than
+    // any other fade here: a rainbow that snapped on would read as an object
+    // being switched on rather than as something you noticed.
+    bowEaseMs: 2600,
+    // How much of it has to be showing before anybody walks over to look.
+    // Well under half, so they set off while it is still arriving and are
+    // standing there for the best of it.
+    bowSeenAt: 0.28,
+
+    snowmen: 3,
+    snowmanSize: 1.05,
+    // The cover a snowman slumps below. Well under `playAt`, so one always
+    // outlives the snow that built it — the slump is the last thing left of a
+    // snowfall, and it should be on its own out there for a while.
+    slumpAt: 0.30,
+    goneAt: 0.06,
+
+    // How long one weather takes to become the next, in world hours. A third of
+    // an hour is twenty real minutes of sky slowly going over, and about eight
+    // seconds under a dragged clock — the same fraction of a day in both cases,
+    // which is the whole reason this is measured in hours and not milliseconds.
+    rampHours: 0.34,
+
+    // ...and how quickly the sky catches up with where it is heading, in real
+    // milliseconds. This is for the CONTROL rather than for the schedule: a
+    // front already ramps over `rampHours` and barely feels this, but a weather
+    // chosen by hand is a step, and every other change of sky in this world is
+    // something you watch happen. See the ease in tickWeather.
+    easeMs: 1100,
+
+    // ------------------------------------------------------ what it leaves
+    //
+    // How much standing water the hardest rain eventually makes, and the two
+    // paces the ground fills and dries at. The gap between them IS the feature:
+    // puddles have to still be there when you come out to look at the sky
+    // clearing, or the shower was a thing that was displayed rather than a
+    // thing that happened.
+    soak: 1,
+    wetMs: 42000,
+    dryMs: 260000,
+
+    // The rain has to ease this far before anybody sheltering will come back
+    // out. Hysteresis, and it is not a nicety: a walk home is the better part
+    // of a minute, so a flag that flickers once at the boundary sends somebody
+    // out of their own door and straight back in.
+    stayIn: 0.30,
+
+    // ----------------------------------------------------------- what it looks like
+    //
+    // How many drops are in the air at full downpour, and how far they fall.
+    // The column is centred on you and travels with you, so its radius only has
+    // to cover what a phone screen can see at once.
+    dropsMax: 1500,
+    dropR: 9.5,
+    dropTop: 13,
+    dropSize: 0.30,
+    // Units a second. Fast enough to be rain and slow enough that a streak is
+    // legible rather than a smear — the drawn streak is doing most of the work
+    // of saying "fast", so this does not have to.
+    fallSpeed: 15.5,
+    // How much of the rain still reaches you under a roof. Not zero: the door
+    // is a hole in the wall and you can see the weather through it, and cutting
+    // the column dead at the threshold reads as the rain being switched off
+    // rather than as being out of it.
+    indoorDrops: 0.10,
+
+    // The splash rings. A small fixed pool popped at random around your feet —
+    // enough that the ground reads as being hit, nowhere near enough to be one
+    // per drop, which nothing needs and nothing could see.
+    ripples: 14,
+    rippleR: 6.0,
+    rippleMs: 620,
+    rippleGrow: 3.4,
+
+    // The puddles. Scattered once on the same spiral everything else on this
+    // planet is scattered on, and revealed by how wet the ground is rather than
+    // created — so the same water is in the same hollows every time it rains,
+    // which is what a hollow is.
+    puddles: 26,
+    puddleMin: 0.55,
+    puddleMax: 1.5,
+    // How much of `wet` a puddle needs before it shows at all. Spread across
+    // the scatter so they do not all arrive at once: the first hollows fill
+    // early in the shower and the last only in a real downpour.
+    puddleFirst: 0.16,
+    puddleLast: 0.72,
+
+    // How far the lightning flash lifts the world, and for how long. Short —
+    // a flash you can time is a lamp being switched on.
+    boltMs: 165,
+    boltLift: 0.55,
   },
 
   // `visit` used to live here — how long a gap counted as "you were here

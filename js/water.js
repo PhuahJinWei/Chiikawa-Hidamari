@@ -66,7 +66,7 @@
 import * as THREE from 'three';
 import { CONFIG, PAL } from './config.js';
 import { dirFromLatLon, localFrame, lakeRim } from './sphere.js';
-import { paintGlints, paintNami, NAMI_FRAMES } from './art.js';
+import { paintGlints, paintNami, paintIceCracks, NAMI_FRAMES } from './art.js';
 
 // How far the water floats above the planet's surface.
 //
@@ -701,6 +701,23 @@ function namiTextures() {
   return NAMI_TEX;
 }
 
+// THE CRACKS, on the same layer the waves live on — see paintIceCracks, which
+// explains why they ride it rather than bringing a mesh of their own.
+//
+// Painted on first use rather than at start-up, because most visits never see
+// a frozen pond and this is a 512px canvas nobody asked for. A winter pays for
+// it once.
+let ICE_TEX = null;
+function iceTexture() {
+  if (!ICE_TEX) {
+    ICE_TEX = new THREE.CanvasTexture(paintIceCracks());
+    ICE_TEX.colorSpace = THREE.SRGBColorSpace;
+    ICE_TEX.wrapS = THREE.RepeatWrapping;
+    ICE_TEX.wrapT = THREE.RepeatWrapping;
+  }
+  return ICE_TEX;
+}
+
 // ---------------------------------------------------------------- the build
 //
 // Returns the three meshes and the material list the caller has to tint. The
@@ -876,7 +893,7 @@ export function buildLake(R, lake) {
 // Night is the exception and keeps a strong pull, because there the sky at the
 // horizon is a deep blue — a NEIGHBOUR of the water's own hue rather than its
 // opposite — so the lerp darkens without draining it.
-export function waterHour(ponds, tint, sky, mirror, glint) {
+export function waterHour(ponds, tint, sky, mirror, glint, freeze = 0) {
   // WATER IS ALWAYS DARKER THAN THE SKY IT IS MIRRORING, and leaving this out is
   // the one thing that stopped the sunset working. A pond throws back some of
   // what lands on it and swallows the rest, so the reflection is the sky at
@@ -898,6 +915,40 @@ export function waterHour(ponds, tint, sky, mirror, glint) {
     p.glintMat.color.copy(sky).lerp(_white, 0.35);
     p.glintMat.opacity = glint;
     p.namiMat.color.copy(tint);
+
+    // ------------------------------------------------------------- and frozen
+    //
+    // Laid over the hour rather than instead of it, which is what keeps a
+    // frozen pond part of the same evening as the field around it: everything
+    // above still runs, and this leans the result toward ice by however far the
+    // water has gone over.
+    //
+    // THE BODY keeps wearing the hour — `_ice` is multiplied by the tint on the
+    // way in — so ice at midnight is blue and ice at sunset is warm, exactly as
+    // the water was. Lerping to a fixed colour instead would put a daylight
+    // pond in the middle of a night.
+    if (freeze > 0.002) {
+      _frozen.copy(tint).multiply(_ice);
+      p.body.material.color.lerp(_frozen, freeze);
+      // THE GLINTS GO ALMOST OUT, and this is the change that reads as "still"
+      // more than any colour does. A sparkle is the surface moving; ice that
+      // still twinkles is water with a pale filter on it. A little is kept,
+      // because ice does catch the light — it just holds it rather than
+      // scattering it, which is what stopping the drift below says.
+      p.glintMat.opacity = glint * (1 - freeze * 0.82);
+      // ...and the wave lines become the cracks. Same layer, same tiling, a
+      // different drawing — see iceTexture.
+      // No `needsUpdate`: swapping one texture for another leaves the shader's
+      // own defines alone, so the uniform is simply re-read — the same bare
+      // assignment the boil below has always used. Setting it would force a
+      // program recompile on the frame a pond freezes, which is a hitch bought
+      // for nothing. Putting it BACK is automatic: the boil restores a wave
+      // frame the first time it runs again after the thaw.
+      if (freeze > 0.5 && p.namiMat.map !== ICE_TEX) {
+        p.namiMat.map = iceTexture();
+        p.namiMat.map.offset.set(0, 0);
+      }
+    }
   }
 }
 const _white = new THREE.Color(1, 1, 1);
@@ -905,6 +956,8 @@ const REFLECT = 0.76;
 const _sky = new THREE.Color();
 const _deep = new THREE.Color(PAL.waterDeep);
 const _ink = new THREE.Color(PAL.waterInk);
+const _ice = new THREE.Color(PAL.iceFace);
+const _frozen = new THREE.Color();
 
 // The surface animates: the glints crawl, and the wave lines and the shore both
 // boil. One clock for every pond on the planet, driven by scene.js's update,
@@ -924,7 +977,23 @@ const _ink = new THREE.Color(PAL.waterInk);
 // of them) this costs two comparisons. The drift offset is then written to
 // whichever wave drawing is live; all three share one drift, so a flip never
 // teleports the lines it is wiggling.
-export function driftWater(ponds, seconds) {
+export function driftWater(ponds, seconds, freeze = 0) {
+  // A FROZEN POND DOES NOT MOVE, and stopping it here is not only correct but
+  // the cheapest thing this feature does: freezing REMOVES the per-frame work
+  // on both ponds — the glint crawl, the boil's texture swap and the shore's
+  // geometry swap — rather than adding any.
+  //
+  // It also has to happen, not merely ought to. `waterHour` puts the crack
+  // sheet on the nami layer; left running, the loop below would put a wave
+  // frame straight back over it on the very next frame, and the two would swap
+  // the map back and forth forever at sixty hertz.
+  //
+  // Gated at half rather than at the walkable point, so the surface stills as
+  // it goes over rather than the moment it will bear weight. The two are
+  // seconds apart and the stilling is the earlier of them, which is the order
+  // anybody watching a pond freeze would expect.
+  if (freeze > 0.5) return;
+
   const nami = namiTextures();
   const pass = Math.floor(seconds / NAMI_STEP) % NAMI_FRAMES;
   const frame = nami[pass];

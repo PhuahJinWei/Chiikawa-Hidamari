@@ -94,6 +94,9 @@ export const ITEMS = {
   // Chiikawa's own pink sasumata. Its separate id is what makes the physical
   // weapon persist between its home spot, the hand, and placed locations.
   chiikawaWeapon: { kind: 'unique', art: 'pinkweapon', name: 'ピンクのさすまた' },
+  // Hachiware's own three-string guitar: one physical instrument that moves
+  // between its cave-floor pose, the player's hand, and a character's hands.
+  hachiwareGuitar: { kind: 'unique', art: 'guitar', name: 'ギター' },
   // Hachiware's blue counterpart is another physical weapon, not a recolour of
   // the same inventory entry, so both can exist and be carried independently.
   hachiwareWeapon: { kind: 'unique', art: 'blueweapon', name: 'ブルーのさすまた' },

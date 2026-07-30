@@ -50,8 +50,8 @@ are used or redistributed.
   under walking pace, so you catch it up rather than punting it across the room.
   Nothing else indoors moves, and nothing else should — every other piece is
   somebody's arrangement, and this one is an accident already.
-- **The world is solid; your friends are not.** Water, the house, every tree,
-  every stump and the bench all stop you, and stop the cast too — a friend
+- **The world is solid; your friends are not.** Water, the house, every tree
+  and every stump all stop you, and stop the cast too — a friend
   strolling through a trunk you just bumped into says the rule is about you
   rather than about the world. What you may still walk through is the people
   and the ground cover: straight up to somebody and straight through them,
@@ -88,8 +88,8 @@ are used or redistributed.
   or turning the house moves the arrival with it. Which way the door faces is
   itself a decision now (`interior.doorFacing`) rather than a by-product of the
   maths that stands the building on its hill.
-- **Somewhere to walk to.** Five landmarks — the house, the bench and three big
-  trees — with worn tracks between them, so there is usually something in sight
+- **Somewhere to walk to.** The house, a giant pudding cup and three big trees
+  act as landmarks, with worn tracks between them, so there is usually something in sight
   to steer by and a line on the ground when there is not.
 - **And a face at the edge of the screen** for anyone who is off it, with an
   arrow pointing their way. The house has one too. On the grass only; up in the
@@ -252,7 +252,7 @@ are used or redistributed.
   nothing grows in one — no grass, no flowers, no trees. Walking into
   a shore slides you along it rather than stopping you dead, and tapping the
   middle of a lake walks you to its edge. Nothing grows through a building
-  either: the house and the bench each keep their own footprint clear.
+  either: the house keeps its own footprint clear.
 - **It remembers nothing.** No `localStorage`, no cookies, no account, no
   record that you were ever here. Close the tab and the planet keeps no trace
   of the visit — including the hour you set, which is why every arrival opens
@@ -513,7 +513,7 @@ camera's near plane is 0.3, so the line holds the EYE clear of the shell, not
 the feet. At 2.25, an eye 1.7 up keeps 0.35 of clearance in every direction.
 Furniture is placed by a bearing round the house (the door is bearing 0) and a
 distance out in world units; nothing indoors is solid, for the same stated
-reason a bench is not — in a room three strides across, a table you could not
+reason a small stool is not — in a room three strides across, a table you could not
 step past would be friction with nothing to buy.
 
 What the merge deleted is worth listing, because all of it was machinery for
@@ -553,7 +553,7 @@ now does two jobs. Anything drawn — the characters, the ground, the three tree
 the two bushes, the stump, the five grasses, the five flowers, the six flat
 flower clusters, the two mushrooms, the lake, the house, the sun and moon — is
 loaded by `js/assets.js` and merely framed here. Everything not yet drawn is
-painted in code as it always was: the bench, the sky, shadows, the soft stamp
+painted in code as it always was: the sky, shadows, the soft stamp
 the lamplight is made of, the ring that marks a tapped spot, and the tracks worn
 between the landmarks. Nothing at ground level is painted any more — the last
 one was the rock, and there are no rocks on this planet.
@@ -2050,15 +2050,9 @@ Constraints worth knowing before you change things:
   changes beyond ground, planting and density — no biome has its own weather,
   its own sound, or its own kind of tree, and the meadow's wood is the same wood
   everywhere in it.
-- **Draw the bench.** It is the last thing on the planet still painted in code,
-  and it sits next to drawn art without an outline, which shows.
 - **Decide how far the built rule goes.** The trees and the stumps are geometry
-  (`CONFIG.foliage3d`); the bushes are not, and the bench is the only other prop
-  out there. The bushes were built and put back, so that one is answered — read
-  the note above before trying it again. The bench is a different shape from
-  anything tried so far: flat planks rather than a lumpy ball, so it is closer to
-  the furniture's job than to the foliage's, and `furniture.js` already knows how
-  to build a thing out of slabs and sticks.
+  (`CONFIG.foliage3d`); the bushes are not. The bushes were built and put back,
+  so that one is answered — read the note above before trying it again.
 - **Give a distant tree fewer triangles.** One canopy is 30k of them and the
   hull doubles it, which is the whole cost of building them; from orbit a tree
   covers a few dozen pixels and could not tell you if it were a tenth of that.

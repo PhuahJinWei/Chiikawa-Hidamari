@@ -59,6 +59,38 @@ const WORLD = {
   housePlate: 'chiikawa-house-plate.png',
 };
 
+// THE WORLD'S OWN WINTER WARDROBE — the same scenery, drawn with snow on it.
+//
+// Keyed by the WORLD key above, so an entry here says "there is a second
+// drawing of that thing, for when the ground is white". scene.js swaps one for
+// the other on the frame the world dresses; nothing else changes, and the snowy
+// drawing wears the hour and catches the lamplight exactly as the summer one
+// does, because it is the same card with a different picture on it.
+//
+// A REDRAW AND NOT A TINT, which is the whole reason this table exists rather
+// than a shader term. The built scenery — trees, stumps, the two buildings —
+// takes its snow as a mix toward the ground colour, because built geometry has
+// no drawing to swap and a lathe frosts perfectly well. A bush is a DRAWING,
+// and this world's rule for drawings is that they are drawn again: snow on a
+// bush is not the bush with its colour moved, it is a bush with snow lying on
+// its top and its flowers gone under. No mix reaches that, and the difference
+// is exactly the one the eye picks out.
+//
+// A DECLARED LIST rather than a hopeful fetch, for the reason the grass sheets
+// taught this file once already: every job below is awaited, so a file that is
+// not there is not a missing extra, it is a start screen that never turns into
+// an invitation. Nothing may be listed here before it has been drawn.
+//
+// Adding one is three steps and no code:
+//   1. draw `asset/images/bush-1-snow.png`
+//   2. add `bush1: 'bush-1-snow.png'` here
+//   3. add its path to sw.js
+// ...and every bush of that kind starts putting a coat on at `dressAt`.
+export const WORLD_SNOW = {
+  bush1: 'bush-1-snow.png',
+  bush2: 'bush-2-snow.png',
+};
+
 // Flowers and mushrooms come in numbered variants — `flower-1.png` and upward.
 // Draw another, bump the count here, add the path to sw.js, and it starts
 // appearing; nothing else counts them.
@@ -118,7 +150,12 @@ export const SKY_DISC_ART = true;
 // the shoal deals from it, the 図鑑 lists it, and a lookup is always by a
 // species id that came out of FISH_SPECIES. `IMG.fish[sp.id]` says that; twelve
 // IMG.fishPeachCarp keys would have said "twelve unrelated pictures".
-export const IMG = { sheets: {}, fish: {}, icons: {} };
+// `snow` is `sheets` again for the winter wardrobe, and it is its own room for
+// the reason `fish` is: it is a SET that gets swapped wholesale rather than a
+// handful of extra pictures. `IMG.snow[key][expr]` says "the same character,
+// dressed for it"; twelve camel-cased snow keys in the top level would have
+// said twelve unrelated drawings.
+export const IMG = { sheets: {}, snow: {}, fish: {}, icons: {} };
 
 // THE PACK'S ICONS, which are deliberately NOT the same pictures as the world's.
 //
@@ -171,6 +208,9 @@ const ICONS = {
 export const ICON_CAT = {
   ...Object.fromEntries(Object.entries(ICONS).map(([id, file]) => [id, file.split('-')[0]])),
   ...Object.fromEntries(FISH_SPECIES.map((sp) => [sp.id, 'fish'])),
+  // No separate bitmap is needed: unique items are photographed from their
+  // hand model. This only supplies the matching category-coloured slot border.
+  hachiwareGuitar: 'unique',
 };
 
 // Deliberately the load event and not decode().
@@ -203,6 +243,14 @@ export async function loadArt(onProgress) {
 
   for (const [key, file] of Object.entries(WORLD)) {
     jobs.push(load(BASE + file).then((img) => { IMG[key] = img; }));
+  }
+
+  // ...and the snowy twin of any of them that has been drawn — see WORLD_SNOW.
+  // Landed under `<key>Snow`, which is the same camel-casing the rest of this
+  // table uses (`houseDay`, `houseNight`), so scene.js can find one from the
+  // summer key it already has without a second lookup table.
+  for (const [key, file] of Object.entries(WORLD_SNOW)) {
+    jobs.push(load(BASE + file).then((img) => { IMG[`${key}Snow`] = img; }));
   }
 
   // File names keep their hyphens; IMG keys camel-case them (`flat-flower-1.png`
@@ -270,6 +318,30 @@ export async function loadArt(onProgress) {
           .then((img) => { sheets[expr] = img; }),
       );
     }
+
+    // THE SECOND WARDROBE — the same character wrapped up, worn while the
+    // ground is white. Keyed the same way and read the same way, so nothing
+    // downstream has to know these are a different set of drawings; see
+    // `setDressed` in character.js, which swaps one table for the other.
+    //
+    // Fetched from the same declared list `sheets` is, and required in exactly
+    // the same sense: a name in `snow` that has no file is a broken build, not
+    // a missing extra. That is the whole reason it is a list rather than a
+    // guess — see the note beside it in cast.js.
+    //
+    // A character with no `snow` list at all gets an empty table, which is not
+    // a gap to handle: the lookup falls through to the ordinary sheet, and
+    // somebody nobody has drawn a coat for simply stands about in the snow in
+    // their usual clothes. Same half-drawn courtesy every other sheet gets.
+    const snow = {};
+    IMG.snow[spec.key] = snow;
+    for (const suffix of spec.snow || []) {
+      const expr = suffix === 'idle' ? 'normal' : suffix;
+      jobs.push(
+        load(`${BASE}characters/${spec.key}-${suffix}-snow.png`)
+          .then((img) => { snow[expr] = img; }),
+      );
+    }
   }
 
   // Counted here rather than inside load(), so that one place counts every kind
@@ -301,8 +373,18 @@ export async function loadArt(onProgress) {
     // sheet half again as tall as the resting one is the drawing being right,
     // not the drawing being wrong.
     const { naturalWidth: w, naturalHeight: h } = sheets.normal;
-    for (const [expr, img] of Object.entries(sheets)) {
-      if (POSTURES.includes(expr)) continue;
+    // The winter wardrobe is measured against the SUMMER idle sheet, not
+    // against its own — and that is the constraint rather than an oversight.
+    // There is one standing plane per character, cut from the resting drawing
+    // once, and both wardrobes hang on it; a coat drawn on a wider canvas does
+    // not get a wider card, it gets the same card with the drawing squashed
+    // onto it. So the two sets have to agree with each other, which is the same
+    // thing as both agreeing with this.
+    const both = { ...sheets, ...Object.fromEntries(
+      Object.entries(IMG.snow[spec.key] || {}).map(([k, v]) => [`${k}-snow`, v]),
+    ) };
+    for (const [expr, img] of Object.entries(both)) {
+      if (POSTURES.some((p) => expr === p || expr === `${p}-snow`)) continue;
       if (img.naturalWidth !== w || img.naturalHeight !== h) {
         console.warn(
           `${spec.key}-${expr}: ${img.naturalWidth}x${img.naturalHeight} `

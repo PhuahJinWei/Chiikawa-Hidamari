@@ -362,6 +362,23 @@ export function activePhase() {
   return hand ? phaseAt(handHours()) : clockPhase();
 }
 
+// THE HOUR ITSELF, whichever clock is keeping it, as a fractional 0 to 24.
+//
+// `activePhase` above is this rounded down into one of five buckets, and for
+// everything the sky does that is the whole of what anybody needs. The weather
+// is the exception and needs the number: a front arrives at 14:20 and eases off
+// by 16:05, which is not a fact about noon or about evening.
+//
+// Exported from HERE rather than worked out over there, for the reason this
+// whole section exists — the two clocks are the same right up until somebody
+// sets the hour by hand, and then a second reader is simply wrong. Dragging the
+// day has to drag the weather with it.
+export function nowHours() {
+  if (hand) return handHours();
+  const d = new Date();
+  return d.getHours() + d.getMinutes() / 60;
+}
+
 // Whether the REAL clock is the one deciding — which is what the pill's dot
 // means, and still exactly what it meant before the hand-wound one started
 // running. A fast day is not an automatic one.
