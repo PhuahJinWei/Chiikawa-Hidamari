@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v70';
+const CACHE = 'hidamari-v77';
 
 const ASSETS = [
   './',
@@ -135,12 +135,15 @@ const ASSETS = [
   './asset/images/characters/chiikawa-idle.png',
   './asset/images/characters/chiikawa-happy.png',
   './asset/images/characters/chiikawa-delight.png',
+  './asset/images/characters/chiikawa-sleep.png',
   './asset/images/characters/hachiware-idle.png',
   './asset/images/characters/hachiware-happy.png',
   './asset/images/characters/hachiware-surprise.png',
+  './asset/images/characters/hachiware-sleep.png',
   './asset/images/characters/usagi-idle.png',
   './asset/images/characters/usagi-happy.png',
   './asset/images/characters/usagi-surprise.png',
+  './asset/images/characters/usagi-sleep.png',
   './asset/images/characters/momonga-idle.png',
   './asset/images/characters/momonga-fly.png',
   'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js',

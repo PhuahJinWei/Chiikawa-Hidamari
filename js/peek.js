@@ -16,7 +16,10 @@
 //             out from the middle, the same two numbers every furniture entry
 //             is written in
 //   look, lookOut   what it is squared up with, as the same pair
-//   phase     morning | noon | evening | night
+//   phase     morning | noon | evening | night | midnight
+//   sleep     1 to lay the sleepers down whatever the hour says — the bench
+//             for the bedding sandwich, which is the one placement in the app
+//             that cannot be judged from any hour but its own
 //   pitch     optional look pitch override, radians up from the resting one
 //   hold      an art name to put in the HAND — the sasumata is why. The slot
 //             pose can be turned live: hx/hy (frame fractions), hh (height
@@ -77,6 +80,20 @@ if (globe.fish) {
 }
 
 globe.setDaylight(PHASE, { instant: true });
+
+// The sleepers, laid down on demand rather than at the hour that would lay them
+// down by itself. This is the bench where the bedding sandwich gets fitted, and
+// fitting it at midnight in an unlit room would mean judging a placement in the
+// dark — which is exactly right for the app and useless for the workbench. So
+// `sleep=1` shows them at whatever hour is being looked at, noon included.
+//
+// Usagi is put at his own meadow spot, since nothing here walks him there.
+if (q.get('sleep') === '1') {
+  for (const spec of CAST) {
+    const at = globe.sleepSpotFor(spec.key);
+    globe.layDown(spec.key, true, at, CONFIG.sleep[spec.key]?.spin || 0);
+  }
+}
 
 // The same two moves the interiors are placed by — see spotDir in scene.js.
 // The shell's frame is read back off the built world rather than rebuilt from

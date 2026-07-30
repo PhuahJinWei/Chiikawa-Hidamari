@@ -59,6 +59,27 @@ const _dTry = new THREE.Vector3();
 // has moved to.
 const DETOUR = [0.45, -0.45, 0.9, -0.9, 1.4, -1.4];
 
+// ...and how FAR to try stepping, as fractions of the sidestep's full length.
+//
+// The bearings above were the whole of it, all six taken at one length, and that
+// length is `roamMax` — eight units. A long line is the hardest kind to keep
+// clear: it has to miss everything along its whole span, so on a planet with two
+// dozen trees on it a blocked bearing usually stays blocked at every bearing, and
+// all six attempts fail together. Measured on the walk to the cave, with two
+// trees of radius 1.19 and 1.29 standing side by side across the line:
+// hundreds of picks, every one empty, the detour exhausting all six offsets each
+// time, and Hachiware stood at the near side of them indefinitely.
+//
+// What gets past a tree is not a better bearing, it is a SHORTER STEP. A unit
+// and a half to the side clears the trunk and needs only a unit and a half of
+// clear ground to do it, and the next pick is made from there — which is exactly
+// what this whole mechanism says it is for: get them moving in roughly the right
+// direction and re-aim from wherever that left them.
+//
+// Full length first, so nothing that already worked changes, and the extra
+// passes only ever run on a pick that had failed at every bearing anyway.
+const DETOUR_STEPS = [1, 0.45, 0.18];
+
 // How many places along a planned walk get checked for water, for latitude, and
 // for the props you cannot walk through.
 //
@@ -80,8 +101,13 @@ const PATH_STEPS = 8;
 
 // How many renderOrder slots one character reserves. The scene hands out a base
 // per character each frame from a depth sort. One slot, because the card is all
-// there is to order — it was 3 to leave room above for the sleeping Zzz, which
-// no longer exists.
+// there is to order — it was 3 to leave room above for the sleeping Zzz.
+//
+// THE ZZZ IS BACK AND STILL NEEDS NO SLOT HERE, which is worth a line because the
+// obvious reading of its return is that this goes back to 3. It does not: the
+// mark hangs off the sleeping CARD in the world, not off this body — see
+// _sleepMark in scene.js — so it is ordered against the bedding it floats over
+// rather than against the cast, and this sort never sees it.
 //
 // A character HAS grown a second mesh since — the piece they are carrying, see
 // `holdGroup` below — and it still needs no slot of its own. That sort exists
@@ -370,11 +396,29 @@ export class Character {
     // pixels stand in for all of them.
     this.alpha = bounds.data;
 
-    // A Zzz floated here while they dozed at night, and `asleep` above was what
-    // switched it on. The cast does not sleep at all now — night is when they
-    // are out under the stars — so both are gone rather than left as a flag
-    // nothing ever sets. `plane()` went with it: the body and the shadow build
-    // their own meshes, and it had no third caller.
+    // ASLEEP, which for this app means "not drawn as a body at all".
+    //
+    // A Zzz used to float here and an `asleep` flag switched it on, and both
+    // were removed when the cast stopped sleeping. Both are back, and the flag
+    // means something stronger than it did while the Zzz has moved: it hangs off
+    // the sleeping card in the world now rather than off this body, because the
+    // body is the thing that stops being drawn. What is drawn instead is a card
+    // lying in the world — in their own bedding, or on the grass for the one
+    // with none —
+    // so a sleeping character is not this body wearing a sleeping face, it is
+    // this body NOT BEING DRAWN while a drawing of them lies somewhere else.
+    // See MIDNIGHT_SLEEP.md and Globe.layDown.
+    //
+    // They keep their position while they sleep, which is what makes the two
+    // agree: `dir` is still where they walked to, so the card is laid at the
+    // spot they stopped at rather than at a place remembered separately.
+    this.asleep = false;
+    this._shown = true;
+    // ON THEIR WAY TO BED, which is the one errand that does not stop for you.
+    // Written by household.js alongside `errand`, and read in exactly one place
+    // — the politeness freeze in _wander. See the note there for what it cost
+    // to learn that bedtime could not share a stroll's manners.
+    this.turningIn = false;
     this.expression = 'normal';
     this.talking = false;
     this.blinkUntil = 0;
@@ -402,7 +446,38 @@ export class Character {
   // Whether the planet's curve has swallowed them. The depth buffer does the
   // actual hiding; this is for the logic that needs to know — who may speak,
   // and who can be tapped.
-  get isVisible() { return this._onScreen; }
+  //
+  // Somebody asleep is not visible BY THIS QUESTION, and every caller wants
+  // that: they may not be spoken to, may not be picked as the one you came to
+  // see, and may not be tapped as a body. What CAN be tapped is the drawing of
+  // them lying in the world, which is a different object and is asked about
+  // separately — see sleeperAt in main.js.
+  get isVisible() { return this._onScreen && !this.asleep; }
+
+  // Lie down, or get up. The card is the scene's business; this is only the
+  // body's half of it — stop wandering, stop being drawn, stop being somebody
+  // a conversation can reach.
+  // `at` is the drawing of them lying down, and it becomes where their voice
+  // comes from — see headWorld. Without it a sleeping friend's mumble would
+  // hang over the spot their BODY is parked at, which for the two who have
+  // beds is a stride away beside the bedding rather than in it.
+  sleep(on, at = null) {
+    if (this.asleep === on) return;
+    this.asleep = on;
+    this.walking = false;
+    this.errand = null;
+    this._bedAnchor = on ? at : null;
+    // Standing back up is standing: whatever posture they went to bed in — a
+    // cushion they were sat on when the hour turned — is not one to wake in.
+    if (!on) this._setPosture('stand');
+  }
+
+  // Whether they are on this side of the planet AT ALL, which is a different
+  // question from whether they can be seen or spoken to. A sleeper is present
+  // and not visible; somebody over the horizon is neither. The bubble reads
+  // this one, because a line already being spoken has to stay over its speaker
+  // even when what is drawn there is a card lying in the bedding.
+  get isPresent() { return this._onScreen; }
 
   get tintables() {
     return [this.bodyMesh.material, this.shadow.material];
@@ -421,7 +496,9 @@ export class Character {
   // The fade is on OPACITY and not on visibility, so somebody walking up to a
   // pond arrives in it rather than appearing in it.
   setReflection(colour, amount, opacity) {
-    const on = opacity > 0.004;
+    // Nobody asleep is reflected in anything: the body casting it is not being
+    // drawn, so a reflection of it would be a ghost standing in the water.
+    const on = opacity > 0.004 && !this.asleep;
     this.reflection.visible = on && this._onScreen;
     if (!on) return;
     this.reflection.material.opacity = opacity * this.fade;
@@ -479,6 +556,14 @@ export class Character {
   // The breath scale is deliberately left off: it would pulse the bubble by a
   // hundredth of a unit to no visible end.
   headWorld(out) {
+    // Asleep, their head is in the bedding rather than on the body — which is
+    // parked beside it, not drawn, and would hang a mumble over an empty patch
+    // of floor. Lifted by the same bubble gap a standing one uses, so a line
+    // clears the drawing instead of sitting on its face.
+    if (this._bedAnchor) {
+      this._bedAnchor.getWorldPosition(out);
+      return out.addScaledVector(this.normal, CONFIG.dialogue.bubbleLift);
+    }
     out.set(0, this.headY, 0).applyQuaternion(this.billboard.quaternion);
     return out.add(this.root.position).add(this.billboard.position);
   }
@@ -861,20 +946,28 @@ export class Character {
     _dAim.normalize();
     localFrame(this.dir, _dEast, _dNorth);
     const base = Math.atan2(_dAim.dot(_dEast), _dAim.dot(_dNorth));
-    const arc = Math.min(cfg.roamMax, this.dir.angleTo(aim) * R) / R;
-    if (arc < 1e-4) return false;
-    for (const off of DETOUR) {
-      const a = base + off;
-      _dTry.copy(this.dir).multiplyScalar(Math.cos(arc))
-        .addScaledVector(_dNorth, Math.sin(arc) * Math.cos(a))
-        .addScaledVector(_dEast, Math.sin(arc) * Math.sin(a))
-        .normalize();
-      // Offered as an ordinary destination, so it is fenced and trimmed exactly
-      // as the direct line was. `localFrame` above is re-read every iteration
-      // because this overwrites the module's own copy of it.
-      this._pickTarget(_dTry);
-      localFrame(this.dir, _dEast, _dNorth);
-      if (this.dir.angleTo(this.target) > 1e-3) return true;
+    const full = Math.min(cfg.roamMax, this.dir.angleTo(aim) * R) / R;
+    if (full < 1e-4) return false;
+    // Every bearing at the full length, then the same bearings closer in — see
+    // DETOUR_STEPS for why the length matters more than the bearing does.
+    for (const frac of DETOUR_STEPS) {
+      const arc = full * frac;
+      // Below about half a unit a sidestep is not a step, it is a shuffle, and
+      // one that short cannot clear anything worth going round.
+      if (arc * R < 0.5) continue;
+      for (const off of DETOUR) {
+        const a = base + off;
+        _dTry.copy(this.dir).multiplyScalar(Math.cos(arc))
+          .addScaledVector(_dNorth, Math.sin(arc) * Math.cos(a))
+          .addScaledVector(_dEast, Math.sin(arc) * Math.sin(a))
+          .normalize();
+        // Offered as an ordinary destination, so it is fenced and trimmed
+        // exactly as the direct line was. `localFrame` above is re-read every
+        // iteration because this overwrites the module's own copy of it.
+        this._pickTarget(_dTry);
+        localFrame(this.dir, _dEast, _dNorth);
+        if (this.dir.angleTo(this.target) > 1e-3) return true;
+      }
     }
     return false;
   }
@@ -901,13 +994,37 @@ export class Character {
     const R = CONFIG.globe.radius;
     const cfg = CONFIG.wander;
 
-    // Being visited, or you have walked right up to them: stay put.
+    // Being visited, or you have walked right up to them, or mid-conversation
+    // with one of the others: stay put.
+    //
+    // NOTHING HOLDS SOMEBODY WHO IS GOING TO BED. Both of these rules are right
+    // for a STROLL, which has nowhere it needs to get to: a friend who wandered
+    // over should stop, the one you came to see should not amble off
+    // mid-sentence, and two of them talking should finish. Bedtime is the only
+    // errand in this world with a deadline, so it outranks all of it — see
+    // `turningIn`, which household.js sets for exactly as long as the walk home
+    // lasts.
+    //
+    // The arrival spot alone was enough to break this. You are set down on the
+    // doorstep 3.6 units from Chiikawa — exactly `closeArc` — so setting the
+    // hour to まよなか from where the game puts you left him holding a valid
+    // route to his own bed and not taking a single step of it: measured still at
+    // 5.02 from the bed for seventy consecutive seconds. Walking over to say
+    // hello first widens the radius to `noticeArc`, 6.5, which is most of the
+    // front garden. A meet exchange could pin the pair of them for another seven
+    // seconds on top.
+    //
+    // They walk PAST you now, which is the same courtesy the cast already extend
+    // to each other — nobody here is solid to anybody else — and they walk off
+    // mid-line if they were talking, which is what somebody excusing themselves
+    // does. What keeps it from reading as marching is their own walk rhythm,
+    // which is untouched.
     const dot = watcher ? this.dir.dot(watcher.dir) : -1;
     const playerHere = !!watcher && watcher.alt < cfg.noticeAlt && (
       (this.attentive && dot > Math.cos(cfg.noticeArc / R))
       || dot > Math.cos(cfg.closeArc / R)
     );
-    if (tMs < this.busyUntil || playerHere) {
+    if (!this.turningIn && (tMs < this.busyUntil || playerHere)) {
       if (this.walking) {
         this.walking = false;
         this.restUntil = tMs + cfg.interruptRest;
@@ -917,6 +1034,11 @@ export class Character {
 
     if (!this.walking) {
       if (tMs < this.restUntil) return;
+      // NOBODY TURNING IN WANDERS. A bedtime walk always carries an errand, so
+      // this is a guard rather than a case: if one ever arrived here without
+      // one, a random stroll is the last thing it should become — that is the
+      // difference between going to bed and pottering about at midnight.
+      if (this.turningIn && !this.errand) return;
       this._pickTarget(this.errand);
       // A trip that came back empty was aimed into a lake, or over a pole, or
       // straight at a tree, and pulled back to where they already stand —
@@ -949,7 +1071,23 @@ export class Character {
     if (ang <= step || ang < 1e-4) {
       this.dir.copy(this.target);
       this.walking = false;
-      this.restUntil = tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin);
+      // A STROLL ENDS IN A REST AND A WALK HOME DOES NOT, which is most of what
+      // separates the two on screen.
+      //
+      // This rest is between one and six seconds and it is taken at the end of
+      // every LEG, not every trip — and a walk to bed is made of many legs,
+      // because a target trimmed short of an obstacle counts as one. So the
+      // whole journey came out as a few paces, a pause, a few paces, a pause,
+      // which reads exactly as it sounds: somebody ambling home who might or
+      // might not be going to bed. It is the pause between the paces that made
+      // midnight feel like it had not really happened.
+      //
+      // Somebody turning in arrives and sets off again on the next frame. The
+      // walk cycle itself is untouched, so they still walk rather than glide;
+      // what is gone is the standing about.
+      if (!this.turningIn) {
+        this.restUntil = tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin);
+      }
     } else {
       _axis.crossVectors(this.dir, this.target);
       if (_axis.lengthSq() < 1e-10) { this.walking = false; return; }
@@ -1028,7 +1166,14 @@ export class Character {
     // and a stroll taken from a cushion would be a stroll through the seat.
     // Driven, there is none either: the rig already stood the body somewhere
     // this frame — see standAt.
-    if (this.posture !== 'sit' && !this.driven) this._wander(dtMs, tMs, watcher);
+    // Wander first: everything below depends on where they ended up. Seated,
+    // there is no wandering to do — standing up is the household's business,
+    // and a stroll taken from a cushion would be a stroll through the seat.
+    // Driven, there is none either: the rig already stood the body somewhere
+    // this frame — see standAt. Asleep, obviously none.
+    if (this.posture !== 'sit' && !this.driven && !this.asleep) {
+      this._wander(dtMs, tMs, watcher);
+    }
 
     // Face the camera squarely, leaning away from whatever they are stood on.
     orientBillboard(this.billboard, this.root.position, this.normal, camera, this.standoff);
@@ -1052,13 +1197,18 @@ export class Character {
     const reach = Math.acos(clampUnit(R / camLen))
       + Math.acos(clampUnit(R / (R + this.headTop)));
     const away = Math.acos(clampUnit(this.normal.dot(this._camDir)));
-    const visible = away < reach + 0.10;
-    if (visible !== this._onScreen) {
-      this._onScreen = visible;
-      this.billboard.visible = visible;
-      this.shadowHolder.visible = visible;
+    this._onScreen = away < reach + 0.10;
+    // Two separate reasons not to be drawn, and they are kept apart on purpose:
+    // over the horizon is about where the CAMERA is and changes as you walk,
+    // while asleep is about what time it is. Folding them into `_onScreen`
+    // would have a sleeper "come back over the horizon" awake.
+    const shown = this._onScreen && !this.asleep;
+    if (shown !== this._shown) {
+      this._shown = shown;
+      this.billboard.visible = shown;
+      this.shadowHolder.visible = shown;
     }
-    if (!visible) return;
+    if (!shown) return;
     this._animate(dtMs, tMs);
   }
 

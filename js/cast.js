@@ -60,7 +60,20 @@ import { FISH_SPECIES } from './config.js';
 // It lives in this file rather than beside EXPRESSIONS in art.js because
 // assets.js is the reader and art.js already imports assets.js — putting it
 // there would close a circle.
-export const POSTURES = ['sit', 'fly'];
+//
+// `sleep` is a posture by the definition above and the ONE that is never worn
+// as a card. The other two are billboards: a body that turns to face you. A
+// sleeping one is drawn from ABOVE and laid flat in the world — in the bedding
+// for the two who have any, on the grass for the one who has not — so what
+// reads it is scene.js, which builds it a plane of its own lying down, and
+// character.js never measures it at all. What it needs from this list is the
+// only thing this list actually does: it tells assets.js that a differently
+// shaped canvas is the drawing being right rather than the drawing being
+// wrong, which a top view of somebody asleep certainly is.
+//
+// See MIDNIGHT_SLEEP.md. A character with no sleep sheet simply never lies
+// down, the same way one with no blink sheet never blinks.
+export const POSTURES = ['sit', 'fly', 'sleep'];
 
 // `home` is only where somebody STARTS. They wander from the first moment, so
 // this is the opening frame's composition and nothing else.
@@ -99,7 +112,7 @@ export const CAST = [
     name: 'ちいかわ',
     scale: 0.90,
     home: { lat: 0.251, lon: -0.782 },
-    sheets: ['idle', 'happy', 'delight'],
+    sheets: ['idle', 'happy', 'delight', 'sleep'],
     likes: ['kusa'],
   },
 
@@ -108,7 +121,7 @@ export const CAST = [
     name: 'ハチワレ',
     scale: 1.00,
     home: { lat: 0.372, lon: 0.592 },
-    sheets: ['idle', 'happy', 'surprise'],
+    sheets: ['idle', 'happy', 'surprise', 'sleep'],
     // Fish. ALL of them, taken off the roster rather than listed, because what
     // Hachiware likes is fish — that was already true of the three koi and
     // writing out twelve ids would turn a characteristic into an inventory. The
@@ -124,7 +137,7 @@ export const CAST = [
     name: 'うさぎ',
     scale: 0.97,
     home: { lat: -0.059, lon: 0.748 },
-    sheets: ['idle', 'happy', 'surprise'],
+    sheets: ['idle', 'happy', 'surprise', 'sleep'],
     likes: ['kinoko1', 'kinoko2'],
   },
 ];

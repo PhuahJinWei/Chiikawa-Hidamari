@@ -1013,14 +1013,21 @@ export function buildFuton(h) {
     },
   ];
 
+  const [base, quilt, pillow] = LAYERS;
+
   // NO SCUFFS on this one. The ticks are the world's own texture and nearly
   // everything built here should wear them, but bedding is the exception: a
   // scuff is a mark of use on a hard surface, and on fresh white cloth it reads
   // as a stain rather than as wear.
+  // THE PILLOW GETS A HOLDER OF ITS OWN, and it is the only layer that does.
+  // See `bedOf` — it is the one part of this piece a sleeper displaces.
+  const pillowHolder = new THREE.Group();
+  g.add(pillowHolder);
+
   const box = new THREE.Box3();
   for (const L of LAYERS) {
     const spec = { ...L, bumps: rimBumps(L.n, L.rx, L.rz, L.box, L.amp) };
-    const fill = part(g, (pad) => fluff(spec, pad), white);
+    const fill = part(L === pillow ? pillowHolder : g, (pad) => fluff(spec, pad), white);
     fill.geometry.computeBoundingBox();
     box.union(fill.geometry.boundingBox);
   }
@@ -1036,6 +1043,76 @@ export function buildFuton(h) {
     top: box.max.y,
     rx: Math.max(box.max.x, -box.min.x),
     rz: Math.max(box.max.z, -box.min.z),
+    bed: bedOf(base, quilt, pillow.cx + pillow.rx, pillowHolder),
+  };
+}
+
+// WHERE SOMEBODY LIES IN A PIECE OF BEDDING, published by the piece rather than
+// measured from outside it.
+//
+// This is the same split as `glow` and `top`: furniture.js knows what bedding
+// is made of, scene.js knows how to lay a drawing down. Neither of the two beds
+// is a shape anyone could guess from the outside — one has a pillow at the head
+// and one has its cover folded at the foot — and the numbers here are read off
+// the very layer specs the meshes are built from, so a layer that moves takes
+// the sleeper with it instead of leaving them under a quilt that is no longer
+// there.
+//
+// The five facts, and they are facts rather than a fitting. Where the card
+// actually goes is scene.js's business and is nudged from config.
+//
+//   lay     the y a sleeper's card lies at — clear of the base's own crown, so
+//           the drawing never z-fights the mattress it is lying on
+//   crown   the y of the COVER's crown. What makes the sandwich work is that
+//           this is well above `lay`: the cover stands between the eye and the
+//           lower half of the drawing from every angle anyone can stand at,
+//           which is what hides the drawing's unfinished bottom edge
+//   head    the x the drawing's head END should reach — the pillow's far edge
+//           where there is a pillow, the mat's own far end where there is not.
+//           An edge rather than a centre, because what is authored in the
+//           drawings is a margin above the head and not a head position
+//   cover   the x of the cover's NEAR edge. Anything past this — toward the
+//           foot — is behind the cover and cannot be seen
+//   across  how wide the cover can hide, which is the width a sleeper has to
+//           fit inside rather than the width of the bed
+//   displaces  a holder whose contents are hidden while somebody is asleep in
+//           this bed, or null where a bed has nothing to displace
+//
+// THAT LAST ONE IS THE PILLOW, and it exists because measurement said so. A
+// pillow is a MOUND — the futon's crown stands 0.24 above the mattress it sits
+// on — so a sleeper laid at mattress height has their head not on the pillow
+// but inside it, and shot from overhead the whole face was gone but for one
+// cheek. There is no height that fixes it: raise the card to clear the pillow
+// and the far end rises out of the quilt that was hiding the drawing's cut
+// edge, and no plausible tilt spans both, because the two mounds TOUCH — the
+// quilt ends at x 0.29 and the pillow begins there, so at mattress height there
+// is no strip of bed to be seen lying in at all.
+//
+// So the pillow steps aside, and the reason that is honest rather than a dodge
+// is what a pillow looks like with a head on it: from anywhere you can stand in
+// this room, it looks like the head. Nobody can see the bed occupied and empty
+// at once, and by day it is a made bed with a pillow on it, which is the only
+// state anybody was ever going to compare against.
+//
+// The worn bedding passes null and needs to: it has no pillow, its cover is
+// folded at one end, and its sleeper's head goes on the bare mat — which is
+// what a flat card already does correctly.
+//
+// `lift` is a real gap and not an epsilon. Both beds are built from fluffed
+// hulls whose crowns bulge between the rim bumps, so a card laid exactly at the
+// computed top sits INSIDE the mattress wherever it happens to bulge — the
+// drawing gets eaten in patches, which reads as holes in the sleeper rather
+// than as anything to do with bedding.
+const BED_LIFT = 0.012;
+
+function bedOf(base, cover, headX, displaces) {
+  return {
+    lay: base.cy + base.ry + BED_LIFT,
+    crown: cover.cy + cover.ry,
+    head: headX,
+    cover: cover.cx + cover.rx,
+    across: cover.rz * 2,
+    displaces,
   };
 }
 
@@ -1054,17 +1131,19 @@ export function buildWornBedding(h) {
   const clothWear = markMat(new THREE.Color(PAL.wornBeddingCloth));
 
   // Long and narrow in plan, matching the sheet and the side-on anime frames.
-  // It stays this size because the cave placement and walkable gap were composed
-  // around it; the remodelling is in its section and edge language, not its
-  // footprint.
-  const L = h * 4.10;
+  // The head end is shortened much more than the foot: the comforter already
+  // reaches the foot edge, while Hachiware only needs a small strip of mat past
+  // his head. Offsetting the shorter base keeps that foot edge and both folded
+  // layers in the same authored positions.
+  const L = h * 3.20;
   const W = h * 1.55;
+  const matCentre = -h * 0.39;
   const matSpec = {
     rx: L / 2,
     rz: W / 2,
     ry: h * 0.045,
     box: 8.0,
-    cx: 0,
+    cx: matCentre,
     cz: 0,
     cy: h * 0.017,
     flat: 0.38,
@@ -1078,72 +1157,28 @@ export function buildWornBedding(h) {
     matSpec.n, matSpec.rx, matSpec.rz, matSpec.box, matSpec.amp);
   const matFill = part(g, (pad) => fluff(matSpec, pad), mat, null, INK * 0.78);
 
-  // The comforter is folded crosswise once. Two separate, shallow slabs keep the
-  // doubled edge readable from every side, but a small gap leaves both inverted
-  // ink hulls visible instead of merging them into one pillow-shaped mound.
-  // The upper half overhangs by only a few centimetres and both halves keep
-  // nearly smooth rims: old cloth sags, it does not bloom into cloud lobes.
+  // One worn comforter layer. It used to be two separate slabs, which made the
+  // cave bedding look like two comforters stacked together. This single broad
+  // slump keeps the same coverage, seated directly into the mat.
   const matTop = matSpec.cy + matSpec.ry;
-  const lower = {
-    rx: h * 0.82,
-    rz: h * 0.64,
-    ry: h * 0.060,
-    box: 5.2,
-    cx: -L * 0.265,
-    cz: h * 0.025,
-    cy: matTop + h * 0.045,
-    flat: 0.62,
-    n: 12,
-    amp: 0.18,
-    rings: 22,
-    cols: 128,
-  };
-  lower.bumps = rimBumps(lower.n, lower.rx, lower.rz, lower.box, lower.amp);
-  const lowerFill = part(g, (pad) => fluff(lower, pad), cloth, null, INK * 0.88);
-
-  const lowerTop = lower.cy + lower.ry;
-  const upper = {
-    rx: h * 0.86,
+  const comforter = {
+    rx: h * 0.96,
     rz: h * 0.66,
     ry: h * 0.085,
     box: 4.8,
-    cx: -L * 0.275,
+    cx: -h * 3.55 * 0.275,
     cz: -h * 0.025,
-    cy: lowerTop + h * 0.060,
+    cy: matTop + h * 0.075,
     flat: 0.60,
     n: 11,
     amp: 0.22,
     rings: 24,
     cols: 136,
   };
-  upper.bumps = rimBumps(upper.n, upper.rx, upper.rz, upper.box, upper.amp);
-  const upperFill = part(g, (pad) => fluff(upper, pad), cloth, null, INK * 0.88);
-
-  // The one long fold stroke visible in the reference sheet. It rides the crown
-  // rather than floating at a fixed height, and bows just enough to keep it from
-  // looking like upholstery piping.
-  const crownY = (spec, x, z) => {
-    const ax = Math.pow(Math.abs((x - spec.cx) / spec.rx), spec.box);
-    const az = Math.pow(Math.abs((z - spec.cz) / spec.rz), spec.box);
-    const plan = Math.pow(ax + az, 2 / spec.box);
-    return spec.cy + spec.ry * Math.sqrt(Math.max(0, 1 - plan));
-  };
-  const foldPoints = [];
-  for (let i = 0; i <= 8; i++) {
-    const t = i / 8;
-    const x = upper.cx + (t - 0.5) * upper.rx * 1.38;
-    const z = upper.cz + upper.rz * (0.27 + Math.sin(t * Math.PI) * 0.025);
-    foldPoints.push(new THREE.Vector3(
-      x,
-      crownY(upper, x, z) + h * 0.007,
-      z,
-    ));
-  }
-  g.add(new THREE.Mesh(
-    new THREE.TubeGeometry(
-      new THREE.CatmullRomCurve3(foldPoints), 24, h * 0.006, 5, false),
-    clothWear,
-  ));
+  comforter.bumps = rimBumps(
+    comforter.n, comforter.rx, comforter.rz, comforter.box, comforter.amp);
+  const comforterFill = part(
+    g, (pad) => fluff(comforter, pad), cloth, null, INK * 0.88);
 
   // Worn ticks on both materials. Unlike Chiikawa's fresh futon, the reference
   // deliberately scatters faded strokes over the mat and the folded cloth.
@@ -1161,15 +1196,7 @@ export function buildWornBedding(h) {
     lift: h * 0.006,
     seed: 67,
   });
-  addWear(lowerFill, clothWear, {
-    count: 5,
-    len: h * 0.075,
-    weight: h * 0.010,
-    minUp: 0.24,
-    lift: h * 0.006,
-    seed: 71,
-  });
-  addWear(upperFill, clothWear, {
+  addWear(comforterFill, clothWear, {
     count: 7,
     len: h * 0.080,
     weight: h * 0.010,
@@ -1191,14 +1218,14 @@ export function buildWornBedding(h) {
       matWear,
     ));
   };
-  fibre(-L * 0.47, W * 0.48, -h * 0.10, h * 0.025, 0.020);
-  fibre(-L * 0.18, -W * 0.50, -h * 0.025, -h * 0.095, 0.014);
-  fibre(L * 0.18, W * 0.50, h * 0.030, h * 0.085, 0.018);
-  fibre(L * 0.47, -W * 0.42, h * 0.095, -h * 0.040, 0.012);
-  fibre(L * 0.49, W * 0.18, h * 0.090, h * 0.018, 0.016);
+  fibre(matCentre - L * 0.47, W * 0.48, -h * 0.10, h * 0.025, 0.020);
+  fibre(matCentre - L * 0.18, -W * 0.50, -h * 0.025, -h * 0.095, 0.014);
+  fibre(matCentre + L * 0.18, W * 0.50, h * 0.030, h * 0.085, 0.018);
+  fibre(matCentre + L * 0.47, -W * 0.42, h * 0.095, -h * 0.040, 0.012);
+  fibre(matCentre + L * 0.49, W * 0.18, h * 0.090, h * 0.018, 0.016);
 
   const box = new THREE.Box3();
-  for (const fill of [matFill, lowerFill, upperFill]) {
+  for (const fill of [matFill, comforterFill]) {
     fill.geometry.computeBoundingBox();
     box.union(fill.geometry.boundingBox);
   }
@@ -1208,6 +1235,11 @@ export function buildWornBedding(h) {
     top: box.max.y,
     rx: Math.max(box.max.x, -box.min.x),
     rz: Math.max(box.max.z, -box.min.z),
+    // The head end is the mat's own far end and not a pillow, because there is
+    // no pillow: what this bed has at one end is the folded cover, and you
+    // sleep with your head at the OTHER one. The single comforter is the cover
+    // that hides the unfinished lower edge of the sleeping drawing.
+    bed: bedOf(matSpec, comforter, matSpec.cx + matSpec.rx, null),
   };
 }
 

@@ -211,10 +211,69 @@ export const LOOK = {
     tint: '#75819C', tintIn: '#5C626B', lamps: 1, haze: 0.76,
     mirror: 0.58, glint: 0.40,
   },
+  // MIDNIGHT — the small hours, and the one hour of the day nobody is awake
+  // for. See MIDNIGHT_SLEEP.md: the cast walk home, lie down and put their own
+  // lights out, which is what this hour is FOR. Nothing in this row does that
+  // work; this row only says what the sky over it looks like.
+  //
+  // IT SHIPPED AS A VERBATIM CLONE OF NIGHT and was tuned afterwards, which is
+  // worth knowing because it is why the two rows still look so alike. The hour
+  // arriving and the hour looking like anything are two changes, and cloning
+  // let the first be proved to move no pixel before the second was attempted —
+  // so a sleeper who failed to show up could never be confused with a tint that
+  // had gone too dark.
+  //
+  // What separates it from night, and there is deliberately not much:
+  //
+  //   A STEP DARKER, and only a step. The moon has moved on and there is less
+  //   of it. This is still the light somebody has to walk the planet by, which
+  //   is the same argument that stopped night going darker — and there is now a
+  //   second reason to keep it, which is that the sleepers are lit by it and
+  //   nothing else. Their own houses are dark by then, by their own hand.
+  //
+  //   HAZE DOWN, 0.76 to 0.64, the one value here that moves the opposite way
+  //   to the rest of the row. The small hours are the clearest air of the whole
+  //   day: morning's mist has not formed and evening's has long settled, so the
+  //   far range comes back a little from the sky it had dissolved into. It is
+  //   the only thing in this hour that reads as air rather than as dark, and it
+  //   is what stops midnight being simply night with the brightness down.
+  //
+  //   A SWATCH OF ITS OWN. Not a look at all — the scrubber paints the day as a
+  //   strip from these, and while midnight cloned night the last quarter of the
+  //   track was one flat block with two labels under it. It has to be
+  //   distinguishable at fourteen pixels tall, which is the whole job of this
+  //   field, so it steps further than the sky it stands for.
+  //
+  // WHAT DID NOT MOVE, and one of them was tried: `discAt`. The moon at 238 is
+  // 6.3 degrees above your eye, and raising it to say that hours have passed
+  // was the obvious flourish. It is wrong by this file's own arithmetic — the
+  // resting view tops out at about texel 222, so anything smaller is only
+  // visible if you swipe up, which is exactly the mistake recorded above the
+  // night row (the moon sat at 140 and nobody found it). A moon you have to go
+  // looking for at the one hour there is nothing else to look at is worse than
+  // a moon that has not moved.
+  //
+  // `lamps` is 1 here and means what it means everywhere: whether a lit window
+  // is worth drawing at this hour. It is NOT "the lamps are on" — the sleepers
+  // switch those off themselves, by hand, and the occupancy fade is what takes
+  // the windows down. See _lightState in scene.js.
+  midnight: {
+    skyTop: '#001C33', skyMid: '#012E4E', skyLow: '#07547A',
+    disc: '#F4F1DC', discAt: [300, 238], discR: 15, glow: 0.20, stars: true,
+    swatch: '#01203A',
+    cloud: '#082742', cloudAlpha: 0.22,
+    ambient: ['#96A9D6', 0.54], dir: ['#BCC9F0', 0.35],
+    tint: '#6B7690', tintIn: '#555B63', lamps: 1, haze: 0.64,
+    mirror: 0.60, glint: 0.36,
+  },
 };
 
+// Midnight is carved out of the night that used to run 20:00 to 05:00, and the
+// hours it took are exactly the ones nobody is up for. Night keeps the evening
+// end of it — the stargazing, the biggest line bank any of them has — and
+// hands over at the turn of the day.
 export function phaseAt(hours) {
-  if (hours < 5) return 'night';
+  if (hours < 5) return 'midnight';
   if (hours < 11) return 'morning';
   if (hours < 16) return 'noon';
   if (hours < 20) return 'evening';
@@ -225,9 +284,21 @@ export function clockPhase() {
   return phaseAt(new Date().getHours());
 }
 
-// `isSleeping` was here and said night. Nobody sleeps now — night is when the
-// cast is out under the stars, still wandering, with a bank of lines about what
-// is overhead — so there is no hour that puts them under.
+// `isSleeping` was here and said NIGHT, and it was removed on the grounds that
+// nobody sleeps. Both halves of that have turned out to be worth keeping: sleep
+// is back, and night is still not it.
+//
+// The original was wrong about the hour rather than about the idea. Sleeping
+// from 20:00 deleted the best hour in the app — the three of them out under the
+// stars with the biggest line bank any of them has — to gain a dark planet with
+// nothing in it. Midnight takes the four hours at the end that nobody was using
+// for anything and leaves night exactly as it was.
+//
+// There is still no `isSleeping` here, and that is not an oversight either.
+// Whether somebody is asleep is a fact about that character, not about the
+// clock: they walk home first, they arrive at different times, and one of them
+// sleeps on the grass. The hour is an input to that decision and household.js
+// is where it is made.
 
 // --------------------------------------------------------------- which phase
 //
@@ -241,7 +312,7 @@ export function clockPhase() {
 // of 1.5 means halfway between noon and evening. Exported because the scrubber
 // needs to turn a finger into a phase and back, and both ends have to agree
 // about what comes after what.
-export const PHASES = ['morning', 'noon', 'evening', 'night'];
+export const PHASES = ['morning', 'noon', 'evening', 'night', 'midnight'];
 const ORDER = PHASES;
 
 export const PHASE_LABEL = {
@@ -250,13 +321,19 @@ export const PHASE_LABEL = {
   noon: 'ひる',
   evening: 'ゆうがた',
   night: 'よる',
+  midnight: 'まよなか',
 };
 
 // Where each phase begins, in hours, matching the boundaries phaseAt draws.
 // Setting an hour by hand puts you at the START of it rather than part way in,
 // so choosing よる buys the whole of the night before it turns rather than
 // however much of it happened to be left.
-const PHASE_START = { morning: 5, noon: 11, evening: 16, night: 20 };
+// Midnight's is 0 and not 24, which are the same instant and not the same
+// number: `handHours` adds to this and wraps at 24, so starting at 24 would put
+// a chosen midnight at the far END of its own span with morning a moment away.
+const PHASE_START = {
+  morning: 5, noon: 11, evening: 16, night: 20, midnight: 0,
+};
 
 // null means follow the real clock, and that is where every visit begins. It
 // used to be restored from localStorage, on the reasoning that picking a time

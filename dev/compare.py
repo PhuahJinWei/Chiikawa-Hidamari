@@ -20,6 +20,14 @@ import hashlib
 import os
 import sys
 
+# This prints em dashes, and a Windows console is not on UTF-8 by default: on a
+# Japanese install stdout is cp932 and the first one raises UnicodeEncodeError.
+# It bit on the "sheets are different sizes" path, so the tool crashed instead
+# of explaining the thing it had correctly detected. Nothing here is worth
+# failing over, so anything unencodable is replaced rather than fatal.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 # Kept in step with the constants at the top of js/goldens.js. If a tile ever
 # lands in the wrong place on the sheet, these are why.
 TILE_W = 300
@@ -28,7 +36,10 @@ LABEL_H = 20
 GAP = 6
 
 STATIONS = ["cave-lantern", "house-room", "doorstep", "house-outside", "pond", "sky"]
-PHASES = ["morning", "noon", "evening", "night"]
+# In step with PHASES in js/daylight.js, which is what goldens.js lays the sheet
+# out from. A row here that the sheet does not have reads the tile beside it and
+# reports nonsense, so this list is not optional bookkeeping.
+PHASES = ["morning", "noon", "evening", "night", "midnight"]
 
 
 def byte_compare(a_path, b_path):

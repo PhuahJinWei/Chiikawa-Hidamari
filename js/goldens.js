@@ -51,7 +51,9 @@ import { dirFromLatLon } from './sphere.js';
 // ------------------------------------------------------------------ the sheet
 
 // Big enough to see a falloff's shape in, small enough that six stations by
-// four hours still fits on a screen. The aspect is portrait-ish because the app
+// five hours still fits on a screen — it was four until midnight was carved out
+// of night, and the sheet takes its columns from PHASES rather than from a
+// number here, so it widened by itself. The aspect is portrait-ish because the app
 // is: a tile shaped like a desktop window would frame the world differently
 // from the phone this is played on.
 const TILE_W = 300;

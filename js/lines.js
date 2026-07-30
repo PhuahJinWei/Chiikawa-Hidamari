@@ -14,18 +14,30 @@
 // or you brought them something — and spending it on an idle line would make
 // both occasions ordinary, which is the whole of why it is not spent there.
 //
-// `night` is the biggest bucket any of them has, and deliberately. Nobody
-// sleeps here — night is the hour they are most awake, out under the stars —
-// so it carries the stargazing, and it has to outlast the other three phases
-// because night is the longest of them. Chiikawa is quietly floored by it,
-// Hachiware has a fact about it, Usagi just points.
+// `night` is the biggest bucket any of them has, and deliberately. Night is the
+// hour they are most awake, out under the stars, so it carries the stargazing —
+// and it stayed the biggest when midnight was carved out of the far end of it,
+// because what midnight took was the hours nobody was using it for. Chiikawa is
+// quietly floored by it, Hachiware has a fact about it, Usagi just points.
 //
-// Two buckets have been and gone. `greetLong` greeted somebody who had not
-// visited in days, and needed a record of when you last came that the app no
-// longer keeps. `dozing` was what they mumbled while asleep, and nobody sleeps.
-// Both removed rather than left lying about looking usable. `greetBack` is NOT
-// in that category and stays: walking up to someone still reaches it, no memory
-// of past visits required.
+// `midnight` is its opposite and is deliberately small: two lines each, sleepy,
+// said on the way to bed. It is reached by the ordinary time-of-day chatter, so
+// it is what somebody says while they are still UP at that hour — which is most
+// of the walk home and nothing after it.
+//
+// `dozing` IS BACK. It was removed once, in the same sweep as `greetLong`, with
+// the note "what they mumbled while asleep, and nobody sleeps". Somebody sleeps
+// now — see MIDNIGHT_SLEEP.md — so it returns under its own name rather than as
+// a new bucket meaning the same thing. It is reached by ONE path: a tap on a
+// sleeping body. There is no `expr` worth setting in it, since the face is
+// painted into the sleeping drawing and the card wearing it is not on screen,
+// but they carry `sleepy` anyway so that whatever they were wearing when they
+// lay down is not what they wake up in.
+//
+// `greetLong` has NOT come back: it greeted somebody who had not visited in
+// days, and needed a record of when you last came that the app does not keep.
+// `greetBack` is not in that category and stays: walking up to someone still
+// reaches it, no memory of past visits required.
 
 const chiikawa = {
   greet: [
@@ -77,6 +89,15 @@ const chiikawa = {
     { t: 'くらいけど…、こわく ないよ', expr: 'happy' },
     { t: 'ずっと みてたく なっちゃう…', expr: 'happy' },
     { t: 'ねむい…、けど まだ みてたい', expr: 'sleepy' },
+  ],
+  midnight: [
+    { t: 'もう…、ねなきゃ…', expr: 'sleepy' },
+    { t: 'ふぁ…、おやすみ…', expr: 'sleepy' },
+  ],
+  dozing: [
+    { t: 'すぅ…、すぅ…', expr: 'sleepy', w: 2 },
+    { t: 'むにゃ…', expr: 'sleepy' },
+    { t: '（…おふとん）', expr: 'sleepy' },
   ],
   longIdle: [
     { t: '（…ねちゃいそう）', expr: 'sleepy' },
@@ -191,6 +212,15 @@ const hachiware = {
     { t: 'ならんで みると、もっと きれいだよ', expr: 'happy' },
     { t: 'ねなくても へいきさ。きょうは とくべつ!', expr: 'happy' },
   ],
+  midnight: [
+    { t: 'さすがに ねむくなってきたなぁ', expr: 'sleepy' },
+    { t: 'ぼく、そろそろ かえるね。おやすみ!', expr: 'sleepy' },
+  ],
+  dozing: [
+    { t: 'すー…、すー…', expr: 'sleepy', w: 2 },
+    { t: 'ん〜…、あしたね〜…', expr: 'sleepy' },
+    { t: '（…しあわせそうな かお）', expr: 'sleepy' },
+  ],
   longIdle: [
     { t: 'ゆっくりしてって いいからね', expr: 'happy' },
     { t: 'あれ、ねむくなっちゃった?', expr: 'sleepy' },
@@ -289,6 +319,15 @@ const usagi = {
     { t: 'ウラ! ウラ!! （ゆびさし）', expr: 'happy' },
     { t: 'ハァ…（きれい）', expr: 'happy' },
     { t: 'プルルル…（ねむい）', expr: 'sleepy' },
+  ],
+  midnight: [
+    { t: 'ハァ…（ねる）', expr: 'sleepy' },
+    { t: 'ウラ…', expr: 'sleepy' },
+  ],
+  dozing: [
+    { t: 'プルルルルル…', expr: 'sleepy', w: 2 },
+    { t: 'ウ…ラ…', expr: 'sleepy' },
+    { t: '（…ヤハ）', expr: 'sleepy' },
   ],
   longIdle: [
     { t: '…プルルルルル', expr: 'sleepy' },

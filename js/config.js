@@ -1051,18 +1051,27 @@ export const CONFIG = {
     // The door's own arc is excluded wherever this applies — see propFor in
     // scene.js. A piece leaning on the opening is leaning on nothing.
     leanFrom: 0.55,
-    // NOTHING IS EVER LOST, and these two numbers are the whole of that rule.
-    // A lent piece stays with its new owner for `returnMs` and then walks
-    // home; one dropped in the water is fished out after `pondMs`. It is why
-    // handing Chiikawa the bear is allowed at all: you cannot lose the bear.
+    // NOTHING IS EVER LOST, and this number is now only half of that rule.
     //
-    // Both are short, and deliberately shorter than they first were. Five
-    // minutes reads as "long enough to feel like a real loan" on paper and as
-    // GONE in play — you wander off, forget, and find the shelf bare. A loan
-    // you can watch expire is a loan; one that outlasts your attention is a
-    // loss with a receipt. The pond is the same argument at a smaller scale:
-    // the joke is the splash, and the joke is over long before the timer.
-    returnMs: 90 * 1000,
+    // `returnMs` stood beside it: a lent piece stayed with its new owner for
+    // ninety seconds and then walked home, which was how "you cannot lose the
+    // bear" was guaranteed back when handing it over was a one-way gesture. It
+    // is gone, because ASKING FOR IT BACK now guarantees the same thing
+    // directly and better — see the 「かえして」 verb. A timer was a second
+    // answer to a question that had already been answered, and it was the worse
+    // answer twice over: this file's own note admitted that a loan outlasting
+    // your attention is "a loss with a receipt", and ninety seconds is short
+    // enough that a friend carrying your lamp across the meadow was over before
+    // you had walked far enough to enjoy watching it.
+    //
+    // WHAT MAKES INDEFINITE SAFE is that it is not really indefinite: v2 saves
+    // the pack and not the map, so every loan goes home on a reload anyway.
+    // "Until you ask" is bounded by the session, and there is no permanent-loss
+    // state to design against.
+    //
+    // The pond keeps its clock, because it is a different problem: a piece
+    // under the water is not with anybody to be asked. The joke is the splash,
+    // and the joke is over long before the timer.
     pondMs: 15 * 1000,
     // WHERE A PLACED PIECE IS ALLOWED TO SIT, as a fraction of the radius of
     // the surface it is set on. Inside this it stays put; between here and the
@@ -1928,7 +1937,12 @@ export const CONFIG = {
       // along the wall — so this is that default plus a half turn, which comes
       // back round to the bearing itself. What actually moves is the PILLOW:
       // the head end is now the other end.
-      { art: 'futon', at: -1.45, out: 1.55, h: 0.60, spin: 1.69 },
+      // `sleeper` is what makes this piece a BED rather than a large soft prop:
+      // it is where the owner of this home lies down at midnight. Which owner
+      // that is comes from CONFIG.homes, so the flag names no one — a bed
+      // belongs to a house, and a house belongs to somebody. See CONFIG.sleep
+      // for the fit and MIDNIGHT_SLEEP.md for the whole of it.
+      { art: 'futon', at: -1.45, out: 1.55, h: 0.60, spin: 1.69, sleeper: true },
       // Chiikawa's pink sasumata, STOOD UP — leaning against the far wall,
       // fork end up, which is how the anime keeps it: never flat on the
       // floor, always propped against a wall. It lay across the futon
@@ -2250,7 +2264,8 @@ export const CONFIG = {
         item: 'kettle' },
       // Hachiware's worn mat lies across the middle of the cave, with its long
       // edge horizontal when viewed from the entrance.
-      { art: 'wornbedding', at: -0.55, out: 1.95, h: 0.58, spin: 0 },
+      { art: 'wornbedding', at: -0.55, out: 1.95, h: 0.58, spin: 0,
+        sleeper: true },
       // Hachiware's blue sasumata, standing against the rock at the back of
       // the hollow, across from the mouth — the same stance as the pink one
       // on Chiikawa's far wall, for the same reason: the anime parks these
@@ -2409,6 +2424,146 @@ export const CONFIG = {
     // How long the windows take to notice, in milliseconds. Slow enough to read
     // as someone crossing a room to a switch rather than as a state flipping.
     lampEaseMs: 2200,
+
+    // ...and what they say once everybody in them is ASLEEP, which is neither
+    // of the two above. A dark house is not an empty one — `emptyLamps` is a
+    // porch light left on by somebody who is out, and there is nobody out.
+    //
+    // Not zero either, and the difference is the same one the lit sheet has
+    // always drawn: this fades the WINDOW GLOW, the advertisement a building
+    // makes across a planet, and a building with none is a building the cull
+    // may as well have taken. A trace is what says the shape on the hill at
+    // three in the morning is still a house. The lamps inside really are off,
+    // by hand, and that is a different mechanism entirely — see _lightState.
+    asleepLamps: 0.06,
+  },
+
+  // ---------------------------------------------------------------- midnight
+  //
+  // Where the sleep drawings actually land. See MIDNIGHT_SLEEP.md for the
+  // model, furniture.js's `bedOf` for the anatomy these numbers are nudges
+  // against, and peek.html?sleep=1 for the bench they were chosen on.
+  //
+  // The two indoor fits are FRACTIONS AND OFFSETS rather than positions,
+  // because the thing they are placed against is not fixed: `across` and `head`
+  // come off the bedding's own layer specs, so resizing a futon or shoving its
+  // comforter along moves the sleeper in it without anything here changing.
+  //
+  //   wide   the card's width across the bed, as a fraction of what the cover
+  //          can hide. Under 1 by default: a drawing as wide as the quilt would
+  //          have its shoulders sticking out either side of the thing meant to
+  //          be covering them
+  //   along  a shove toward the head (+) or the foot (-), in world units. The
+  //          one knob that matters, and what it trades is a head sliding off
+  //          its pillow against a foot that stops short of the cover — which is
+  //          the drawing's unfinished edge in plain view
+  //   lift   extra height over the bedding's own `lay`, for the case where a
+  //          bulge in a hull still eats a corner of the drawing
+  //
+  //   zzzAt  where the floating Zzz hangs, in the CARD's own frame, so `up` is
+  //          height and the other two slide it over the sleeper. It goes over
+  //          the HEAD rather than the middle of them, because that is where a
+  //          Zzz comes from, and `up` has to clear whatever is heaped on top —
+  //          for a futon, a comforter standing 0.33 above the mattress
+  //   zzzWide the mark's width in world units, small on purpose. See ZZZ_RISE in
+  //          scene.js for the other half of keeping it a hint and not a label
+  //
+  // There is no height knob beyond `lift` and there should not be. A tilt was
+  // tried, to raise a head onto a pillow — see `bedOf` in furniture.js, which
+  // records why no tilt can work and what replaced it.
+  sleep: {
+    // Drawn a little toward the pillow instead of tucked all the way to the
+    // comforter's edge. The sleeping sheet includes the bear beside Chiikawa,
+    // and this small shift exposes both without revealing the unfinished lower
+    // edge that still belongs under the quilt.
+    chiikawa: {
+      wide: 0.86, along: 0.12, lift: 0,
+      zzzAt: { x: 0.34, z: -0.22, up: 0.40 }, zzzWide: 0.30,
+    },
+    // NO TILT. Hachiware's bed has no pillow — what it has at one end is the
+    // folded cover, and he sleeps with his head at the other — so his head is
+    // on the mat, which is where a flat card already puts it. `along` draws him
+    // toward the shortened head end. The asymmetric mat now ends 0.15 units past
+    // his head, while the lengthened fold still hides the drawing's cut edge and
+    // leaves his face clear.
+    hachiware: {
+      wide: 0.92, along: -0.15, lift: 0,
+      zzzAt: { x: 0.40, z: -0.20, up: 0.30 }, zzzWide: 0.28,
+    },
+
+    // Usagi has no home and no bedding, so none of the above applies to him:
+    // there is nothing to sandwich a drawing into and nothing to hide, which is
+    // why his is the only one of the three drawn complete. What he needs
+    // instead is a size in world units and somewhere to be.
+    //
+    // `wide` is the world length of his card's LONG axis — the drawing is 1012
+    // by 720, lying along his body, so this is roughly head to rear.
+    //
+    // IT WAS 1.30 AND WAS TOO SMALL BY NEARLY DOUBLE, and the note here was
+    // wrong about why: it claimed Usagi stands 1.95 units tall and sized him off
+    // that. Measured off his own idle sheet he stands **2.79** tall and 1.86
+    // wide, so 1.30 left the sleeping drawing 1.21 units long — shorter than his
+    // standing GIRTH, let alone his height, and it read as a smaller animal
+    // asleep on the grass rather than as him.
+    //
+    // 2.40 is where the arithmetic and the eye agree, which is the only reason
+    // to trust either. A creature lying sprawled measures about four fifths of
+    // its standing height along its longest axis — it is compacted, and the ears
+    // that make up much of that height are folded back — which puts the drawn
+    // body at 2.2 by 1.6 against a standing 2.79 by 1.86. Staged beside a
+    // standing Usagi at three sizes, that is also the one that reads as the same
+    // creature.
+    //
+    // His card is a ground cap rather than an upright plane, so its frame is the
+    // grass's: `x` runs along the drawing and `z` across it, with the drawing's
+    // own up at -z. The `zzzAt` offsets are absolute world units and therefore
+    // do NOT ride the size above — they were scaled by hand when it changed, and
+    // would need it again.
+    usagi: {
+      wide: 2.40, spin: 0.9,
+      zzzAt: { x: 0.55, z: -0.81, up: 0.34 }, zzzWide: 0.28,
+    },
+
+    // WHERE HE FLOPS. A bearing and a distance from his own wander anchor in
+    // cast.js, rather than a lat/lon of its own — he should sleep in the meadow
+    // he lives in, and pinning that to two numbers in a second file is how the
+    // two drift apart the first time anybody moves him.
+    //
+    // Off the anchor rather than on it, because the anchor is also where he
+    // STARTS, and a visitor arriving at dawn to find him lying exactly where he
+    // is about to stand up is a smaller world than one where he went and found
+    // a spot.
+    meadow: { at: 1.1, out: 2.4 },
+
+    // WHICH SIDE OF THE BED they stand on, expressed as a token step toward the
+    // doorway. World units, and deliberately small.
+    //
+    // It is not the clearance and no longer pretends to be. Two versions of
+    // this number tried to be — an absolute 0.9 from the bed's middle, then a
+    // 0.5 margin on top of the footprint — and both left the standing spot
+    // inside the fence a walking body keeps off solids, so the last leg of the
+    // walk was refused and nobody ever got into bed. How far off the bed the
+    // spot ends up is now asked of `keepOffSolids`, at the walker's own margin,
+    // right after the furniture is registered — see scene.js. All this does is
+    // decide which way it gets pushed, by starting it on the door's side.
+    beside: 0.2,
+
+    // How long a walk to bed may go WITHOUT REACHING A WAYPOINT before a fresh
+    // route is planned.
+    //
+    // Not how long the walk may take, and that distinction is the whole of the
+    // number: a route home rings out around the house before it comes back in,
+    // so a walk measured from its start looks like it is heading the wrong way
+    // for most of a minute. Timed that way at twenty seconds it re-planned
+    // Chiikawa's route continuously and left him circling his own house. The
+    // deadline has to measure being STUCK, and reaching a waypoint is what
+    // proves somebody is not.
+    //
+    // It is a BACKSTOP and not the recovery for an obstacle. Walking round a
+    // tree belongs to `Character._detour`, which already does it on every errand
+    // — see the note in _toBed about the second copy of that which was written
+    // here and deleted. Generous, therefore: nothing depends on it being prompt.
+    retryMs: 20000,
   },
 
   daylight: {

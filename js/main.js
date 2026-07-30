@@ -1067,11 +1067,15 @@ function lendUnique(bot, now) {
   const again = Date.now() - inventory.lastGiven(key) < CONFIG.social.giftCooldown;
   if (!again) inventory.markGiven(key);
   // `to` is what turns a loan from bookkeeping into something you can watch —
-  // see carryLent. Without it the piece simply vanished for six minutes, which
-  // is a strange way to be given a bear.
-  inventory.setUnique(id, {
-    state: 'given', to: key, returnAt: Date.now() + CONFIG.uniques.returnMs,
-  });
+  // see carryLent. Without it the piece simply vanished, which is a strange way
+  // to be given a bear.
+  //
+  // NO `returnAt`, and its absence is the flag rather than an oversight: a lent
+  // piece stays lent until you ask for it back. `tickUniques` sends home only
+  // what carries a clock, which after this is only what the pond swallowed —
+  // see the note at uniques.pondMs for why one kept its timer and the other
+  // did not.
+  inventory.setUnique(id, { state: 'given', to: key });
   speak(bot, again ? 'giftAgain' : 'gift', now);
   return true;
 }
@@ -1132,15 +1136,26 @@ function carryLent() {
   }
 }
 
-// Lent and pond-swallowed pieces coming home, checked coarsely — a return is
-// a minutes-scale event and nobody is watching the exact second.
+// Pond-swallowed pieces coming home, checked coarsely — a return is a
+// minutes-scale event and nobody is watching the exact second.
+//
+// IT USED TO BRING LENT PIECES HOME TOO, on the ninety-second clock lendUnique
+// no longer sets. What decides now is whether a record carries a `returnAt` at
+// all: something under the water has one because there is nobody to ask for it
+// back, and something in a friend's hands does not, because there is. See
+// uniques.pondMs.
+//
+// Written as a presence test rather than as `rec.to === undefined` on purpose.
+// The question this is really asking is "is this one on a clock", and asking it
+// of the clock keeps a future state that wants a timer working without editing
+// this line.
 let uniquesTickAt = 0;
 function tickUniques(now) {
   if (now < uniquesTickAt) return;
   uniquesTickAt = now + 1500;
   for (const id of Object.keys(inventory.uniques)) {
     const rec = inventory.unique(id);
-    if (rec.state === 'given' && Date.now() >= rec.returnAt) {
+    if (rec.state === 'given' && rec.returnAt !== undefined && Date.now() >= rec.returnAt) {
       inventory.setUnique(id, { state: 'home' });
       globe.placeLoose(uniqueByItem(id), null);
     }
@@ -1337,7 +1352,11 @@ function onMove(e) {
 function hopSeen() {
   const s = CONFIG.social;
   for (const b of bots) {
-    if (throughWall(b.ch)) continue;
+    // A hop is a wave, and you cannot see one through masonry — nor answer one
+    // in your sleep. `hopBack` is a lift on the BODY card, which a sleeper is
+    // not being drawn as, so without this the answer would be an invisible
+    // bounce nobody could see and a friend who is meant to be out cold.
+    if (!b.ch.isVisible || throughWall(b.ch)) continue;
     if (arcBetween(b.ch.dir, rig.anchor) > s.hopArc) continue;
     b.ch.hopBack(s.hopReplyMs + Math.random() * s.hopReplySpreadMs);
   }
@@ -1467,11 +1486,27 @@ function onUp(e) {
       // wall now means whatever a tap on the ground behind it means, which is
       // usually nothing, which is the honest answer.
       setNdc(e);
-      // A loose piece under the tap, near enough to reach: pick it up. First,
-      // because it is the most specific thing a tap can be pointing at.
-      const grab = (rig.isFirstPerson && !inventory.heldUnique)
+      // SOMEBODY ASLEEP under the finger, before anything else a tap could
+      // mean. A person beats a pastime everywhere on this planet, the friend
+      // branch above says, and one who has gone to bed is still a person —
+      // they have simply stopped being pickCharacter's business, because what
+      // is drawn where they are is a card lying in the bedding.
+      //
+      // AND THEY DO NOT WAKE. That is the whole of the interaction and it is
+      // the point of it: at the one hour of the day when nobody can answer
+      // you, the world is still worth touching, and what it gives back is a
+      // mumble and nothing else. No visit, no walking over, no expression —
+      // the face is painted into the drawing and the drawing does not change.
+      const dozer = globe.sleeperAt(raycaster);
+      const grab = (!dozer && rig.isFirstPerson && !inventory.heldUnique)
         ? globe.pickLoose(raycaster, rig.anchor, UNIQUE_ARTS) : null;
-      if (grab) {
+      if (dozer) {
+        const bot = bots.find((b) => b.spec.key === dozer);
+        // `dozing` is a bucket a bank may not have, and the fallback is the
+        // same half-drawn courtesy everything else here gets: somebody with no
+        // sleep-talk written for them simply sleeps quietly.
+        if (bot && bot.dlg.has('dozing')) pokeBack(bot, 'dozing', now);
+      } else if (grab) {
         takeLoose(grab);
       } else if (rig.isFirstPerson && inventory.heldUnique
         && putDownWhereTapped(raycaster, e)) {
@@ -2442,7 +2477,7 @@ const ixEl = document.getElementById('interact');
 // keeps it — and the whole point of the gaps below is that kin stand together.
 // Splitting them to seat one of them would be spending the grouping to buy the
 // anchor, when both fit.
-const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'give', 'giveBack'];
+const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'give', 'swap', 'giveBack'];
 
 // WHAT EACH VERB IS ABOUT, which is what the gaps in the column are drawn from.
 //
@@ -2483,6 +2518,7 @@ const IX_GROUP = {
   // head. See IX_ORDER for why they moved up here.
   talk: 'friend',
   give: 'friend',
+  swap: 'friend',
   giveBack: 'friend',
 };
 
@@ -2501,6 +2537,12 @@ const IX_GLYPH = {
   // difference between them.
   give: '<path d="M18.6 7.8H9.7a4.4 4.4 0 0 0 0 8.8h3.6"/>'
       + '<path d="m15.1 4.3 3.5 3.5-3.5 3.5"/>',
+  // Two arrows passing each other, which is the one shape everybody already
+  // reads as an exchange. Deliberately NOT a variation on give's curve: a swap
+  // is not a give with something added, it is both directions at once, and the
+  // glyph should be legible as that at a glance in a column of similar pills.
+  swap: '<path d="M4.6 8.7h12.6"/><path d="m14.5 5.9 2.7 2.8-2.7 2.8"/>'
+      + '<path d="M19.4 15.3H6.8"/><path d="m9.5 12.5-2.7 2.8 2.7 2.8"/>',
   // An arrow that turns and comes back toward you: the loan's own shape. It is
   // 「ひろう」's cousin rather than its opposite, because taking something back
   // IS a pickup — it just starts in somebody's hands.
@@ -2543,6 +2585,22 @@ const ACTIONS = {
     word: () => (inventory.heldUnique ? 'かす' : 'わたす'),
     run: handToMate,
   },
+  // 「とりかえる」 — yours for theirs, in one press.
+  //
+  // It exists because A CHARACTER HAS ONE PAIR OF HANDS, and lending to
+  // somebody who is already holding one of yours was a degenerate state rather
+  // than a feature: carryLent gives the visible grip to the first loan and lets
+  // any second one ride along invisibly, so the second lamp was in their hands
+  // in the save and nowhere on the screen. This does not merely tidy the
+  // buttons — it makes that state unreachable, which is why it replaces 「かす」
+  // rather than sitting beside it.
+  //
+  // ONLY FOR UNIQUES. A stackable is not held at all — giving somebody a fish
+  // decrements a count and earns a thank-you, and their hands stay exactly as
+  // full as they were — so 「わたす」 goes on being offered alongside 「かえして」
+  // when that is what you are carrying. Two verbs there are two real choices;
+  // two verbs for uniques were one real choice and one that quietly broke.
+  swap: { word: () => 'とりかえる', run: swapWithMate },
   // 「かえして」 rather than 「とりかえす」: you ASK, and they hand it over. This
   // world does not have a verb for taking something out of a friend's arms, and
   // it should not grow one. What is being asked for needs no naming — it is
@@ -2646,13 +2704,24 @@ function actionsNow() {
   // reason the world verbs do: standing near two friends, "which one" is a
   // question only facing can answer.
   if (mate) list.push('talk');
+  // Two hands full of uniques — yours and theirs — is a SWAP rather than a
+  // gift, because they have nowhere to put a second one. See the `swap` entry.
+  const loan = loanFrom(mate);
+  const trading = !!mate && !!inventory.heldUnique && !!loan;
   // Something in your hand and somebody in front of you is the whole condition.
   // It reads the HAND rather than the pouch on purpose: handing over what you
   // are holding is a gesture, and reaching into your bag mid-conversation to
   // find something to hand over is a different one that the pouch panel already
   // covers — pick it up there and this appears.
-  if (mate && (inventory.holding || inventory.heldUnique)) list.push('give');
-  if (loanFrom(mate)) list.push('giveBack');
+  if (mate && (inventory.holding || inventory.heldUnique) && !trading) list.push('give');
+  if (trading) list.push('swap');
+  // 「かえして」 SURVIVES THE SWAP, and that is the one place this stops short of
+  // collapsing the two. Wanting your lamp back and wanting to trade for it are
+  // different intentions, and with only a swap on offer the second press would
+  // hand back what the first press took — a loop with no way out to an empty
+  // hand. Two pills here say two different things; the pair they replaced said
+  // one thing twice.
+  if (loan) list.push('giveBack');
   return list;
 }
 
@@ -2784,10 +2853,11 @@ function talkToMate() {
 // verb — see the note in onUp for why it could not stay a tap.
 //
 // TWO WORDS FOR TWO DIFFERENT ENDINGS, which is the real prize. A stackable is
-// gone when you give it and a unique comes home on a timer, and until now those
-// two were the same gesture with no way to tell them apart: you handed Chiikawa
-// the lamp exactly as you handed her a fish, and found out ninety seconds later
-// which one it had been. The pill says 「わたす」 or 「かす」 before you press it.
+// gone when you give it and a unique stays theirs until you ask for it back,
+// and until now those two were the same gesture with no way to tell them apart:
+// you handed Chiikawa the lamp exactly as you handed her a fish, and found out
+// afterwards which one it had been. The pill says 「わたす」 or 「かす」 before
+// you press it.
 //
 // 「わたす」 rather than 「あげる」 on purpose, though あげる is the plainer word
 // for a gift: the rod's strike already owns 「あげる!」, and while the two can
@@ -2813,8 +2883,39 @@ function handToMate() {
   refuse('give');
 }
 
-// Ask for a lent piece back. The warm half of a loan's ending, and the only one
-// you can choose: the timer's version happens wherever they happen to be.
+// Yours for theirs. See the `swap` entry for why this exists at all.
+//
+// ORDER MATTERS, and it is the whole of why this is one function rather than
+// lendUnique followed by takeBackLoan. Yours goes over FIRST, which frees the
+// slot it was occupying, so theirs is guaranteed somewhere to land — a swap can
+// therefore never be refused for want of room, however full the pack is. Done
+// the other way round, a full pack would take theirs, fail to place it, and
+// send it home: a trade that lost both halves.
+//
+// One line spoken, not two. A swap is a single moment between two people, and
+// the gift bank is the right half of it to voice — being handed something is
+// the part with delight in it, and 「はい、どうぞ」 for the half going back would
+// be them narrating their own admin.
+function swapWithMate() {
+  const theirs = loanFrom(mate);
+  const mine = inventory.heldUnique;
+  if (!theirs || !mine) return;
+  const bot = mate.bot;
+  const key = bot.spec.key;
+  const now = performance.now();
+  rig.closeIn(bot.ch);
+  greetedKey = key;
+  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  const again = Date.now() - inventory.lastGiven(key) < CONFIG.social.giftCooldown;
+  if (!again) inventory.markGiven(key);
+  inventory.setUnique(mine, { state: 'given', to: key });
+  inventory.setUnique(theirs, { state: 'hand' });
+  speak(bot, again ? 'giftAgain' : 'gift', now);
+}
+
+// Ask for a lent piece back. The warm half of a loan's ending, and now the only
+// one there is — see uniques.pondMs for why the timer that used to do it from
+// across the planet is gone.
 //
 // ROOM IS CHECKED FIRST, and that is not a nicety. `setUnique` sends a piece
 // HOME when the pack has no slot for it — a sensible answer for a pickup off the
@@ -3625,7 +3726,13 @@ function updateCast(now) {
       // Never through the wall: the nearest character can be one sat at home
       // a metre of masonry away, and being greeted by them from your side of
       // it would be the house talking.
-      if (throughWall(b.ch)) continue;
+      //
+      // ...and never somebody asleep, which is what `isVisible` is answering
+      // here. Over the horizon it changes nothing — nobody that far off is
+      // inside greetArc — but a sleeper is a body standing right where you are
+      // walking, and without this, creeping up on Chiikawa at three in the
+      // morning is met with 「おかえり」 from a drawing of him under a quilt.
+      if (!b.ch.isVisible || throughWall(b.ch)) continue;
       const d = arcBetween(b.ch.dir, playerDir);
       if (d < nearD) { nearD = d; near = b; }
     }
@@ -3679,6 +3786,12 @@ function updateCast(now) {
         const a = bots[i];
         const b = bots[j];
         if (a.ch.attentive || b.ch.attentive) continue;
+        // NOT ON THE WAY TO BED. The hold this sets is already ignored by
+        // somebody turning in, so they would not have stopped — but two friends
+        // passing at midnight striking up a conversation neither of them halts
+        // for is worse than no conversation: it is a chat held by two people
+        // walking away from each other. At this hour they have somewhere to be.
+        if (a.ch.turningIn || b.ch.turningIn) continue;
         if (arcBetween(a.ch.dir, b.ch.dir) > s.meetArc) continue;
         if (!onScreen(a.ch) && !onScreen(b.ch)) continue;
         speak(a, 'meet', now);
@@ -4068,7 +4181,10 @@ function positionBubbles() {
     // bubble in from there would park it beside somebody you cannot see. Above
     // the top is the one direction that does not hide, because that is where
     // the person you are stood closest to goes.
-    if (anchor.z > 1 || !b.ch.isVisible || Math.abs(anchor.x) > 1.0 || anchor.y < -1.2) {
+    // `isPresent` and not `isVisible`, because a sleeper is neither drawn as a
+    // body nor gone: what stands in for them is a card lying in the bedding,
+    // headWorld already points at it, and a mumble has to hang over that.
+    if (anchor.z > 1 || !b.ch.isPresent || Math.abs(anchor.x) > 1.0 || anchor.y < -1.2) {
       b.bubble.style.opacity = '0';
       continue;
     }

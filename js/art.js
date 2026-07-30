@@ -2377,10 +2377,78 @@ export function paintBench() {
   return c;
 }
 
-// `paintZzz` stood here — the floating Z over a sleeping character. Nobody
-// sleeps any more: the cast stays up through the night now, wandering and
-// looking at the stars, so there was never a moment it could be drawn. See the
-// note in character.js.
+// The floating Z over somebody asleep. It stood here once and was removed with
+// the note "nobody sleeps any more"; somebody sleeps again — see
+// MIDNIGHT_SLEEP.md — so it is back, drawn rather than restored, because the
+// thing it floats over is different now.
+//
+// THREE Z'S UP A DIAGONAL, smallest first, which is the whole of the drawing.
+// The size ramp is what makes it read as one mark rising rather than three marks
+// side by side, and it is why they are not evenly spaced: each step out is a
+// little longer than the last, so the eye follows the line off the top.
+//
+// PAPER FILLED, INK OUTLINED, and that is not decoration — it is the only way it
+// survives where it has to live. A mark drawn in the pen alone is dark on dark:
+// the hour this exists for is the one hour the room's lamps are off, by the
+// sleeper's own hand, so an ink Z over a sleeping Chiikawa would be invisible
+// exactly when it is needed. Stroked twice, wide in the pen and narrow in paper,
+// gives a pale mark with its own outline that reads against a dark room AND
+// against the near-white bedding a hand's breadth below it. It takes the hour's
+// tint like everything else, so it dims to lamplight rather than glowing.
+//
+// Both passes go over ALL THREE before either moves on, rather than outlining
+// and filling each in turn. The z's overlap where the biggest crowds the one
+// below it, and per-glyph passes would lay the third one's outline across the
+// second one's fill — a seam through the middle of a mark two centimetres wide.
+export function paintZzz() {
+  const S = 256;
+  const c = makeCanvas(S, S);
+  const g = c.getContext('2d');
+
+  // Middle, size — as fractions of the canvas. Placed up a diagonal to the
+  // right, which is the direction these have drifted in every cartoon ever
+  // drawn, and leaves the bottom-left corner clear for the head it rises from.
+  const zs = [
+    { x: 0.22, y: 0.84, s: 0.16 },
+    { x: 0.45, y: 0.55, s: 0.22 },
+    { x: 0.74, y: 0.24, s: 0.30 },
+  ];
+
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  // Wide pen first, narrow paper over it. The ratio is what sets how heavy the
+  // outline looks; scaled per glyph so the small one is not proportionally
+  // fatter than the big one.
+  //
+  // THE PEN IS A FIFTH OF THE GLYPH AND WAS NEARLY A THIRD, which is a bigger
+  // difference than it sounds: a stroke swells a shape by half its width on
+  // every side, so at 0.30 the largest z grew by thirteen pixels all round and
+  // ate the gap to the one below it. Rendered, the three of them fused into a
+  // single vertical ribbon — recognisable as a squiggle and not as three z's,
+  // which is the whole of what makes the mark read at this size.
+  // ...and 0.26 rather than 0.20, which is the other end of the same tuning: at
+  // a fifth the outline came out as one or two device pixels on a mark this
+  // small, antialiased most of the way to the fill, so the pen read grey instead
+  // of as the world's own near-black. The gaps still hold — the widest glyph
+  // swells to 97 canvas units against 107 to its neighbour.
+  for (const pass of [{ colour: PAL.line, w: 0.26 }, { colour: '#FFFDF7', w: 0.10 }]) {
+    g.strokeStyle = pass.colour;
+    for (const z of zs) {
+      const d = S * z.s;
+      const x = S * z.x - d / 2;
+      const y = S * z.y - d / 2;
+      g.lineWidth = d * pass.w;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + d, y);
+      g.lineTo(x, y + d);
+      g.lineTo(x + d, y + d);
+      g.stroke();
+    }
+  }
+
+  return c;
+}
 
 // ------------------------------------------------------------------- indoors
 //

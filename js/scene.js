@@ -16,7 +16,7 @@ import {
   paintRoomWall, paintRoomFloor, paintRug, paintTableTop,
   archPath, DOOR_SHEET, WINDOW_SHEET,
   paintCaveSkin, paintCaveWall, paintCaveFloor, paintCaveMouth, paintCaveMouthInner,
-  paintCaveDay, paintCaveNight, MOUTH_SHEET,
+  paintCaveDay, paintCaveNight, MOUTH_SHEET, paintZzz,
 } from './art.js';
 import { BUILD } from './furniture.js';
 import {
@@ -33,7 +33,7 @@ import { RENDER_SPAN } from './character.js';
 import {
   UP, orientBillboard, dirFromLatLon, inLake, setBuildings, inBuilding, setScenery,
   setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, growWeight,
-  lakeReach, perchAlongRay,
+  lakeReach, perchAlongRay, inSolid,
 } from './sphere.js';
 import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
@@ -928,6 +928,52 @@ const _cT = new THREE.Color();
 // ...and a fourth, for the lamp glass in _syncInterior. The lean above it has
 // already spent _cB by the time the loop runs.
 const _cC = new THREE.Color();
+// Standing a sleeper up on the grass — see layDown. Their own, because the
+// shared tangent scratches all belong to per-frame code and this runs from a
+// state change rather than from update().
+const _sleepAt = new THREE.Vector3();
+const _sleepTan = new THREE.Vector3();
+const _sleepRight = new THREE.Vector3();
+const _sleepBasis = new THREE.Matrix4();
+// Sweeping bearings round a bed for somewhere to stand — see _bedsideSpot. Runs
+// once per home at build, so it wants no allocation but needs no thread safety.
+const _bedTan = new THREE.Vector3();
+// Where the camera is, in a sleeper card's own frame — see _syncZzz.
+const _zzzEye = new THREE.Vector3();
+
+// One drawing of the Zzz for the whole cast. Three of these exist at most and
+// they are the same mark, so the canvas is painted once; the meshes each get
+// their own material, since each fades on its own clock.
+let _zzzCanvas = null;
+function cachedZzz() {
+  if (!_zzzCanvas) _zzzCanvas = paintZzz();
+  return _zzzCanvas;
+}
+
+// How the mark drifts. See _syncZzz for why this feature has a transform in it
+// at all when the rest of the app animates by redrawing.
+//
+// `periodMs` is a breath rather than a beat — three seconds is slow enough that
+// two of them in frame never look synchronised and fast enough that you see one
+// complete while you stand there. `rise` is a third of a unit against a mark a
+// third of a unit wide, so it travels about its own height: further reads as
+// something escaping, shorter as something twitching.
+//
+// `peak` holds it under full strength on purpose. It is the one bright thing in
+// a room whose lamps have just been switched off, and at 1.0 it was the first
+// thing the eye went to in a scene whose subject is somebody sleeping.
+const ZZZ_RISE = { periodMs: 3000, rise: 0.20, inAt: 0.28, peak: 0.82 };
+
+// Where in that cycle one sleeper starts, so three of them in view do not rise
+// and fade as one. Off their place in CAST rather than a counter or a roll: it
+// is the same on every visit and the same after a reload, which is what the rest
+// of this world promises about itself — see the seeded scatter in art.js.
+function zzzPhase(key) {
+  const i = CAST.findIndex((c) => c.key === key);
+  // An irrational-ish step, so no two of a small cast land near each other and a
+  // fourth character would not double up with the first.
+  return ((i < 0 ? 0 : i) * 0.37) % 1;
+}
 // Where the house is, for the bloom's distance fade — see _syncBloom. Its own
 // scratch because it is read in update(), where the shared ones are all busy.
 const _bloomAt = new THREE.Vector3();
@@ -1355,6 +1401,16 @@ export class Globe {
     // out and _applyLight needing it — see SKY_DOOR.
     this.skyLow = new THREE.Color(0xFFFFFF);
 
+    // WHO IS LYING DOWN, keyed by character. One entry per drawn sleeper, made
+    // as the world is built and never added to afterwards — a bed is a place in
+    // a room, so it exists exactly as long as the room does.
+    //
+    // The cards are here rather than on the characters because that is what
+    // they are: a sleeping body is not a pose this app can put a billboard in,
+    // it is a drawing lying in the world, seen from above, sandwiched into the
+    // bedding it is drawn in. See MIDNIGHT_SLEEP.md, and `bedOf` in
+    // furniture.js for the anatomy the two indoor ones are fitted to.
+    this.sleepers = new Map();
     // How far up the lamps are, 0 to 1, already shaped — see _setLamps. The
     // horizon cull reads it as well as the daylight blend, so it cannot live
     // inside either.
@@ -3865,6 +3921,10 @@ export class Globe {
       // hop onto it. A piece you can get on top of is furniture; a piece that
       // only says no is an obstruction.
       const furnitureSolids = [];
+      // The bed, kept aside as it is built. Where somebody stands to get into it
+      // cannot be worked out here — it depends on what else ends up in the room
+      // — so the piece waits and the sweep below answers it.
+      let bedPiece = null;
       const topTex = texFrom(paintTableTop());
       // The room's own shadow tone, not the planet's. This stamp falls on a
       // grey floor and a cream rug, and the grass-green one every prop outside
@@ -4027,6 +4087,26 @@ export class Globe {
           // _syncRoomShade, and the ROOM_SHADE note for why a stamp like this
           // has to get lighter as the room gets darker rather than staying put.
           this.interiorShade.push({ mat: shadow.material, alpha: shadow.material.opacity });
+        }
+
+        // SOMEBODY ASLEEP IN IT, if this piece is a bed. The card is a child of
+        // the same anchor as the bedding, so it is placed in the builder's own
+        // frame — which is the whole reason the sandwich holds together: shove
+        // the futon across the room or turn it end for end and the sleeper goes
+        // with it, still between the same two layers.
+        if (f.sleeper) {
+          // ...and where somebody has to walk to before they can get into it.
+          //
+          // BESIDE the bed rather than on it: bedding is furniture and
+          // furniture is solid, so a route aimed at the bed's own spot is one
+          // the walk refuses and trims short of itself, leaving somebody stood
+          // a stride away planning the same walk forever.
+          //
+          // Where they stand to get into it is settled after the room's
+          // furniture is registered — see the sweep below — because it is a
+          // question about what else is in the way.
+          bedPiece = { f, built };
+          this._layInBed(rec, anchor, built, null);
         }
 
         // What the piece does to the room, if it does anything.
@@ -4420,6 +4500,12 @@ export class Globe {
       // grass were. Appended rather than set, so the trees keep their entries.
       addSolids(furnitureSolids);
 
+      // ...AND ONLY NOW CAN THE BEDSIDE SPOT BE FOUND, which is why it waited.
+      if (bedPiece) {
+        const sl = this.sleepers.get(rec.owner);
+        if (sl) sl.walkTo = this._bedsideSpot(bedPiece, rec, spotDir, N);
+      }
+
       // The one gap in the wall, registered beside the wall itself. The same
       // footprint object the ground cover and the lamplight already read is
       // given the door: mutated in place, so every reader — the walk, the
@@ -4587,6 +4673,11 @@ export class Globe {
       d: 0,
     }));
 
+    // ...and whoever has nowhere to sleep. After the buildings because a
+    // sleeper with a bed was made with the bed; before the hour, because these
+    // are two more surfaces that wear it.
+    this._layOnGround();
+
     // The hour, moved off the CPU and into the materials that can take it.
     // LAST, because it walks the two tint lists and every one of them has to
     // have been filled — and because it reads `itemLights`, which the interior
@@ -4598,6 +4689,397 @@ export class Globe {
 
     this._camDir = new THREE.Vector3();
     this.resize();
+  }
+
+  // ------------------------------------------------------------- the sleepers
+  //
+  // Three drawings, laid flat, shown for the four hours nobody is awake. See
+  // MIDNIGHT_SLEEP.md.
+  //
+  // FLAT AND STATIONARY, which is the whole design and not a shortcut. Every
+  // other body in this world is a card that turns to face you; these do not
+  // turn, do not breathe and do not bob, because what they are drawn as is a
+  // view from ABOVE — somebody seen from where you are stood, looking down at
+  // them in their bedding. A billboard of that drawing would be a sleeping
+  // creature standing upright.
+  //
+  // They are lit as FURNITURE and take no character lift. A sleeper is a thing
+  // in a room at the hour that room is darkest, and the two indoor ones are in
+  // rooms whose lamps their owners have just switched off — so most nights you
+  // will barely see them, which is right. It is fine to sleep in the dark.
+
+  // WHERE SOMEBODY STANDS TO GET INTO A BED.
+  //
+  // Beside it, never on it: bedding is furniture and furniture is solid, so a
+  // walk aimed at the bed's own spot is one the path check refuses outright.
+  // What they do on arrival is lie down, and the drawing of them lying down is
+  // already in the bed, so the last step is one nobody has to take.
+  //
+  // THE DISTANCE IS DERIVED AND THE BEARING IS SEARCHED, and it took three goes
+  // to arrive at that. Both halves were hand-picked first and both were wrong:
+  //
+  //   The distance was 0.9 from the bed's middle, then the footprint plus 0.5.
+  //   A walking body keeps `wallKeep` clear of every solid, so a spot merely
+  //   outside a bed is not somewhere anybody may stand — it has to clear the
+  //   footprint AND that fence. Both versions left the target inside it and the
+  //   last leg of the walk permanently refused; the second measured as a block
+  //   of radius 0.81 sitting on the target itself. It is now the sum of the two
+  //   things that actually decide it, so it cannot go stale if a bed is resized.
+  //
+  //   The bearing was "toward the doorway", full stop. Right in spirit — you
+  //   arrive from the door, so the far side of the bed is the wrong side to aim
+  //   at — and not enough on its own, because the door's side of a bed may have
+  //   something else standing in it. `keepOffSolids` was tried here and is the
+  //   wrong tool: it ejects in ONE pass, which its own note in sphere.js warns
+  //   about, and in the cave it pushed the spot off the bedding straight into
+  //   another prop. So the door's bearing is where the search STARTS, and it
+  //   sweeps outward both ways until it finds floor.
+  //
+  // Fifteen degrees a step over a full turn, which at these radii is a stride
+  // between candidates — fine enough not to step over a gap, coarse enough that
+  // the whole sweep is two dozen point tests done once at build.
+  _bedsideSpot(piece, rec, spotDir, N) {
+    const R = CONFIG.globe.radius;
+    const { f, built } = piece;
+    const keep = CONFIG.wander.wallKeep;
+    const bedDir = spotDir(f.at, f.out);
+    // The bed's own registered footprint (the area-equivalent circle — see
+    // furnitureSolids) plus the walker's fence plus a little room to stand in.
+    const off = Math.sqrt(built.rx * built.rz) / R + keep + CONFIG.sleep.beside / R;
+    // The door's side of the bed, as a tangent there.
+    const doorIn = spotDir(0, rec.spec.walk * 0.7);
+    const t0 = doorIn.clone().addScaledVector(bedDir, -doorIn.dot(bedDir));
+    if (t0.lengthSq() < 1e-9) t0.copy(_bedTan.set(0, 1, 0).cross(bedDir));
+    t0.normalize();
+
+    let fallback = null;
+    for (let i = 0; i < 24; i++) {
+      // 0, +15, -15, +30, -30 ... so the first clear bearing found is also the
+      // nearest one to the door.
+      const turn = Math.ceil(i / 2) * (Math.PI / 12) * (i % 2 ? 1 : -1);
+      _bedTan.copy(t0).applyAxisAngle(bedDir, turn);
+      const p = bedDir.clone().multiplyScalar(Math.cos(off))
+        .addScaledVector(_bedTan, Math.sin(off)).normalize();
+      // Inside the room's own walkable ring, with a margin: a spot in the wall
+      // band is one only the doorway could be, and this is not the doorway.
+      if (Math.acos(clampUnit(p.dot(N))) * R > rec.spec.walk - 0.2) continue;
+      if (!fallback) fallback = p;
+      if (inSolid(p, keep)) continue;
+      return p;
+    }
+    // A room furnished so tightly that nothing round the bed is standable. Give
+    // back the door's side anyway: the walk will trim short of it and they will
+    // sleep late rather than never, which is the better of two bad nights.
+    return fallback || bedDir.clone().multiplyScalar(Math.cos(off))
+      .addScaledVector(t0, Math.sin(off)).normalize();
+  }
+
+  // The card itself: the drawing, sized against something, lying in the XZ
+  // plane of whatever frame the caller is placing it in.
+  //
+  // The two rotations are the whole of the orientation and are worth stating in
+  // words, because they are easy to get a quarter turn wrong and hard to read
+  // back off the numbers. `rotateX` lays the plane down — the drawing's own up
+  // ends up pointing along -Z. `rotateY` then swings that round to +X. So the
+  // head end of the drawing points along the frame's +X, which for a bed is
+  // along its length toward the pillow, and the drawing's width lies across Z.
+  _sleepCard(img, wide) {
+    const canvas = paintSheet(img);
+    const long = wide * (canvas.height / canvas.width);
+    const geo = new THREE.PlaneGeometry(wide, long);
+    geo.rotateX(-Math.PI / 2);
+    geo.rotateY(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geo, sceneryMaterial(texFrom(canvas)));
+    mesh.visible = false;
+    // Biased toward the eye for the same reason every other decal in this app
+    // is: it lies a hair above a surface it must never tear into, and here that
+    // surface is soft, bulging and directly underneath.
+    mesh.material.polygonOffset = true;
+    mesh.material.polygonOffsetFactor = -4;
+    mesh.material.polygonOffsetUnits = -8;
+    return { mesh, long };
+  }
+
+  // The Zzz, hung over whoever the card belongs to.
+  //
+  // A CHILD OF THE CARD, which settles four things at once and is the reason it
+  // is built here rather than out in the world with the other floating marks.
+  // It appears and disappears with the sleeper for free, because a hidden parent
+  // hides its children. It is culled with the room, because the card is. It
+  // needs no position of its own in the world, because the card already has
+  // one. And — the useful part — every sleeper card's local +Y is the surface
+  // up at that spot, whichever way the drawing itself was turned, so "above
+  // them" is +Y here and nothing has to work out which way up is.
+  //
+  // It BILLBOARDS, unlike the sleeper it floats over. That is not an
+  // inconsistency: the card is a drawing of somebody seen from above and lies
+  // flat because that is what it is a picture of, while this is a MARK — the app
+  // saying something about them — and marks in this world stand up and face you,
+  // the way the focus arrow and the speech bubbles do. Lying flat it would
+  // foreshorten to a smear at the eye height this room is usually seen from.
+  //
+  // Turned about the surface up ONLY, which is all a billboard on a planet needs
+  // and is one angle rather than a quaternion: the mark stays upright and swings
+  // to face you. See _syncZzz.
+  _sleepMark(card, fit) {
+    const wide = fit.zzzWide ?? 0.34;
+    const canvas = cachedZzz();
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(wide, wide * (canvas.height / canvas.width)),
+      sceneryMaterial(texFrom(canvas)),
+    );
+    // Where it hangs, in the card's own frame: `x` and `z` slide it over the
+    // sleeper — toward the head, which is what a Zzz rises from — and `up`
+    // lifts it clear of whatever is heaped on top of them.
+    mesh.position.set(fit.zzzAt?.x ?? 0, fit.zzzAt?.up ?? 0.5, fit.zzzAt?.z ?? 0);
+    // Where the drift starts from, kept because the drift overwrites `y` every
+    // frame and would otherwise have nothing to measure from.
+    mesh.userData.baseY = mesh.position.y;
+    // STARTS INVISIBLE, because _syncZzz only writes an opacity for a sleeper
+    // who is already lying down. Left at the material default of 1 the mark
+    // would be drawn at full strength for the single frame between somebody
+    // lying down and the next sync — a flash on the one thing here whose whole
+    // job is to be quiet about it.
+    mesh.material.opacity = 0;
+    // Over the card and over the bedding, both of which are transparent and
+    // write no depth, so a painter's order is the only thing that can say which
+    // is in front. Solid geometry still occludes it by the depth test, which is
+    // what keeps a Zzz behind the comforter when you crouch to look along it.
+    mesh.renderOrder = 4;
+    card.add(mesh);
+    return mesh;
+  }
+
+  // Somebody in their own bedding, sandwiched.
+  //
+  // The card lies just above the base and runs from the head end back under the
+  // cover, and it is the COVER that does the work: it stands well above the
+  // card from every angle a body can be stood at, so the lower part of the
+  // drawing — which is where these two are deliberately unfinished — is behind
+  // real geometry and cannot be seen. Nothing is masked, clipped or sorted by
+  // hand; it is an object under a quilt, and the depth buffer knows what to do
+  // with one of those.
+  _layInBed(rec, anchor, built, beside) {
+    const key = rec.owner;
+    const sheets = key ? IMG.sheets[key] : null;
+    // A bed in a home whose owner has no sleeping drawing is simply a bed. The
+    // same tolerance the blink sheet gets: draw the picture and it starts being
+    // used, and until then nothing anywhere has to be guarded.
+    if (!sheets || !sheets.sleep || !built.bed) return;
+
+    const bed = built.bed;
+    const fit = CONFIG.sleep[key] || {};
+    const { mesh, long } = this._sleepCard(sheets.sleep, bed.across * (fit.wide ?? 1));
+
+    // FLAT, at the bedding's own lying height. There is no tilt and no lift in
+    // the usual case, and that is the point of `displaces` doing the work
+    // instead: a card laid on the mattress is hidden by the cover exactly where
+    // the cover is, which is what makes the sandwich a fact about the geometry
+    // rather than a height somebody tuned.
+    //
+    // Measured from the HEAD end, which is the end that has to land somewhere
+    // exact — a head in the wrong place is the one error in this arrangement
+    // that reads as a mistake rather than as bedding. The foot lands wherever
+    // the drawing's own proportions put it, deep under the cover, where a few
+    // centimetres either way cannot be seen by anybody.
+    mesh.position.set(
+      bed.head + (fit.along ?? 0) - long / 2,
+      bed.lay + (fit.lift ?? 0),
+      0,
+    );
+    anchor.add(mesh);
+    const zzz = this._sleepMark(mesh, fit);
+    // On the room's list, so _installHourTint patches it with everything else
+    // under this roof and it takes the same dark and the same lamp discs as the
+    // bedding it is lying in. That is the entire lighting of this feature.
+    this.interiorTintables.push(mesh.material);
+    this.interiorTintables.push(zzz.material);
+    this.sleepers.set(key, {
+      mesh, zzz, phase: zzzPhase(key), home: rec, outdoors: false,
+      displaces: bed.displaces, walkTo: beside,
+    });
+  }
+
+  // ...and whoever has no bedding to be sandwiched into.
+  //
+  // Usagi has no home — see CONFIG.homes, which has two entries and three
+  // characters — so he sleeps on the grass, which is both the honest reading of
+  // that fact and the funnier one. His drawing is the only one of the three
+  // drawn complete, because there is nothing over him to hide an edge under.
+  //
+  // A ground CAP rather than a flat quad, like every other decal on this
+  // planet: a straight card 1.3 across on a world of radius 8 stands its
+  // corners clear of the grass, and a sleeper hovering at the ears is worse
+  // than most of the things that lift catches.
+  //
+  // WHERE it goes is not decided here. He walks somewhere and lies down there,
+  // so the spot arrives at `layDown` time from whoever is doing the walking.
+  _layOnGround() {
+    const R = CONFIG.globe.radius;
+    for (const spec of CAST) {
+      // Anybody with a bed was given one above; this is the remainder.
+      if (this.sleepers.has(spec.key)) continue;
+      const sheets = IMG.sheets[spec.key];
+      if (!sheets || !sheets.sleep) continue;
+
+      const fit = CONFIG.sleep[spec.key] || {};
+      const wide = fit.wide ?? 1.2;
+      const canvas = paintSheet(sheets.sleep);
+      const long = wide * (canvas.height / canvas.width);
+      const mesh = new THREE.Mesh(
+        groundCap(R, wide, long, SHADOW_LIFT),
+        shadowMaterial(texFrom(canvas)),
+      );
+      mesh.visible = false;
+      // Over the ground and the walk mark, under everything that stands on it.
+      mesh.renderOrder = 1;
+      this.world.add(mesh);
+      const zzz = this._sleepMark(mesh, fit);
+      this.tintables.push(mesh.material);
+      this.tintables.push(zzz.material);
+      // Where he walks to is his own meadow, worked out on demand rather than
+      // stored: unlike a bed it is not a thing that was built, and the spot he
+      // actually lies down at is wherever he got to. See sleepSpotFor.
+      this.sleepers.set(spec.key, {
+        mesh, zzz, phase: zzzPhase(spec.key), home: null, outdoors: true,
+        displaces: null, walkTo: null,
+      });
+    }
+  }
+
+  // Where somebody with no bed should walk to before lying down: a spot near
+  // their own wander anchor, so they sleep in the meadow they live in.
+  //
+  // Asked of the scene rather than worked out by the caller because this is the
+  // same arithmetic every interior places its furniture with — a bearing round
+  // a point and a distance out along the surface — and there is no reason for
+  // household.js to grow a second copy of it.
+  sleepSpotFor(key, out = new THREE.Vector3()) {
+    const rec = this.sleepers.get(key);
+    if (!rec || !rec.outdoors) return null;
+    const spec = CAST.find((c) => c.key === key);
+    if (!spec) return null;
+    const R = CONFIG.globe.radius;
+    const m = CONFIG.sleep.meadow;
+    dirFromLatLon(spec.home.lat, spec.home.lon, _sleepAt);
+    // A tangent at the anchor, turned to the given bearing. North-ish first,
+    // then rotated — the same two moves _onRing makes round a house, and for
+    // the same reason: a bearing is only a bearing once something has said what
+    // it is measured from.
+    _sleepTan.set(0, 1, 0).addScaledVector(_sleepAt, -_sleepAt.y);
+    if (_sleepTan.lengthSq() < 1e-9) _sleepTan.set(1, 0, 0);
+    _sleepTan.normalize().applyAxisAngle(_sleepAt, m.at);
+    const arc = m.out / R;
+    return out.copy(_sleepAt).multiplyScalar(Math.cos(arc))
+      .addScaledVector(_sleepTan, Math.sin(arc)).normalize();
+  }
+
+  // Lie somebody down, or stand them back up.
+  //
+  // `where` is only read by a sleeper with no bed, and only when they are lying
+  // down: one who has a bed is already in it, and where that bed is was settled
+  // when the room was built.
+  layDown(key, on, where = null, spin = 0) {
+    const rec = this.sleepers.get(key);
+    if (!rec) return false;
+    if (on && rec.outdoors && where) {
+      const R = CONFIG.globe.radius;
+      rec.mesh.position.copy(where).multiplyScalar(R);
+      // Its own up is the surface under it; which way it is turned is flavour,
+      // and the only thing that matters is that it is not the same every night.
+      _sleepTan.set(0, 1, 0).addScaledVector(where, -where.y);
+      if (_sleepTan.lengthSq() < 1e-9) _sleepTan.set(1, 0, 0);
+      _sleepTan.normalize().applyAxisAngle(where, spin);
+      const right = _sleepRight.crossVectors(where, _sleepTan);
+      rec.mesh.quaternion.setFromRotationMatrix(
+        _sleepBasis.makeBasis(right, where.clone(), _sleepTan),
+      );
+    }
+    rec.mesh.visible = on;
+    // ...and whatever they are lying on top of steps out of the way. The futon's
+    // pillow is the only one — see `bedOf` for why a head and a pillow cannot
+    // both be in a bed this size, and why the head wins.
+    if (rec.displaces) rec.displaces.visible = !on;
+    return true;
+  }
+
+  isLyingDown(key) {
+    const rec = this.sleepers.get(key);
+    return !!rec && rec.mesh.visible;
+  }
+
+  // The Zzz over everybody asleep: turned to face you, and drifting.
+  //
+  // Skipped entirely when nobody is down, which is three quarters of the day —
+  // the loop costs nothing at noon because `mesh.visible` is false and there is
+  // nothing to ask.
+  //
+  // ONE ANGLE, not a quaternion. A billboard on a planet only has to spin about
+  // the surface up: the mark stays upright and swings toward the eye. The card's
+  // own frame already has up on +Y (see _sleepMark), so the camera's position
+  // read in that frame gives the angle directly, and `worldToLocal` does the
+  // whole change of basis including the planet's bob and whatever way the
+  // bedding was turned.
+  //
+  // THE DRIFT IS THE ONE TRANSFORM IN THIS FEATURE, and it is deliberate against
+  // the rule that says animate by boiling rather than by moving things. That
+  // rule is about DRAWINGS of characters — a body that scales or slides reads as
+  // a sticker being dragged — and this is not a body, it is a mark whose whole
+  // meaning is that it rises. There is no drawing of a Zzz that says "floating
+  // upward" while sitting still. It is kept slow and short: a third of a unit
+  // over three seconds, fading out over the top half of it, so what you notice
+  // is that something is happening rather than the thing itself.
+  //
+  // Each sleeper runs on its own offset, so three of them in view do not pulse
+  // as one. Taken from the character's own key rather than a counter, so it is
+  // the same every visit and the same after a reload.
+  _syncZzz(tMs) {
+    for (const [key, rec] of this.sleepers) {
+      if (!rec.mesh.visible || !rec.zzz) continue;
+      const z = rec.zzz;
+      rec.mesh.worldToLocal(_zzzEye.copy(this.camera.position));
+      z.rotation.y = Math.atan2(_zzzEye.x, _zzzEye.z);
+      const at = ZZZ_RISE;
+      const p = ((tMs / at.periodMs) + (rec.phase || 0)) % 1;
+      z.position.y = z.userData.baseY + p * at.rise;
+      // In quickly, out over the top half. Never quite to 1: this is a hint at
+      // the edge of a dark room, not a label.
+      const fade = p < at.inAt ? p / at.inAt : 1 - ((p - at.inAt) / (1 - at.inAt));
+      z.material.opacity = Math.max(0, fade) * at.peak;
+    }
+  }
+
+  // Where somebody's sleeping drawing is, for a bubble to hang over. Null for
+  // anybody on their feet.
+  sleepAnchor(key) {
+    const rec = this.sleepers.get(key);
+    return rec && rec.mesh.visible ? rec.mesh : null;
+  }
+
+  // Whoever is asleep under the ray, or null.
+  //
+  // Its own pick rather than a case inside the character one, because a sleeper
+  // is not a character as far as anything on screen is concerned: the body is
+  // not drawn, `isVisible` is false for it, and what the finger has actually
+  // landed on is a flat drawing lying in the bedding. See pickCharacter in
+  // main.js, which asks this only after finding nobody standing up.
+  //
+  // No alpha test, unlike a body's. A card is small, nearly filled by what is
+  // drawn on it, and lying flat — so the corners a test would reject are a few
+  // pixels at a glancing angle, and the cost of getting it wrong is one extra
+  // sleepy mumble rather than a tap that misses somebody.
+  sleeperAt(raycaster) {
+    let best = null;
+    let bestD = Infinity;
+    for (const [key, rec] of this.sleepers) {
+      if (!rec.mesh.visible) continue;
+      const hits = raycaster.intersectObject(rec.mesh, false);
+      if (hits.length && hits[0].distance < bestD) {
+        bestD = hits[0].distance;
+        best = key;
+      }
+    }
+    return best;
   }
 
   // ------------------------------------------------- the hour, as a uniform
@@ -5269,9 +5751,17 @@ export class Globe {
   }
 
   // Which drawing is in the sky for a given hour. One sun covers morning, noon
-  // and evening; only night has its own.
+  // and evening; the two dark hours share the moon.
+  //
+  // Sharing it is what keeps night and midnight a continuous sky rather than
+  // two: `swapDisc` only fires where the DRAWING changes, so scrubbing across
+  // that boundary moves one card whose colour and height are interpolated,
+  // exactly as scrubbing between two daylight hours moves one sun. A moon
+  // cross-fading into a second moon would be the one place in the day where
+  // the thing overhead visibly changed identity while you watched.
   _discArtFor(phase) {
-    return phase === 'night' ? this.discTex.moon : this.discTex.sun;
+    return (phase === 'night' || phase === 'midnight')
+      ? this.discTex.moon : this.discTex.sun;
   }
 
   // Placed and sized from the same `discAt` / `discR` the halo behind it is
@@ -5988,6 +6478,30 @@ export class Globe {
     L.manual = true;
     this._relight();
     return on;
+  }
+
+  // Whether a lamp is STANDING IN a given home at this moment.
+  //
+  // Not where it was built, which is what `L.home` records and what makes it
+  // the wrong question here: a lantern is a thing you can pick up, and one in
+  // somebody's hand on the far side of the planet is not a light anybody in
+  // that room can reach the switch of. Asked of where the anchor actually is,
+  // so a lamp carried out stops counting the moment it crosses the wall and
+  // starts again when it is brought back.
+  lampIsIn(L, home) {
+    if (!L || !home || home.wallCos === undefined) return false;
+    L.at.getWorldPosition(_sleepAt).sub(this.world.position).normalize();
+    return _sleepAt.dot(home.sprite.normal) > home.wallCos;
+  }
+
+  // Every lamp burning in a home right now, for somebody about to turn them
+  // off on their way to bed. See MIDNIGHT_SLEEP.md: this is a list of switches
+  // a hand is about to flip, which is why it is a list of lights rather than
+  // anything that could be mistaken for a policy.
+  lampsBurningIn(home) {
+    return this.roomLights.filter(
+      (L) => this.lightIsOn(L) && this.lampIsIn(L, home),
+    );
   }
 
   // Whether it is GIVING LIGHT, which is the question the button is asking on
@@ -7348,6 +7862,11 @@ export class Globe {
   update(t, anchor, landed) {
     const g = CONFIG.globe;
     this.world.position.y = Math.sin(t / g.bobPeriod * Math.PI * 2) * g.bob;
+
+    // The Zzz over anybody asleep. Early in the frame with the other per-frame
+    // placements, and free at every hour but one — see _syncZzz, which walks
+    // away the moment it finds nobody lying down.
+    this._syncZzz(t);
 
     // Where each lamp is, in the same space the shader measures from. It has to
     // be world space — that is what `modelMatrix * position` gives — and the
