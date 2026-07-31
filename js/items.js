@@ -97,6 +97,9 @@ export const ITEMS = {
   // Hachiware's own three-string guitar: one physical instrument that moves
   // between its cave-floor pose, the player's hand, and a character's hands.
   hachiwareGuitar: { kind: 'unique', art: 'guitar', name: 'ギター' },
+  // Hachiware's compact camera is likewise one persistent physical belonging.
+  // Its supplied slot illustration is registered separately in assets.js.
+  hachiwareCamera: { kind: 'unique', art: 'camera', name: 'カメラ' },
   // Hachiware's blue counterpart is another physical weapon, not a recolour of
   // the same inventory entry, so both can exist and be carried independently.
   hachiwareWeapon: { kind: 'unique', art: 'blueweapon', name: 'ブルーのさすまた' },

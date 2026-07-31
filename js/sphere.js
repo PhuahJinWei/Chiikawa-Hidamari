@@ -420,6 +420,48 @@ export function underRoof(dir, margin = 0) {
   return null;
 }
 
+// HOW MUCH HEADROOM THERE IS AT A SPOT — the height of the ceiling above the
+// floor, or Infinity out under the open sky.
+//
+// A room here is a DOME: a sphere of radius `roof` sitting on the planet at the
+// building's own middle, which is why the ceiling is 3.2 over the rug and less
+// than two at the wall. Everything that has asked about a room until now has
+// asked a question with a yes-or-no answer — am I inside, may I stand here —
+// and for those the disc was the whole of it. A camera is the first thing that
+// needs the SHAPE, because it flies, and a flying thing in a dome runs out of
+// room sideways long before it runs out of floor.
+//
+// The height comes out of the same triangle the wall pieces are hung by. A spot
+// an angle θ off the middle sits on the planet at radius R; the dome's centre is
+// at R along the middle; so the ceiling is the far root of
+//   u² − 2R·cosθ·u + (R² − roof²) = 0,
+// which is R·cosθ + √(roof² − R²sin²θ), measured back down from the planet's
+// own radius. At θ = 0 that is exactly `roof`, and it reaches the floor where
+// R·sinθ = roof, which is the wall.
+//
+// A building with no `roof` written down is one nothing can be inside — a solid
+// landmark rather than a home — and gets no headroom at all rather than an
+// infinity that would read as open sky.
+// `R` is passed rather than defaulted, and that is deliberate: this file knows
+// nothing about CONFIG by design, and a default that silently equalled today's
+// radius would go on being wrong quietly the day the planet changed size.
+export function roofHeight(dir, R) {
+  let low = Infinity;
+  for (const b of BUILDINGS) {
+    const along = Math.min(1, Math.max(-1, dir.dot(b.dir)));
+    if (along <= Math.cos(b.r)) continue;
+    if (b.roof === undefined) return 0;
+    const sin = Math.sqrt(Math.max(0, 1 - along * along)) * R;
+    const inside = b.roof * b.roof - sin * sin;
+    // Past the dome's own footprint there is no ceiling to be under — which the
+    // disc test above should already have caught, and does not cost a branch to
+    // be sure of.
+    const h = inside <= 0 ? 0 : along * R + Math.sqrt(inside) - R;
+    if (h < low) low = h;
+  }
+  return low;
+}
+
 // The way out of a building's wall at a point, in the tangent plane there.
 // False when there is no sensible direction to give — standing exactly on the
 // centre.
@@ -572,6 +614,43 @@ export function addSolids(list) {
 // than merely whether it is standing in one.
 export function solids() { return SOLIDS; }
 
+// WHICH REGISTERED FOOTPRINTS OVERLAP EACH OTHER, as a list of complaints — or
+// an empty one, which is the answer this should always give.
+//
+// Nothing in the running game asks. It exists because two solids that intersect
+// are a bug of a kind the rest of this file cannot defend against: every escape
+// here — keepOffSolids, the walk's lean-out ladder, the shove's fence — ejects
+// in ONE pass, and one pass out of overlapping circles can land inside the
+// neighbour. The note at _bedsideSpot in scene.js records that happening in the
+// cave. Those routines are right to be single-pass, because the world they are
+// promised is one where props do not intersect; this is what checks the promise.
+//
+// It is a BUILD-TIME fact, not a runtime one. Trees are scattered on a golden
+// spiral with a berth, and furniture is authored by hand — so an overlap is a
+// config or scatter mistake that is either always there or never, and catching
+// it once at boot is worth more than any amount of runtime forgiveness. Called
+// from main.js under IS_LOCAL, so it costs a deployed player nothing.
+//
+// Arcs in radians, like everything else registered here. `overlap` is how far
+// the two intrude on one another, which is the number worth acting on: a hair
+// is a rounding artefact, a third of a unit is a table inside a bed.
+export function auditSolids() {
+  const bad = [];
+  for (let i = 0; i < SOLIDS.length; i++) {
+    for (let j = i + 1; j < SOLIDS.length; j++) {
+      const a = SOLIDS[i];
+      const b = SOLIDS[j];
+      const along = Math.min(1, Math.max(-1, a.dir.dot(b.dir)));
+      const gap = Math.acos(along);
+      const want = a.r + b.r;
+      if (gap < want) {
+        bad.push({ i, j, a, b, gap, want, overlap: want - gap });
+      }
+    }
+  }
+  return bad;
+}
+
 // Which prop a spot is inside, or null. Returns the prop for the same reason
 // inBuilding returns the building: every caller that cares then wants to slide
 // around the thing it hit, and asking again from outside would come back empty.
@@ -709,9 +788,20 @@ export function solidNormal(dir, s, out) {
 // pushes every destination off every prop pushes them off the one they were
 // asked to sit on. See _pickTarget, which is the only caller that has a goal to
 // name.
-export function keepOffSolids(spot, margin = 0, except = null) {
+// `feet` is how high off the ground the thing being placed is, and it means
+// exactly what it means to `inSolid` — a prop with a `top` stops counting once
+// you are level with it, because at that height it is a surface rather than an
+// obstacle. The default is the floor, so every caller that does not think about
+// height gets the old answer: everything ejects.
+//
+// The one caller that passes anything is the set-down, which passes infinity:
+// putting a bear on a table must not push it off the table, and only the
+// TOPLESS solids — trunks and walls — are things a placement can be inside of.
+// See canPlaceAt, which asks `inSolid` the same question with the same argument.
+export function keepOffSolids(spot, margin = 0, except = null, feet = 0) {
   for (const s of SOLIDS) {
     if (s === except) continue;
+    if (s.top !== undefined && feet >= s.top - 1e-4) continue;   // a surface
     if (spot.dot(s.dir) <= Math.cos(s.r + margin)) continue;
     if (!solidNormal(spot, s, _bOut)) {
       // Dead centre, so no bearing to keep; any will do.

@@ -133,6 +133,7 @@
        the two interact. Snow at noon and snow at midnight are different skies,
        and choosing them in the same place is how you find that out.
        The glyphs and the word are written by paintChip in main.js. -->
+  <div id="sky-stack" class="sky-stack">
   <div id="sky-chip" class="chip-wrap">
     <button id="chip-toggle" class="chip" type="button">
       <span id="chip-hour-mark" class="chip-mark" aria-hidden="true"></span>
@@ -171,6 +172,67 @@
     </div>
   </div>
 
+  <!-- じぶんを みる — the lens swung round to look back at you.
+
+       IT IS NOT HERE UNTIL YOU OWN A CAMERA. The compact camera resting in
+       Hachiware's cave is the feature: pick it up (or carry it in the pouch)
+       and this button exists; set it down somewhere and it goes away again.
+       Hidden rather than greyed, because a control for an ability you have not
+       found yet is not disabled — it is a spoiler. The gate is painted every
+       frame in main.js, off the same pack the pouch reads.
+
+       It left the right-hand column for this corner when it stopped being a
+       standing view control and became a TOOL: the right column is the verbs
+       you always have, and a thing that can be found and lost belongs with the
+       readings rather than among them. Below the chip, not beside it — the
+       open panel is 322px and paints over this spot on purpose (chip-wrap is
+       z-index 2), the same order it already keeps with the pouch.
+
+       A CAMERA, not an eye or a person: the shot is the point, and a lens with
+       a shutter says "this is a picture of you" where a silhouette would only
+       say "you". The disc is the body and the small circle its glass. -->
+  <button id="selfie-toggle" class="ctl-icon is-gone" type="button">
+    <span class="ctl-disc">
+      <svg id="selfie-glyph" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.6 8.2h3.1l1.5-2h7.6l1.5 2h3.1v10.4H3.6Z"/>
+        <circle cx="12" cy="13.2" r="3.4"/>
+      </svg>
+    </span>
+    <span id="selfie-cap" class="ctl-cap">じぶんを みる</span>
+  </button>
+
+  <!-- THE POSES, and they are a drawer now rather than a row.
+
+       Five pills laid along the bottom of the screen were five words competing
+       with the picture they were there to help you compose — and they sat in
+       the lower middle, which is exactly where a shutter has to go. Collapsed
+       to one button under the camera, the framing gets its screen back and the
+       faces are still one press away.
+
+       The panel opens BELOW the button and the button's caption says which face
+       is chosen, so the collapsed state still answers the question the row
+       answered by being visible. Same grammar as the sky chip two above it: a
+       reading you can press, with the choices behind it. -->
+  <div id="pose-wrap" class="pose-wrap is-gone">
+    <button id="pose-toggle" class="ctl-icon" type="button" aria-expanded="false">
+      <span class="ctl-disc">
+        <!-- A little face — the only glyph in this corner that is not an object,
+             because it is the only control here about YOU. -->
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8.6"/>
+          <path d="M8.6 14.4c.9 1.1 2 1.7 3.4 1.7s2.5-.6 3.4-1.7"/>
+          <path d="M9.2 9.6v.6"/>
+          <path d="M14.8 9.6v.6"/>
+        </svg>
+      </span>
+      <span id="pose-cap" class="ctl-cap">おまかせ</span>
+    </button>
+    <!-- Filled from POSES in main.js, so the panel can never offer a face the
+         avatar has no sheet for. -->
+    <div id="pose-bar" class="pose-bar" role="group" aria-label="ポーズ"></div>
+  </div>
+  </div>
+
   <!-- THE TWO VERBS. Equal circles with the word underneath rather than pills
        with the word inside: a fixed 52px disc aligns with the one above it
        forever, whatever the label says or what language it is in, which is the
@@ -198,6 +260,11 @@
       </span>
       <span id="view-cap" class="ctl-cap">そらへ</span>
     </button>
+    <!-- The selfie toggle stood here, under そらへ, back when everybody had it.
+         It is up with the sky chip now, and it is EARNED — see the note there. -->
+    <!-- The shutter stood here as a third disc in the column, wearing とる under
+         it like the two verbs beside it. It is down in the middle of the screen
+         now and it is a SHUTTER — see .shot-btn. -->
     <div id="pouch" class="pouch">
       <button id="pouch-toggle" class="ctl-icon" type="button">
         <!-- A BACKPACK, and it was a tote — a trapezoid with a wide handle arched
@@ -377,6 +444,78 @@
   document.getElementById('loadbar-car').src =
     './asset/images/loading-' + (1 + Math.floor(Math.random() * 3)) + '.png';
 </script>
+
+<!-- POSING, which is the other half of having a camera. Shown only while the
+     lens is turned round, low and centred where a thumb can reach across — this
+     is the one control you use WHILE looking at the result rather than before.
+
+     The faces are yours to pick and stay picked until you turn the view off,
+     which is what makes it posing rather than a mood: you decide how you want
+     to look in the picture, then take it. See POSES in main.js. -->
+<!-- THE SHUTTER. A ring with a red disc inside it, low and centred, and big —
+     which is not decoration but the one arrangement every camera app on every
+     phone has converged on, so a player already knows what it is and where to
+     put their thumb before being told anything.
+
+     RED, alone on the screen. Nothing else in this app is red: the palette is
+     cream and pink and ink, so the one saturated thing in view is unmistakably
+     THE button. That is also why it carries no caption where every other
+     control here does — a shutter is the one control that has never needed a
+     word, and 「とる」 under it would only say what the shape already says.
+
+     It only exists while the lens is turned round. A shutter in a view with no
+     camera in it would be a promise about a picture nobody could compose. -->
+<button id="shot-btn" class="shot-btn is-gone" type="button">
+  <span class="sr-only">しゃしんを とる</span>
+</button>
+
+
+<!-- WHAT YOU JUST TOOK. The picture is shown before it goes anywhere, which is
+     both the nicer moment — you get to see it — and the only mechanism that
+     works everywhere. A silent download of a blob is unreliable on iOS, where
+     it may open a tab or do nothing visible at all; a sheet with the image in
+     it gives the two paths that DO work: the share sheet, and a long press on
+     the picture itself.
+
+     Nothing here touches a server. The photograph is made in the browser's own
+     memory and never leaves the device unless you share it, which is why this
+     works identically on a static host like GitHub Pages. -->
+<div id="photo-sheet" class="photo-sheet is-gone">
+  <div class="photo-card">
+    <img id="photo-img" class="photo-img" alt="とったしゃしん">
+    <div class="photo-row">
+      <button id="photo-share" class="photo-btn is-gone" type="button">シェア</button>
+      <button id="photo-save" class="photo-btn" type="button">ほぞん</button>
+      <button id="photo-close" class="photo-btn photo-close" type="button">とじる</button>
+    </div>
+  </div>
+</div>
+
+<!-- WHAT YOU JUST LEARNED YOU CAN DO. Shown once, when the camera first reaches
+     your hands, because the button appearing in the corner is the whole of the
+     unlock and a corner is exactly where a player who is looking at the camera
+     they just picked up is not looking.
+
+     It says what you got and where it went, and then it goes away by itself. No
+     dismiss button: a notice you have to close is a decision, and there is
+     nothing here to decide. -->
+<div id="unlock" class="unlock is-gone" role="status" aria-live="polite">
+  <span class="unlock-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24">
+      <path d="M3.6 8.2h3.1l1.5-2h7.6l1.5 2h3.1v10.4H3.6Z"/>
+      <circle cx="12" cy="13.2" r="3.4"/>
+    </svg>
+  </span>
+  <span class="unlock-say">
+    <b>カメラを てにいれた！</b>
+    <i>ひだりうえの ボタンで じぶんを とれるよ</i>
+  </span>
+</div>
+
+<!-- The shutter's own flash. A photograph you cannot hear needs to be one you
+     can see happen, or a press with a silent save behind it reads as a button
+     that did nothing. One frame of white, faded out by the animation. -->
+<div id="shot-flash" class="shot-flash"></div>
 
 <div class="rotate-hint"><p>たてむきに してね</p></div>
 

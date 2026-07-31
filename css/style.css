@@ -354,6 +354,17 @@ html, body {
   gap: 12px;
 }
 
+/* The left corner's own column: the sky chip with the camera below it, once the
+   camera has been found. Mirrors .ctl-stack so the two corners age together —
+   same gap, opposite edge. The chip keeps its z-index 2, so its open panel
+   paints over the button below exactly as it already paints over the pouch. */
+.sky-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 /* A DISC AND A WORD UNDER IT, rather than a word inside a pill.
 
    The pills were 96px, 118px and a clock that changed width with the hour, in a
@@ -927,7 +938,14 @@ html, body {
   border-radius: 24px;
   background: rgba(255, 253, 247, 0.96);
   box-shadow: 0 6px 18px rgba(91, 76, 68, 0.14);
-  pointer-events: auto;
+  /* NONE while closed, and not merely because it is invisible. Hit-testing used
+     to ride on the delayed visibility flip below — fine while nothing lived
+     under the panel, and a 200ms window where an invisible sheet eats taps the
+     moment something does. The camera button lives there now. `pointer-events`
+     is a statement about the panel's STATE rather than about a transition
+     having finished, so a stalled frame can never leave a closed panel
+     swallowing a press meant for the thing beneath it. */
+  pointer-events: none;
   transform-origin: top left;
   transform: scale(0.4);
   opacity: 0;
@@ -943,6 +961,7 @@ html, body {
   transform: scale(1);
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
   /* Overshoots a little on the way open. It is a small control appearing under
      your thumb, and arriving dead-on reads as a dialog rather than a thing you
      pulled out. */
@@ -2124,4 +2143,314 @@ html, body {
     transform: none;
     transition: opacity 0.2s ease-out;
   }
+}
+
+/* ------------------------------------------------------------ the camera
+   The shutter and the pose bar, both of which exist only while the lens is
+   turned round on you. `is-gone` rather than a grey-out: a control for a view
+   you are not in is not disabled, it is irrelevant, and this corner has always
+   said what you can do NOW rather than what you could do elsewhere.
+
+   NOT THE TITLE CARD, which wore this class first and means something gentler
+   by it: `.start.is-gone` is a 620ms fade-and-lift, and a blanket `display: none`
+   would have cut that to a single frame. The exclusion is the whole reason this
+   selector is not just `.is-gone`. */
+.is-gone:not(.start) { display: none !important; }
+
+/* LOW AND CENTRED, AND BIG, AND RED.
+
+   This is the one control in the app that is copied rather than designed. Every
+   camera on every phone puts a large ring with a disc in it at the bottom middle
+   of the screen, and a player who has ever taken a photograph knows what it is
+   and where their thumb goes before reading a word. Inventing something nicer
+   here would be inventing a puzzle.
+
+   RED, and nothing else in this app is: the palette is cream and pink and ink,
+   so the one saturated thing on screen is unmistakably THE button. It is also
+   why it carries no caption where every other control does — a shutter has
+   never needed a word, and とる underneath would only repeat the shape.
+
+   The ring is drawn on the button and the disc is the ::before, so the press
+   can shrink the disc INSIDE a ring that holds still — which is what a real
+   shutter does and what makes the press feel mechanical rather than like a
+   web page reacting. */
+.shot-btn {
+  position: absolute;
+  left: 50%;
+  bottom: max(calc(30px + env(safe-area-inset-bottom)), 5vh);
+  transform: translateX(-50%);
+  width: 74px;
+  height: 74px;
+  padding: 0;
+  border: 4px solid var(--face);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 6;
+  box-shadow: 0 3px 12px rgba(91, 76, 68, 0.28);
+}
+
+.shot-btn::before {
+  content: '';
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #E8555F;
+  transition: transform 0.09s ease, background 0.09s ease;
+}
+
+.shot-btn:active::before {
+  transform: scale(0.86);
+  background: #C93F49;
+}
+
+/* The pose drawer, under the camera in the left column. The panel is absolute
+   so opening it cannot push the stack around — the button stays exactly where
+   the thumb left it, which is the whole point of a drawer. */
+.pose-wrap {
+  position: relative;
+  /* Under the sky chip's own panel (z-index 2 there), for the same reason the
+     pouch is: the reading you opened wins over the ones you did not. */
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* A COLUMN, not a row. Along the bottom these were five words across the
+   picture; hanging off a button in the corner they are a short list against the
+   edge of the screen, which is the shape a drawer of choices wants and the
+   shape that leaves the middle alone. */
+.pose-bar {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 18px;
+  background: var(--face);
+  box-shadow: var(--shell-flat);
+  pointer-events: none;
+  transform-origin: top left;
+  transform: scale(0.4);
+  opacity: 0;
+  visibility: hidden;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.7, 0.4),
+              opacity 0.16s ease,
+              visibility 0s linear 0.2s;
+}
+
+.pose-wrap.is-open .pose-bar {
+  transform: scale(1);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: transform 0.26s cubic-bezier(0.22, 1.2, 0.36, 1),
+              opacity 0.14s ease,
+              visibility 0s;
+}
+
+/* The same small pill the weather picker uses — this is a row of choices where
+   exactly one is live, which is the shape that already has a treatment. */
+.pose-pick {
+  height: 30px;
+  min-width: 46px;
+  padding: 0 9px;
+  text-align: left;
+  border: none;
+  border-radius: 15px;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease, background 0.14s ease;
+}
+
+.pose-pick:active { transform: scale(0.92); }
+
+.pose-pick.is-on {
+  background: var(--accent);
+  box-shadow: var(--shell-flat-live);
+}
+
+/* ONE FRAME OF WHITE. It covers everything including the HUD, because a shutter
+   is about the whole screen rather than about the picture — and it must not
+   swallow the press that comes after it, hence pointer-events. */
+.shot-flash {
+  position: absolute;
+  inset: 0;
+  background: #FFFFFF;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.shot-flash.is-firing {
+  animation: shot-flash 260ms ease-out;
+}
+
+@keyframes shot-flash {
+  0% { opacity: 0.86; }
+  100% { opacity: 0; }
+}
+
+/* ------------------------------------------------------------- the unlock
+   Shown once, when the camera first reaches your hands. It sits ABOVE the left
+   column rather than over the middle of the screen: the thing it is pointing at
+   is up there, and a notice in the centre would be talking about a corner while
+   standing somewhere else. */
+.unlock {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  margin: 0 auto;
+  max-width: 320px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 10px 11px;
+  border-radius: 20px;
+  background: var(--face);
+  box-shadow: var(--shell);
+  pointer-events: none;
+  z-index: 20;
+  animation: unlock-in 4.2s ease forwards;
+}
+
+.unlock-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.unlock-mark svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.unlock-say {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.unlock-say b {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* The where-to-look line, quieter than the what-you-got line: one is news and
+   the other is a direction, and they are not equally interesting. */
+.unlock-say i {
+  font-size: 0.6rem;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--ink);
+  opacity: 0.62;
+}
+
+/* Drops in, sits still long enough to be read at reading speed, lifts away. The
+   whole thing is 4.2s and it is `forwards`, so the last frame — invisible — is
+   what it holds until main.js takes the element away. */
+@keyframes unlock-in {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.94); }
+  9% { opacity: 1; transform: translateY(0) scale(1); }
+  84% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-10px) scale(0.98); }
+}
+
+/* --------------------------------------------------------- the photograph
+   The sheet that opens over everything once a picture has been taken. Modal on
+   purpose: you have just made a thing, and the one decision worth offering is
+   what to do with it. */
+.photo-sheet {
+  /* Fixed and above the pouch's sheet (11), matching the one other modal in the
+     app — and padded off the notch, because the card is as tall as it is
+     allowed to be and would otherwise reach into it. */
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: calc(env(safe-area-inset-top) + 1rem) 1rem
+           calc(env(safe-area-inset-bottom) + 1rem);
+  /* Dark enough to read the picture against, light enough that the world is
+     still visibly behind it — you are looking at a photo OF somewhere you are
+     still standing. */
+  background: rgba(58, 44, 38, 0.46);
+  pointer-events: auto;
+}
+
+.photo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: min(86vw, 420px);
+  max-height: 86vh;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--face);
+  box-shadow: var(--shell);
+}
+
+/* The picture keeps its own shape and is never cropped: a photograph shown at
+   the wrong aspect is a different photograph. */
+.photo-img {
+  display: block;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 62vh;
+  object-fit: contain;
+  border-radius: 14px;
+  background: var(--sky-mid, #BFE0F2);
+}
+
+.photo-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.photo-btn {
+  flex: 1 1 0;
+  height: 42px;
+  border: none;
+  border-radius: 21px;
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: var(--shell-flat-live);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s ease;
+}
+
+.photo-btn:active { transform: scale(0.95); }
+
+/* とじる is the way out rather than a thing to do, so it wears the quiet
+   treatment — the same distinction the pouch's own sheet makes. */
+.photo-close {
+  background: var(--face);
+  box-shadow: var(--shell-flat);
 }

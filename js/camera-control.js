@@ -47,7 +47,7 @@ import { CONFIG } from './config.js';
 import {
   dirFromLatLon, localFrame, inLake, lakeReach, lakeNormal,
   inBuilding, buildingNormal, keepOutside, inScenery, buildings, underRoof,
-  inSolid, solidNormal, keepOffSolids,
+  inSolid, solidNormal, keepOffSolids, roofHeight,
 } from './sphere.js';
 // Gravity and the surface underfoot, which the cast share — see walker.js.
 import { Walker } from './walker.js';
@@ -70,6 +70,23 @@ function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 function smoothstep(x) { return x * x * (3 - 2 * x); }
 
 const _f = new THREE.Vector3();
+const _selfieDir = new THREE.Vector3();
+const _selfiePos = new THREE.Vector3();
+const _selfieLook = new THREE.Vector3();
+const _selfieProbe = new THREE.Vector3();
+
+// WHICH WAYS ROUND THE LENS MAY TRY, in radians, when the way it wanted is full
+// of tree — see _selfieDodge. Nearest first and alternating sides, so the search
+// gives up the least ground it can and has no handedness: a trunk dead ahead is
+// as likely to send the camera left as right, decided by which side is actually
+// open rather than by the order of this list.
+//
+// Nine of them, ending at 32°. Wider than that and the lens is filming your
+// cheek — past a third of a turn a selfie stops being one, which is the same
+// reasoning that bounds the pan.
+const SELFIE_DODGE = [0, 8, -8, 16, -16, 24, -24, 32, -32]
+  .map((deg) => deg * Math.PI / 180);
+const _selfieAimDir = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _wAim = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -272,6 +289,56 @@ export class PlanetCamera {
     // got, eased both ways over accelMs so arming mid-stride is a lean into
     // it and stopping is a wind-down, never a gear change.
     this.sprintOn = false;
+    // Whether a friend's hand is in yours. Written from main.js; read by the
+    // walk above and by the sprint button, which will not arm while it is set.
+    this.leash = false;
+
+    // THE SELFIE VIEW — see CONFIG.player.selfie*.
+    //
+    // `selfieOn` is the switch and `selfie` is how far the lens has swung round,
+    // 0 on your own eyeline and 1 out in front looking back. Everything else in
+    // this class reads the SECOND one, because a view that is halfway round is
+    // halfway round: the bob and the sprint kick fade out with it rather than
+    // switching off, and the placement blends between the two poses on the same
+    // number.
+    //
+    // Nothing outside these two lines knows the view exists. `anchor`, `alt`
+    // and `isFirstPerson` are untouched by all of it, which is the whole design
+    // — see the note in config.
+    this.selfieOn = false;
+    this.selfie = 0;
+    // WHO ELSE IS IN THE SHOT, as a surface direction, or null. Written by
+    // main.js while a hand is held; read only to decide what the lens aims at.
+    // The rig has no business knowing about the household, so it is handed a
+    // point rather than a person.
+    this.pairAim = null;
+    // How far back the lens has been ASKED to sit, before the world gets its
+    // say — see selfieZoom and the march.
+    this.selfieWant = CONFIG.player.selfieDist;
+    // ...and how far ROUND you it has been asked to sit, in radians, positive
+    // being toward your right. This is the whole of "move the camera": a lens
+    // that always stays the same distance away and always points back at you
+    // has exactly one place left to go, which is sideways.
+    //
+    // A BEARING RATHER THAN A SIDESTEP, and the difference matters. Offsetting
+    // the lens along a screen axis would change its distance too — the corner of
+    // a box is further from the middle than the edge is — so a pan would
+    // silently undo the zoom. Swinging it round an arc cannot.
+    //
+    // No vertical twin, deliberately. The lens already rises and falls with the
+    // one-finger drag (see `lift`), and a second height control would be two
+    // knobs fighting over one number with no way for either to show what the
+    // other had done.
+    this.selfieSide = 0;
+    // What the WORLD added to that, easing, when the bearing you asked for was
+    // full of tree — see _selfieDodge. Kept apart from `selfieSide` so that
+    // stepping out from behind the tree returns the lens to the framing you
+    // chose rather than to wherever it was pushed.
+    this.selfieAuto = 0;
+    // Where the lens ended up last frame, so the march that keeps it out of
+    // walls has somewhere to ease from rather than snapping in and out as you
+    // walk past a trunk.
+    this._selfieBack = 0;
     this._dash = 0;
     this._ranArmed = false;  // whether the armed run has actually been run yet
     this._lift = 1;          // banked outward pinch, while stood on the ground
@@ -305,6 +372,12 @@ export class PlanetCamera {
 
     this._T = new THREE.Vector3();
     this._axis = new THREE.Vector3();
+    // The lens's own bearing and its axis, kept apart from `_axis` because the
+    // dodge below tries several of them per frame and the one that wins has to
+    // survive being asked about again.
+    this._bear = new THREE.Vector3();
+    this._tryBear = new THREE.Vector3();
+    this._tryAxis = new THREE.Vector3();
     this._pos = new THREE.Vector3();
     this._look = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
@@ -336,6 +409,63 @@ export class PlanetCamera {
   // Where you are heading rather than where you are, so a button label flips
   // the instant it is pressed instead of waiting out the climb.
   get goingUp() { return this.altT > CONFIG.camera.eyeHeight * 3; }
+
+  // Turn round and look at yourself, or turn back. Refused off the ground,
+  // where the far view owns the camera and there is no body to look at anyway.
+  setSelfie(on) {
+    const want = !!on && this.isFirstPerson;
+    if (this.selfieOn === want) return this.selfieOn;
+    this.selfieOn = want;
+    // A FRAMING BELONGS TO A SHOT, so the zoom goes back to the default every
+    // time the lens is turned round — the same rule the pose picker follows.
+    // Coming back to a view still holding the last picture's framing would be
+    // the app remembering something the user set for one photograph.
+    if (want) {
+      this.selfieWant = CONFIG.player.selfieDist;
+      this.selfieSide = 0;
+      this.selfieAuto = 0;
+    }
+    // ...and the stick is dropped on the spot rather than on the next tick, so
+    // turning the camera round mid-stride cannot leave a throttle running
+    // against a pad that has just been taken away.
+    if (want) this.setMove(0, 0);
+    return this.selfieOn;
+  }
+
+  // Pinch, in the selfie view. `factor` arrives as the pinch's own ratio — under
+  // one when the fingers spread — so multiplying brings the lens IN as they
+  // open, which is the way every photograph on a phone has ever been framed.
+  //
+  // What comes back is only what was ASKED for. The legality march still has
+  // the last word every frame, so pinching out against a wall quietly gets you
+  // as much room as there is and no more, and stepping away from the wall opens
+  // it up again without another gesture.
+  selfieZoom(factor) {
+    const p = CONFIG.player;
+    if (!(factor > 0)) return;
+    this.selfieWant = clamp(this.selfieWant * factor, p.selfieMin, p.selfieMax);
+  }
+
+  // Slide the lens round you. `dx` is in screen-ish units — pixels of drag or a
+  // frame's worth of held key — and the sign is the one a hand expects: dragging
+  // right carries the camera right, so the world behind you swings left, exactly
+  // as it does when you turn a real one.
+  //
+  // CLAMPED TO A FIXED ARC, which is the "fixed area" this was asked for. Past
+  // about a third of a turn the lens is filming your ear, and past a half it is
+  // behind you — a back view in a world where every card turns to face the lens,
+  // which is the one shot this art cannot make. See the note at the top of the
+  // selfie.
+  selfiePan(dx) {
+    const p = CONFIG.player;
+    if (!dx) return;
+    this.selfieSide = clamp(
+      this.selfieSide + dx * p.selfiePanSens,
+      -p.selfieSideMax, p.selfieSideMax,
+    );
+  }
+
+  toggleSelfie() { return this.setSelfie(!this.selfieOn); }
 
   markTouched(now) { this.lastTouch = now; }
 
@@ -494,6 +624,208 @@ export class PlanetCamera {
   // gyro is a bounded offset on top, faded out as you leave the ground. Both the
   // camera and the walk direction come through here, which is the point — they
   // used to disagree by exactly this term.
+  // The two poses, mixed by `selfie`. Writes `_pos` and `_look` in place, so
+  // the roll and the lookAt below take it without knowing anything happened.
+  //
+  // BLENDED AS AN ARC, not as a straight line between two points. The lens
+  // travels from your eye to a spot several units away round a planet of eight;
+  // lerping the positions would cut the corner and dip the camera through the
+  // hillside on the way. Rotating the anchor by a growing arc keeps every frame
+  // of the swing at an honest height above the ground.
+  _selfiePose(A, R, height, dtMs) {
+    const p = CONFIG.player;
+    const k = this.selfie;
+
+    // The lens rises and falls with the same swipe that pitches the view on
+    // foot, which is what makes looking up at the two of you cost nothing to
+    // learn: the gesture already means "tilt".
+    //
+    // Worked out BEFORE the march now, because it is also how high the lens
+    // flies — and that is what decides which of the things on the ground it has
+    // to care about at all. See _selfieReach.
+    let lift = clamp(
+      p.selfieHigh + this.lookPitch * p.selfieSwing,
+      p.selfieLow, p.selfieTop,
+    );
+    // ...and never through the plaster. `selfieTop` is 3.6 against a room whose
+    // apex is 3.2, so an upward swipe indoors asked for a lens above the roof —
+    // and the march would then have refused every step, collapsing the shot to
+    // arm's length for a reason nothing on screen explained. Clamped to the
+    // ceiling over YOUR head, which is the highest it could be anywhere in the
+    // room; the march still draws it in as the dome slopes away.
+    const head = roofHeight(A, R);
+    if (head < Infinity) lift = Math.min(lift, Math.max(p.selfieLow, head - p.selfieHead));
+    const feet = this.body.stand + lift;
+    const asked = this.selfieWant + (this.leash ? p.selfiePair : 0);
+
+    // Out in front along the way you are facing, swung by however far round you
+    // have asked the camera to sit. `_T` is that heading and is already computed
+    // above, so a swipe that turns you also swings the lens round you — an orbit
+    // for free, and one that agrees with the direction the stick walks.
+    this._bear.copy(this._T);
+    if (this.selfieSide) this._bear.applyAxisAngle(A, this.selfieSide);
+
+    // ...and then the world's own opinion about that bearing, eased in so the
+    // lens slides round a trunk rather than jumping round it.
+    const goal = this._selfieDodge(A, this._bear, asked, feet);
+    const swing = 1 - Math.exp(-dtMs / p.selfieDodgeMs);
+    this.selfieAuto += (goal - this.selfieAuto) * swing;
+    if (this.selfieAuto) this._bear.applyAxisAngle(A, this.selfieAuto);
+
+    // How far out the world will actually allow ALONG THE BEARING IT SETTLED ON,
+    // eased so walking past a trunk draws the lens in rather than snapping it.
+    // Marched again rather than reusing the dodge's own number, because the
+    // swing above is still travelling and the honest distance is the one for
+    // where the lens is this frame.
+    this._axis.crossVectors(A, this._bear).normalize();
+    const want = this._selfieReach(A, asked, this._axis, feet);
+    const ease = 1 - Math.exp(-dtMs / 90);
+    this._selfieBack += (want - this._selfieBack) * ease;
+    const back = this._selfieBack;
+    // MEASURED FROM THE GROUND UNDER YOU, not from `alt`.
+    //
+    // `alt` is already an eye height — the surface plus eyeHeight — so adding
+    // the lens height to it stacked one on the other: the camera ended up 3.4
+    // units up aiming 2.7 up, which is above the head of a 2.02-unit Momonga.
+    // It framed the sky over your shoulder and none of you. `body.stand` is the
+    // surface you are on, which is also what makes this right on top of a stump
+    // or a table rather than only on the grass.
+    const floor = R + this.body.stand;
+    // POSITIVE, which is IN FRONT. `_axis` is A x the bearing, so rotating the anchor
+    // about it by a positive angle carries it toward `_T` — the way you are
+    // facing. The main placement above uses a NEGATIVE angle for exactly the
+    // opposite reason, to swing the far view back off the overhead line, and
+    // copying that sign here put the lens behind your shoulder: a back view in
+    // a world where every card turns to face the lens anyway, and one whose
+    // legality march kept colliding with the house you had just walked out of.
+    _selfieDir.copy(A).applyAxisAngle(this._axis, back / R);
+    _selfiePos.copy(_selfieDir).multiplyScalar(floor + lift);
+    // ...looking back at your chest — or at the space BETWEEN the two of you,
+    // when somebody is in the picture with you.
+    //
+    // Aimed at the player alone, a friend standing 1.35 to one side sits at the
+    // edge of the frame with the other half of the shot empty sky. Splitting
+    // the difference is what turns a snapshot of you with somebody caught in it
+    // into a photograph of the pair of you, and it is the whole reason the
+    // hand-holding selfie was worth building.
+    _selfieAimDir.copy(A);
+    if (this.pairAim) {
+      _selfieAimDir.lerp(this.pairAim, 0.5);
+      if (_selfieAimDir.lengthSq() < 1e-9) _selfieAimDir.copy(A);
+      else _selfieAimDir.normalize();
+    }
+    _selfieLook.copy(_selfieAimDir).multiplyScalar(floor + p.selfieAim);
+
+    this._pos.lerp(_selfiePos, k);
+    this._look.lerp(_selfieLook, k);
+  }
+
+  // HOW FAR THE LENS MAY GO BACK before it is inside something.
+  //
+  // The classic third-person problem and the classic answer: walk out along the
+  // ray and stop at the first spot that is not a place a camera may be. What
+  // counts as legal here is the same three questions everything else on this
+  // planet asks — not in a trunk, not in masonry, and not on the wrong side of
+  // a wall from the person it is filming.
+  //
+  // That last one is why `underRoof` is in the list rather than `inBuilding`
+  // alone. A lens 3.4 units in front of somebody stood by their own window is
+  // outdoors while they are indoors, and the wall between would be filming the
+  // outside of the house. Matching the roof state to yours keeps the shot in
+  // whichever space you are in — and indoors it is clamped tighter still, since
+  // the room is 4.5 across and a portrait is the only framing that fits.
+  // TWO THINGS WERE MEASURED WRONG HERE, and between them they were why the
+  // lens spent most of its life jammed against your face. Over 71 standing spots
+  // and 24 headings each, the march came back at its 1.5 floor in 45% of
+  // directions and reached the far stop in 25%; after the two fixes below and
+  // the dodge above, that is 8% and 85%, and the mean reach goes 2.97 → 4.90.
+  //
+  // A LENS IS NOT A PAIR OF FEET. This asked `inSolid` with the default `feet`,
+  // which is the floor — so every registered footprint was a wall to it, and
+  // seven of thirty-six directions out of the first spot tested were being
+  // refused by things the camera clears by a metre. Passing the lens's own
+  // height lets it fly over a stump, a table, a bed; a tree has no `top` and so
+  // is still a wall at any height, which is the right answer for the one prop
+  // whose canopy would swallow the shot.
+  //
+  // AND IT IS NOT AS WIDE AS A BODY. The 0.15 margin is the berth a walking
+  // character keeps, and on trunks registered at 0.13–0.20 radians it very
+  // nearly doubled them: a lens could not pass within two and a half units of a
+  // tree that is one wide. `selfieClear` is what a camera actually needs, which
+  // is enough not to clip its near plane through the bark.
+  //
+  // The masonry margin stays at the body's, and that asymmetry is on purpose: a
+  // wall is a flat plane rather than a post, so a lens that grazes one sees
+  // along it into the room beyond, and no amount of near-plane clearance makes
+  // that a picture anybody wanted.
+  // AND INDOORS IT WAS A FLAT NUMBER, which is the third thing this march has
+  // been caught measuring with the wrong instrument.
+  //
+  // `selfieRoom` capped the lens at 2.1 from anywhere under a roof. That is
+  // roughly the radius of Chiikawa's room, so it is the right answer standing on
+  // the rug and the wrong one everywhere else — and because the cap did not move
+  // with you, it was the SAME answer everywhere: 1.85 in all directions from any
+  // spot in the house, the march never even reaching a wall to be stopped by.
+  // Worse, 2.1 sits below `selfieMin` (2.2), so pinching indoors did nothing at
+  // all. A gesture that works in every other place and silently does not work
+  // here does not read as a small room; it reads as a broken button.
+  //
+  // What replaces it is the room's own shape. The ceiling is a dome — 3.2 over
+  // the rug, under two at the wall — so the honest limit is "may a lens at this
+  // height be at this spot", asked of each step. That is one test doing the work
+  // of the cap and doing it better: it lets you back across the whole room when
+  // you are stood by a wall, it draws in when you pitch the lens up into the
+  // slope of the roof, and it needs nothing written down per house.
+  _selfieReach(A, want, axis, feet) {
+    const c = CONFIG.player;
+    const R = CONFIG.globe.radius;
+    const roofed = !!underRoof(A);
+    const step = 0.35;
+    let best = c.selfieNear;
+    for (let d = c.selfieNear; d <= want + 1e-6; d += step) {
+      _selfieProbe.copy(A).applyAxisAngle(axis, d / R);
+      if (inSolid(_selfieProbe, c.selfieClear, feet)) break;
+      if (inBuilding(_selfieProbe, 0.15)) break;
+      if (!!underRoof(_selfieProbe) !== roofed) break;
+      // ...and the plaster, which only a roofed march can run into. Outdoors
+      // `roofHeight` is Infinity and this costs one comparison.
+      if (roofHeight(_selfieProbe, R) < feet + c.selfieHead) break;
+      best = d;
+    }
+    return Math.min(best, want);
+  }
+
+  // WHERE ELSE THE LENS COULD STAND, when the bearing you asked for is full of
+  // tree. Returns an extra angle to add to it, and zero when nothing is in the
+  // way — which is the answer most of the time and costs one march to get.
+  //
+  // This is the piece that turns "the camera is always zoomed in" into a
+  // non-problem, and it works because of what a selfie already promises: the
+  // lens points back at YOU, so it is free to stand anywhere on the arc and the
+  // shot is still of your face. A third-person camera behind a walking character
+  // cannot do this — swinging it sideways changes what the player is looking at,
+  // which is why those cameras pull in instead. Here it changes only the
+  // background, and a background is a thing a photograph is allowed to choose.
+  //
+  // CANDIDATES ARE ORDERED BY HOW FAR THEY STRAY, and the comparison is strict,
+  // so a tie keeps the smallest deviation: the lens takes the nearest way round
+  // the trunk rather than whichever the loop happened to reach last. It stops
+  // the moment one of them reaches the distance asked for, so an open field is a
+  // single march and no swing at all.
+  _selfieDodge(A, bear, want, feet) {
+    let bestAng = 0;
+    let bestReach = -1;
+    for (const s of SELFIE_DODGE) {
+      this._tryBear.copy(bear);
+      if (s) this._tryBear.applyAxisAngle(A, s);
+      this._tryAxis.crossVectors(A, this._tryBear).normalize();
+      const r = this._selfieReach(A, want, this._tryAxis, feet);
+      if (r > bestReach + 1e-6) { bestReach = r; bestAng = s; }
+      if (bestReach >= want - 1e-6) break;
+    }
+    return bestAng;
+  }
+
   _viewTangent(out) {
     const yaw = this.gyroHeading * (1 - this.w);
     out.copy(this.forward);
@@ -591,7 +923,13 @@ export class PlanetCamera {
     // stays analog under it — a careful half-push is still a careful half-push,
     // just a running one. Cadence comes along free: stepPhase advances with
     // speed, so the footfalls quicken exactly as the ground does.
-    const speed = this.drive * p.walkSpeed * (1 + (p.sprintBoost - 1) * this._dash);
+    // HOLDING A HAND CAPS THE WALK AND REFUSES THE RUN — see player.leadSpeed.
+    // `leash` is set by main.js while somebody is being led, and it is the one
+    // thing allowed to override the stick, because the alternative is dragging
+    // a friend along at twice the speed their own drawing was made to walk at.
+    const speed = this.leash
+      ? this.drive * p.leadSpeed
+      : this.drive * p.walkSpeed * (1 + (p.sprintBoost - 1) * this._dash);
     this.stepPhase += speed * p.stepsPerUnit * dt * Math.PI * 2;
 
     const step = (speed / R) * dt;
@@ -1199,10 +1537,17 @@ export class PlanetCamera {
     // the way up even though _coast has already wound the throttle down anyway.
     // A sprint opens it further — see player.sprintFov — riding the same gait
     // gate, so a held button with the stick idle still widens nothing.
-    this._setFov(c.fov + (c.walkFov + p.sprintFov * this._dash) * gait * (1 - w));
+    // ...and NOT IN A SELFIE, where both of these are cockpit effects with no
+    // cockpit. The lens is out in front of you now: a walk kick and a head bob
+    // applied to it read as the CAMERA being jostled by somebody else's feet,
+    // which is the one thing a held-out arm does not do. The body still bobs —
+    // it has its own walk cycle — so the movement is all still there, in the
+    // half of the picture that should have it.
+    const fp = 1 - this.selfie;
+    this._setFov(c.fov + (c.walkFov + p.sprintFov * this._dash) * gait * (1 - w) * fp);
 
-    const bob = Math.abs(Math.sin(this.stepPhase)) * p.bobAmp * gait;
-    const roll = Math.sin(this.stepPhase * 0.5) * p.rollAmp * gait;
+    const bob = Math.abs(Math.sin(this.stepPhase)) * p.bobAmp * gait * fp;
+    const roll = Math.sin(this.stepPhase * 0.5) * p.rollAmp * gait * fp;
 
     // The jump rides beside the bob, in the one place height is composed —
     // exactly where the hop's parabola used to be added, and meaning the same
@@ -1230,6 +1575,17 @@ export class PlanetCamera {
     this._fwd.copy(this._T).multiplyScalar(Math.cos(pitch)).addScaledVector(A, Math.sin(pitch));
     this._look.copy(A).multiplyScalar(height).addScaledVector(this._fwd, c.lookAhead);
     this._look.lerp(ORIGIN, w);
+
+    // ROUND TO THE FRONT, if the view is swung. Everything above has already
+    // decided where you are looking FROM on your own eyeline; this takes that
+    // pose and turns it into the other one, on a blend, and nothing that ran
+    // before it has been changed.
+    //
+    // Eased here rather than at the switch so the swing survives being toggled
+    // mid-stride, and so the two poses are always the same two endpoints.
+    this.selfie += ((this.selfieOn && this.isFirstPerson ? 1 : 0) - this.selfie)
+      * (1 - Math.exp(-dtMs / p.selfieEaseMs));
+    if (this.selfie > 0.001) this._selfiePose(A, R, height, dtMs);
 
     this.camera.position.copy(this._pos);
     // Local up, so the horizon stays level while stood on the ground and the

@@ -137,12 +137,35 @@ export class MoveInput {
     }
   }
 
+  // NOTHING MOVES WHILE YOU ARE FRAMING A SHOT.
+  //
+  // The three surfaces this file owns — the pad, the keys, and the two action
+  // buttons — all ask this one question rather than each carrying its own copy
+  // of the rule, which is the whole reason they were brought into one file.
+  //
+  // It is not merely tidiness to lock them. In the selfie view the stick still
+  // steers relative to your FACING while the lens looks back at you, so pushing
+  // away from yourself walks you toward the screen: the control is not hard, it
+  // is inverted. Remapping it was the alternative and it answers the wrong
+  // question — a camera turned on yourself is for composing a picture, not for
+  // travelling, and the honest answer to "how do I walk in this view" is that
+  // you turn it off.
+  //
+  // THE JUMP GOES WITH THEM, and that one is easy to forget. A hop is a
+  // parabola added to the CAMERA at render time, so in a selfie it would bounce
+  // the lens while the body it is pointed at stood perfectly still — the
+  // photographer stumbling rather than anybody jumping. Wiring the hop to the
+  // avatar instead would make a jump pose possible, which is a nice thing for
+  // another day and not this one.
+  get frozen() { return !!this.rig.selfieOn; }
+
   // ------------------------------------------------------------------ verbs
   //
   // The two the buttons and the keys share, so a thumb and a thumb's worth of
   // keyboard cannot drift apart.
 
   jump() {
+    if (this.frozen) return;
     this.onTouched();
     // The rig refuses off the ground on its own, so this needs no gate: the
     // authority on whether you can jump is the thing doing the jumping.
@@ -241,6 +264,7 @@ export class MoveInput {
   // loose piece under the finger, kept for the release — see the note on `pad`.
   // True when the pad took it, which is the caller's signal to stop arbitrating.
   claim(e, grabbable = null) {
+    if (this.frozen) return false;
     if (this.pad.id !== null || !this.rig.isFirstPerson || !this.inZone(e)) return false;
     this.pad.id = e.pointerId;
     this.pad.travel = 0;
@@ -321,7 +345,37 @@ export class MoveInput {
   // once when the last of them comes up — write it every frame and the pad could
   // never take over on a device that has both, and write it never and a released
   // key would leave the throttle pinned wherever it was.
-  tick() {
+  tick(dtMs = 16) {
+    // Frozen: let go of the throttle once and stay quiet. Written through
+    // `_wrote` so this releases exactly like the keyboard does rather than
+    // pinning the stick at zero every frame and fighting anything else.
+    //
+    // ...AND THEN THE SAME KEYS MEAN SOMETHING ELSE. They are still read into
+    // `_kx`/`_ky` above rather than refused at the door, because a keyboard with
+    // two tables and two listeners is the "gesture split across two detectors"
+    // trap this file was written to close: one owner, one table, and the
+    // destination decided here where the view is already known.
+    //
+    // A and D slide the lens round you, which is the pan the two-finger drag
+    // does on a phone. W and S dolly it, which is the pinch. Between them that
+    // is the whole of the camera on a machine with no second finger — and both
+    // are the same key doing the same thing it does on foot, aimed at the lens
+    // instead of at your legs.
+    if (this.frozen) {
+      if (this._wrote || this.rig.drive > 0) {
+        this._wrote = false;
+        this.rig.setMove(0, 0);
+      }
+      const p = CONFIG.player;
+      const dt = Math.min(dtMs, 100) / 1000;      // a stall must not lurch it
+      if (this._kx) this.rig.selfiePan(this._kx * p.selfiePanKey * dt);
+      // Forward is negative and forward means nearer, so the sign lands the
+      // right way round without an apology. Exponential because the zoom is a
+      // ratio: a second of W takes the same BITE out of the distance whether the
+      // lens is at arm's length or across the garden.
+      if (this._ky) this.rig.selfieZoom(Math.exp(this._ky * p.selfieZoomKey * dt));
+      return;
+    }
     if (this.pad.id !== null) return;
     if (this._kx === 0 && this._ky === 0) {
       if (!this._wrote) return;

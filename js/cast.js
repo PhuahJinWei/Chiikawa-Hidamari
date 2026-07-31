@@ -93,7 +93,16 @@ import { FISH_SPECIES } from './config.js';
 //
 // See MIDNIGHT_SLEEP.md. A character with no sleep sheet simply never lies
 // down, the same way one with no blink sheet never blinks.
-export const POSTURES = ['sit', 'fly', 'sleep'];
+// `pastime-1` is the fourth, and it is a posture by the same definition as the
+// glide: a whole different body rather than a different face. Usagi sprawled
+// across the top of a pudding and Hachiware seated with a guitar are not the
+// standing drawing wearing an expression, and hanging either on the standing
+// plane would squash it — which is the exact thing this list exists to prevent.
+//
+// NUMBERED, because a character is allowed more than one hobby. The second is
+// `pastime-2`, drawn and named the same way, and the declaration in
+// household.js is what says which prop it belongs to.
+export const POSTURES = ['sit', 'fly', 'sleep', 'pastime-1'];
 
 // `home` is only where somebody STARTS. They wander from the first moment, so
 // this is the opening frame's composition and nothing else.
@@ -142,8 +151,8 @@ export const CAST = [
     name: 'ハチワレ',
     scale: 1.00,
     home: { lat: 0.372, lon: 0.592 },
-    sheets: ['idle', 'happy', 'surprise', 'sleep'],
-    snow: ['idle', 'happy', 'surprise'],
+    sheets: ['idle', 'happy', 'surprise', 'sleep', 'pastime-1'],
+    snow: ['idle', 'happy', 'surprise', 'pastime-1'],
     // Fish. ALL of them, taken off the roster rather than listed, because what
     // Hachiware likes is fish — that was already true of the three koi and
     // writing out twelve ids would turn a characteristic into an inventory. The
@@ -159,8 +168,8 @@ export const CAST = [
     name: 'うさぎ',
     scale: 0.97,
     home: { lat: -0.059, lon: 0.748 },
-    sheets: ['idle', 'happy', 'surprise', 'sleep'],
-    snow: ['idle', 'happy', 'surprise'],
+    sheets: ['idle', 'happy', 'surprise', 'sleep', 'pastime-1'],
+    snow: ['idle', 'happy', 'surprise', 'pastime-1'],
     likes: ['kinoko1', 'kinoko2'],
   },
 ];
@@ -187,10 +196,22 @@ export const PLAYER = {
   // standing about, so most of the time you are up there you are on your feet
   // in the resting sheet, walking when your spot is towed along. See
   // GLIDE_SPEED in main.js for what it takes to leave the ground.
-  sheets: ['idle', 'fly'],
+  // `happy` is the one expression you have, and it exists because the selfie
+  // view put your own face on screen for the first time — see the swap in
+  // main.js, which wears it while somebody's hand is in yours. A PLACEHOLDER
+  // for now: the file is a copy of the idle sheet, so nothing looks wrong, and
+  // redrawing it is the whole of finishing the job.
+  // FOUR FACES TO POSE WITH, which is what a camera turned on yourself asks
+  // for that nothing else ever did. `happy` is also worn automatically while a
+  // hand is held; the other two are yours to pick — see the pose bar in main.js.
+  //
+  // PLACEHOLDERS for now: every one of these is a copy of the idle sheet, so
+  // the picker works and nothing looks broken, and redrawing them is the whole
+  // of finishing the job.
+  sheets: ['idle', 'fly', 'happy', 'delight', 'surprise'],
   // You get wrapped up too, and both postures are drawn — which matters more
   // for the player than for anybody else: yours is the only body that can be
   // gliding over a white planet, and a momonga in summer clothes mid-glide over
   // snow would be the one costume mistake permanently in shot.
-  snow: ['idle', 'fly'],
+  snow: ['idle', 'fly', 'happy', 'delight', 'surprise'],
 };

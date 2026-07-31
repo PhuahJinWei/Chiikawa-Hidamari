@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v118';
+const CACHE = 'hidamari-v137';
 
 const ASSETS = [
   './',
@@ -81,6 +81,11 @@ const ASSETS = [
   // See the note in assets.js.
   './asset/images/mushroom-1.png',
   './asset/images/mushroom-2.png',
+  // The notes over a singer — see TUNE_VARIANTS in assets.js.
+  './asset/images/effects/tune-1.webp',
+  './asset/images/effects/tune-2.webp',
+  './asset/images/effects/tune-3.webp',
+  './asset/images/effects/tune-4.webp',
   // The twelve fish, one drawing per species — see FISH_SPECIES in config.js,
   // which is the list this one has to agree with. Required like the rest: the
   // school builds a card per species before the world is shown, so a fish
@@ -135,6 +140,7 @@ const ASSETS = [
   './asset/images/icon/icon-fish-pink-ripplefin.webp',
   './asset/images/icon/icon-fish-sky-teardrop-fish.webp',
   './asset/images/icon/icon-special-chiikawa-fork.webp',
+  './asset/images/icon/icon-special-hachiware-camera.webp',
   './asset/images/icon/icon-special-hachiware-guitar.webp',
   './asset/images/icon/icon-special-hachiware-fork.webp',
   './asset/images/icon/icon-special-chiikawa-housekey.webp',
@@ -155,8 +161,20 @@ const ASSETS = [
   './asset/images/characters/usagi-happy.png',
   './asset/images/characters/usagi-surprise.png',
   './asset/images/characters/usagi-sleep.png',
+  // The hobbies — see PASTIMES in household.js. Required like every other
+  // sheet: the app awaits them all before it builds anything.
+  './asset/images/characters/hachiware-pastime-1.png',
+  './asset/images/characters/hachiware-pastime-1-snow.png',
+  './asset/images/characters/usagi-pastime-1.png',
+  './asset/images/characters/usagi-pastime-1-snow.png',
   './asset/images/characters/momonga-idle.png',
   './asset/images/characters/momonga-fly.png',
+  './asset/images/characters/momonga-happy.png',
+  './asset/images/characters/momonga-happy-snow.png',
+  './asset/images/characters/momonga-delight.png',
+  './asset/images/characters/momonga-delight-snow.png',
+  './asset/images/characters/momonga-surprise.png',
+  './asset/images/characters/momonga-surprise-snow.png',
   // The winter wardrobe — see `snow` in cast.js, which is the list this one has
   // to agree with. Required exactly as the sheets above are: a name in that
   // list with no file here is a cold offline start that never finishes loading.

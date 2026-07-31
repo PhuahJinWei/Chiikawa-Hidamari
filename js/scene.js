@@ -29,7 +29,7 @@ import {
 } from './foliage.js';
 import {
   IMG, TREE_VARIANTS, FLOWER_VARIANTS,
-  MUSHROOM_VARIANTS, SKY_DISC_ART, WORLD_SNOW,
+  MUSHROOM_VARIANTS, SKY_DISC_ART, WORLD_SNOW, TUNE_VARIANTS,
 } from './assets.js';
 import { LOOK, PHASES } from './daylight.js';
 import { PLATEAU, restoreGLSL, RESTORE_APPLY } from './light-model.js';
@@ -37,7 +37,7 @@ import { RENDER_SPAN } from './character.js';
 import {
   UP, orientBillboard, dirFromLatLon, inLake, setBuildings, inBuilding, setScenery,
   setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, growWeight,
-  lakeReach, perchAlongRay, inSolid, underRoof, keepOffSolids,
+  lakeReach, perchAlongRay, inSolid, underRoof,
 } from './sphere.js';
 import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
@@ -807,6 +807,10 @@ const FOCUS_MARK = {
   // own clearance.
   gap: 0.20,
   personGap: 0.06,
+  // ...and a little more over a perch site, because `y` is the surface somebody
+  // SITS on rather than the top of a shape. A mark at the plain gap floats where
+  // the singer's lap will be; this clears the friend the mark is inviting.
+  spotGap: 0.55,
 };
 
 const WALK_MARK = {
@@ -932,6 +936,37 @@ const _looseQ = new THREE.Quaternion();
 // straight ahead and a glancing pass sends it politely aside.
 const LOOSE_LEAD = 2.9;
 
+// HOW MUCH OF A MOVING PIECE'S CLOSING SPEED IS HANDED TO THE ONE IT RUNS INTO
+// — see _separateLoose. A feel number and emphatically not a coefficient of
+// restitution: nothing here conserves anything, because nothing here has a mass.
+//
+// Under one on purpose, and the shortfall is doing two jobs. It reads as the
+// soft knock a stuffed toy gives rather than the click of two marbles, which is
+// the register this whole floor is written in — see the topple, which is
+// authored for the same reason. And it makes a chain CONVERGE: kick the bear
+// into the teapot into the lantern and each handoff is smaller than the last, so
+// three pieces settle in a heap instead of trading a scoot back and forth until
+// the damping happens to catch them.
+const LOOSE_PASS = 0.8;
+
+// Scratch for holding two pieces apart, kept separate from the shove's own so a
+// separation running mid-loop cannot tread on the vectors the shove is using.
+const _sepAxis = new THREE.Vector3();
+const _sepTanA = new THREE.Vector3();
+const _sepTanB = new THREE.Vector3();
+const _sepQ = new THREE.Quaternion();
+// The pieces in play this frame. Refilled rather than rebuilt, for a list that
+// is asked for on every frame of every session.
+//
+// Two of them, and not as a micro-optimisation: `_looseInPlay` empties whatever
+// it is handed, so the separation holding one across its whole double loop means
+// any other caller reaching for the same array mid-pass would cut the loop's
+// list out from under it. The separation gets one to itself; the two set-down
+// helpers share the other, which is safe because neither of them nests inside
+// the other — each finishes its loop before the next is called.
+const _sepList = [];
+const _perchList = [];
+
 // Scratch for aiming the sky: where its axis points now, and the small turn
 // from there to where it should point.
 const _skyUp = new THREE.Vector3();
@@ -975,6 +1010,8 @@ const _cC = new THREE.Color();
 // state change rather than from update().
 const _sleepAt = new THREE.Vector3();
 const _sleepTan = new THREE.Vector3();
+const _tuneTan = new THREE.Vector3();
+const _tuneAt = new THREE.Vector3();
 const _sleepRight = new THREE.Vector3();
 const _sleepBasis = new THREE.Matrix4();
 // Sweeping bearings round a bed for somewhere to stand — see _bedsideSpot. Runs
@@ -3055,6 +3092,13 @@ ${shader.fragmentShader}`
     };
     this._markPerson = mkFocusMark();
     this._markThing = mkFocusMark();
+    // ...and a third, for a PLACE. The stump 「いっておいで」 would send a friend
+    // to is not a loose piece and not a person: nothing owns an anchor object to
+    // hang a mark off, only a bearing and a height. Its own mark rather than a
+    // borrowed one because the grab mark can be live at the same moment — you
+    // may be leading somebody past a stump with a lantern at your feet — and two
+    // questions sharing one mark would answer only the later one.
+    this._markSpot = mkFocusMark();
     this._fmAt = 0;
 
     this.sprites = [];
@@ -6036,6 +6080,25 @@ ${shader.fragmentShader}`
     M.lift = _fmSphere.radius + FOCUS_MARK.gap;
   }
 
+  // ...and over a PLACE — a perch site, `{dir, y}`, which is what 「いっておいで」
+  // is about. `y` is already the top of the thing (the stump's cut face, the
+  // pudding's dome), so the clearance is a plain gap rather than a measured
+  // bounding sphere: there is no body here to measure, and the number the site
+  // was built from is more honest about where the surface is than a box round
+  // whatever geometry happens to be under it.
+  //
+  // Compared by VALUE rather than by identity, because perchSite hands back a
+  // fresh object every call — an identity test would rebuild the mark's lift
+  // every frame and, worse, read as the target having changed.
+  setSpotMark(spot) {
+    const M = this._markSpot;
+    const same = !!M.target === !!spot
+      && (!spot || (M.target.y === spot.y && M.target.dir.equals(spot.dir)));
+    if (same) return;
+    M.target = spot ? { dir: spot.dir.clone(), y: spot.y } : null;
+    if (spot) M.lift = FOCUS_MARK.gap + FOCUS_MARK.spotGap;
+  }
+
   // The per-frame half: position over the target, face the camera, bob, and
   // ease the scale toward present or gone. Squarely the hand slot's arrival
   // gesture — scale rather than opacity — because the mark is paper and ink,
@@ -6049,7 +6112,7 @@ ${shader.fragmentShader}`
     const dtMs = Math.min(100, this._fmAt ? now - this._fmAt : 16);
     this._fmAt = now;
     const k = 1 - Math.exp(-dtMs / FOCUS_MARK.easeMs);
-    for (const M of [this._markPerson, this._markThing]) {
+    for (const M of [this._markPerson, this._markThing, this._markSpot]) {
       M.on += ((M.target ? 1 : 0) - M.on) * k;
       const shown = M.on > 0.004;
       if (shown !== M.mesh.visible) M.mesh.visible = shown;
@@ -6063,6 +6126,13 @@ ${shader.fragmentShader}`
           ch.headWorld(_fmPos);
           M.mesh.position.copy(_fmPos)
             .addScaledVector(ch.normal, FOCUS_MARK.personGap + bob);
+        } else if (M === this._markSpot) {
+          // A bearing and a height, which is all a perch site is. Built here
+          // rather than stored, so a mark on a spot needs nothing to exist in
+          // the scene graph to point at.
+          const sp = M.target;
+          M.mesh.position.copy(sp.dir)
+            .multiplyScalar(CONFIG.globe.radius + sp.y + M.lift + bob);
         } else {
           const l = M.target;
           M.mesh.position.copy(l.anchor.position)
@@ -7032,6 +7102,206 @@ ${shader.fragmentShader}`
   // Somebody walked. A thin passthrough so that nothing outside the scene has
   // to know whether there is any snow to walk in — see `tread` in snowfield.js,
   // which does nothing at all on a field that has not been laid.
+  // ------------------------------------------------------------ somewhere to
+  //                                                                perch on
+  //
+  // The nearest prop of a kind, with the height of the surface you would stand
+  // on top of it — everything a pastime needs to know about the thing it is
+  // about. Null when the world has none of that kind, which is the whole of how
+  // a pastime whose prop was never scattered simply never happens.
+  //
+  // ASKED OF THE SCENE because the scene is the only thing that knows where
+  // anything is, and worked out from the SAME numbers the props were built
+  // from: a stump's cut face comes off the lathe that cut it, and a pudding's
+  // top is the height the builder returned. Neither is a constant written down
+  // twice, so a resized prop moves the perch with it.
+  //
+  // `standoff` is half the prop's height — see where sprites are pushed — which
+  // is the one measurement every prop carries, so `h` comes back out of it
+  // rather than being stored a second time.
+  perchSite(type, from) {
+    let best = null;
+    let near = Infinity;
+    for (const s of this.sprites) {
+      if (s.type !== type) continue;
+      const d = from ? from.angleTo(s.normal) : 0;
+      if (d >= near) continue;
+      near = d;
+      best = s;
+    }
+    if (!best) return null;
+    const h = (best.standoff || 0) * 2;
+    // A pudding is a cylinder with a domed shoulder and the builder calls its
+    // full height the top; a stump is a lathe whose cut face sits at `tall`.
+    const y = type === 'stump' ? stumpTop(h) : h;
+    return { dir: best.normal, y, r: solidRadius(type, h) / CONFIG.globe.radius, sprite: best };
+  }
+
+  // ------------------------------------------------------------- the notes
+  //
+  // WHAT COMING OUT OF SOMEBODY LOOKS LIKE. Called every frame while a hobby
+  // with `tune` is under way — see PASTIMES — and left alone the rest of the
+  // time, when it is a hidden pool costing nothing.
+  //
+  // BUILT ONCE AND REUSED, the way the splashes and the flakes are. A note is a
+  // card that lives for a second and a half; making one per note would be a
+  // texture upload and a material compile several times a second, which is a
+  // great deal of machinery for a quaver.
+  //
+  // They rise, drift to one side, and fade — and the drift is what stops four
+  // notes reading as one note stuttering. Each takes its own bearing and its own
+  // drawing when it is launched, so no two are on the same path.
+  _tunePool() {
+    if (this.tune) return this.tune;
+    const maps = (IMG.tune || []).slice(0, TUNE_VARIANTS)
+      .filter(Boolean).map((img) => texFrom(img));
+    const notes = [];
+    if (maps.length) {
+      const w = CONFIG.household.tuneSize;
+      for (let i = 0; i < CONFIG.household.tuneCount; i++) {
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, w),
+          sceneryMaterial(maps[0]),
+        );
+        mesh.material.opacity = 0;
+        mesh.visible = false;
+        // Over the cast, because a note is in front of the singer rather than
+        // among them — and both are transparent, so nothing but a painter's
+        // order can say so.
+        mesh.renderOrder = 60;
+        this.world.add(mesh);
+        notes.push({ mesh, life: 1, at: new THREE.Vector3(), up: 0, side: 0, spin: 0 });
+      }
+    }
+    this.tune = { maps, notes, due: 0 };
+    return this.tune;
+  }
+
+  // `dir` and `y` are where the singer is standing and how high they are; the
+  // notes come off their shoulder rather than their feet.
+  tuneAt(dir, y, dtMs, camera) {
+    const pool = this._tunePool();
+    if (!pool.notes.length) return;
+    const R = CONFIG.globe.radius;
+    const w = CONFIG.household;
+    pool.due -= dtMs;
+    for (const n of pool.notes) {
+      if (n.life >= 1) {
+        // Nothing to draw. Launch a new one when one is due, so the pool cycles
+        // rather than all of them going at once.
+        if (pool.due > 0) {
+          if (n.mesh.visible) n.mesh.visible = false;
+          continue;
+        }
+        pool.due = w.tuneEveryMs * (0.7 + Math.random() * 0.6);
+        n.life = 0;
+        n.up = 0;
+        n.side = (Math.random() * 2 - 1) * w.tuneDrift;
+        n.spin = (Math.random() * 2 - 1) * 0.5;
+        n.at.copy(dir);
+        n.mesh.material.map = pool.maps[Math.floor(Math.random() * pool.maps.length)];
+        n.mesh.material.needsUpdate = true;
+        n.mesh.visible = true;
+      }
+      n.life = Math.min(1, n.life + dtMs / w.tuneMs);
+      // Up fast and then easing off, which is how something light leaves a
+      // hand. A constant climb reads as a lift rather than as a release.
+      const k = 1 - (1 - n.life) * (1 - n.life);
+      n.up = w.tuneRise * k;
+      // Placed in the world from the singer's own spot, so a singer who slides
+      // about the top of a pudding takes their notes with them.
+      _tuneTan.set(0, 1, 0).cross(n.at);
+      if (_tuneTan.lengthSq() < 1e-9) _tuneTan.set(1, 0, 0).cross(n.at);
+      _tuneTan.normalize();
+      const arc = (n.side * k) / R;
+      _tuneAt.copy(n.at).multiplyScalar(Math.cos(arc))
+        .addScaledVector(_tuneTan, Math.sin(arc)).normalize();
+      n.mesh.position.copy(_tuneAt).multiplyScalar(R + y + w.tuneLift + n.up);
+      if (camera) {
+        n.mesh.quaternion.copy(camera.quaternion);
+        // The little tumble, IN SCREEN SPACE — composed onto the billboard
+        // rather than written through it. This read `rotation.z = spin * life`
+        // for a while, and that line quietly unmade the line above it: setting
+        // one Euler axis decomposes the camera's quaternion, keeps x and y, and
+        // REPLACES z — and on a planet, the camera's own z-component encodes
+        // part of where you are standing, so the notes came out tilted by an
+        // amount that depended on your longitude. Measured at the stump: 70-odd
+        // degrees off, reading as the drawings being wrong when the drawings
+        // were upright all along.
+        n.mesh.rotateZ(n.spin * n.life);
+      }
+      // Held, then let go — a note that starts fading the instant it appears
+      // never reads as a shape at all.
+      n.mesh.material.opacity = n.life < 0.45 ? 1 : 1 - (n.life - 0.45) / 0.55;
+      if (n.life >= 1) n.mesh.visible = false;
+    }
+  }
+
+  // Quiet again. Called when the singing stops, so the last few notes are not
+  // left hanging in the air over an empty stump.
+  tuneOff() {
+    if (!this.tune) return;
+    for (const n of this.tune.notes) {
+      n.life = 1;
+      if (n.mesh.visible) n.mesh.visible = false;
+    }
+  }
+
+  // ---------------------------------------------------------- a photograph
+  //
+  // The scene as it stands, as a PNG blob.
+  //
+  // RENDERED AGAIN INTO A TARGET rather than read off the canvas, and that is
+  // not belt-and-braces. `preserveDrawingBuffer` is off — it costs something on
+  // every frame of the year to serve one button — so the drawing buffer is not
+  // guaranteed to still hold anything by the time a `toBlob` callback runs, and
+  // the failure mode is a silent black rectangle. Rendering into a target reads
+  // pixels back synchronously from a buffer this call owns, which cannot go
+  // stale, and it lets the picture be a sensible size on a phone whose canvas
+  // is whatever the screen happens to be.
+  //
+  // What it does NOT capture is the HUD, the pills or the speech bubbles: those
+  // are DOM over the top of the canvas, so a photograph comes out as the world
+  // alone. That is the right picture and it is free.
+  photo(maxW = 1080) {
+    const cam = this.camera;
+    const aspect = (Number.isFinite(cam.aspect) && cam.aspect > 0.05) ? cam.aspect : 0.65;
+    // ASKED FOR OUTRIGHT rather than capped to the canvas. This began as
+    // `min(maxW, canvas.width)`, which on a small screen handed back a 540-wide
+    // photograph — the size of the BUFFER the game happens to be drawing into,
+    // which is a fact about the device rather than about the picture. Nothing is
+    // upscaled by rendering larger: the character sheets are around a thousand
+    // pixels across and the ground paints its own detail, so a bigger frame
+    // genuinely resolves more. A photograph should be the same size wherever it
+    // was taken.
+    const w = Math.max(320, Math.round(maxW));
+    const h = Math.max(320, Math.round(w / aspect));
+    const rt = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    const r = this.renderer;
+    const had = r.getRenderTarget();
+    r.setRenderTarget(rt);
+    r.render(this.scene, cam);
+    const px = new Uint8Array(w * h * 4);
+    r.readRenderTargetPixels(rt, 0, 0, w, h, px);
+    r.setRenderTarget(had);
+    rt.dispose();
+
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(w, h);
+    // Upside down on the way out: GL counts rows from the bottom and a canvas
+    // counts them from the top.
+    for (let y = 0; y < h; y++) {
+      const src = (h - 1 - y) * w * 4;
+      img.data.set(px.subarray(src, src + w * 4), y * w * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    return new Promise((done) => cv.toBlob(done, 'image/png'));
+  }
+
   tread(key, dir) {
     this.field.tread(key, dir);
   }
@@ -8160,6 +8430,20 @@ ${shader.fragmentShader}`
       // Measured against WHICHEVER room it is in — `homeAt` answers with the
       // building or with null, which is the same wall-arc test isInside makes
       // and folds the "is it indoors at all" guard into the same lookup.
+      // THE PROPS, INDOORS AND OUT, in one call — because `inSolid` is one list
+      // and always was. The trees and stumps were registered with the scatter
+      // and the furniture appended once the rooms were built (see addSolids), so
+      // a bear fetching up against a table leg and one fetching up against a
+      // trunk are the same question asked of the same array.
+      //
+      // It used to run only outdoors, which was not a decision so much as where
+      // the line happened to fall: the outdoor fence was written when the shove
+      // was first let out of the house, and indoors kept only the wall clamp it
+      // had always had. So a piece scooting across a room passed clean through
+      // the table, the chest and the bed — every solid thing in it — and stopped
+      // only at the skirting.
+      this._fendSolids(n);
+
       const room = this.homeAt(n.dir);
       if (room) {
         const N = room.sprite.normal;
@@ -8177,27 +8461,24 @@ ${shader.fragmentShader}`
           }
         }
       } else {
-        // ...AND THE FENCE FOR A PIECE OUT ON THE GRASS, which had none because
-        // until the shove was let out of doors it could never need one. The
-        // clamp above is the room's wall, and a bear in a meadow has no wall —
-        // but it does have two edges, and both of them are places a TAP is
-        // already forbidden to put it:
+        // ...AND THE WATER, for a piece out on the grass. The clamp above is the
+        // room's wall and a bear in a meadow has no wall, but it does have a
+        // shore — and setting a piece down past one is already forbidden: on
+        // open water a tap is ぽちゃん, the pond keeps it a moment and it finds
+        // its way home (see putDownUnique), and on ice the set-down is refused
+        // outright, because a lantern left on a frozen pond is floating in open
+        // water twenty minutes later. A shin that could shove one out there
+        // would be a way round both rules.
         //
-        //   A POND. Setting a piece down on water is ぽちゃん — the pond keeps it
-        //   a moment and it finds its way home (see putDownUnique) — and on ice
-        //   the set-down is refused outright, because a lantern left on a frozen
-        //   pond is floating in open water twenty minutes later. A shin that
-        //   could shove one out there would be a way round both rules.
-        //
-        //   A TRUNK. Somewhere the shover cannot follow it, so a piece knocked
-        //   inside one can only be got back by waiting for it to go home.
+        // The trunks used to be fenced here too, and have moved up to
+        // `_fendSolids` above, which does the same job for both sides of a wall.
         //
         // Same move as the room's clamp: put it back on the legal side and drop
         // the part of its travel that was heading in, because a toy shoved at
         // something fetches up against it rather than bouncing off. Only ever
         // reached by a piece already in motion — a resting one is skipped well
         // above — so nothing standing legitimately still is ever pushed about.
-        keepOffSolids(n.dir, 0);
+        //
         // The ice is ground, and a bear scooting across a frozen pond is a
         // better joke than a fence. `isWater` is the one place that is decided.
         if (isWater(n.dir, CONFIG.player.shoreKeep)) {
@@ -8233,6 +8514,219 @@ ${shader.fragmentShader}`
       // placeLoose, which is the point.
       this._parentLoose(n);
     }
+
+    // ...and finally the pieces against EACH OTHER, once every one of them has
+    // finished moving. After the loop rather than inside it, because a pair is
+    // not a property of either half: resolving a against b while b has yet to
+    // take its own step this frame would measure the overlap against a position
+    // b is about to leave.
+    this._separateLoose();
+  }
+
+  // Push a moving piece off any prop it has scooted into, and drop the part of
+  // its travel that was heading in — the same two-part move the room's wall
+  // clamp makes, for the same reason: a toy shoved at something fetches up
+  // against it rather than bouncing off.
+  //
+  // ONE prop, not all of them. `inSolid` hands back the first it finds, and a
+  // frame's shove is a few hundredths of a unit, so a piece is only ever a hair
+  // inside one thing — there is no case here where it is deep in two at once.
+  // (There is one where ejecting from A lands inside B, which needs A and B to
+  // overlap; see auditSolids in sphere.js, which exists to tell you they do.)
+  //
+  // Asked at the FLOOR, which is where a shoved piece is: `place()` does not
+  // re-apply the perch lift that putDownUnique added, so anything knocked off a
+  // table is already back at ground level by the time this runs, and a solid
+  // with a `top` is something it must go round rather than something it is on.
+  _fendSolids(n) {
+    const hit = inSolid(n.dir, 0, 0);
+    if (!hit) return;
+    _looseOut.copy(n.dir).addScaledVector(hit.dir, -n.dir.dot(hit.dir));
+    if (_looseOut.lengthSq() < 1e-12) {
+      // Dead on its centre, so no outward bearing to compute — and the one
+      // place none is needed, since every direction leads out of a circle's
+      // middle. The same fallback keepOffSolids and keepOutside both carry.
+      localFrame(hit.dir, _looseE, _looseN);
+      _looseOut.copy(_looseN);
+    }
+    _looseOut.normalize();
+    // Never exactly ON the rim: `inSolid` is a strict inequality, and a piece
+    // left on the line reads as inside to the next frame's test. Same epsilon
+    // the ejections in sphere.js use, and for the same reason.
+    const edge = hit.r + 1e-5;
+    n.dir.copy(hit.dir).multiplyScalar(Math.cos(edge))
+      .addScaledVector(_looseOut, Math.sin(edge)).normalize();
+    const into = n.vel.dot(_looseOut);
+    if (into < 0) n.vel.addScaledVector(_looseOut, -into);
+  }
+
+  // WHICH LOOSE PIECES ARE IN PLAY for the two rules that treat them as objects
+  // in their own right rather than as things underfoot — the separation below
+  // and the perch-occupancy test. Visible, and not standing propped against a
+  // wall, which are the same two gates the shove itself opens with.
+  _looseInPlay(out) {
+    out.length = 0;
+    for (const n of this.loose) {
+      if (!n.anchor.visible || (n.body && !n.body.visible)) continue;
+      if (n.propAt !== null && n.homeLean) continue;
+      out.push(n);
+    }
+    return out;
+  }
+
+  // TWO THINGS MAY NOT BE IN THE SAME PLACE, which until now they cheerfully
+  // were: nothing anywhere tested a loose piece against another one, so a bear
+  // and a teapot set down on the same patch stood inside each other, and a
+  // shoved one slid straight through whatever it met.
+  //
+  // Discs on a sphere, like every other collision in this world — no solver, no
+  // iteration, one pass over a list that is a handful long. The pair separates
+  // along the great circle between them, each giving up half the overlap, which
+  // is the only split that does not have to decide which of them was there
+  // first.
+  //
+  // HOW BIG IS A PIECE. Half its own `reach`, so a pair settles exactly `reach`
+  // apart — the same number that decides whether your feet are touching it. That
+  // is deliberate rather than convenient: `reach` is already this file's
+  // definition of "close enough to be in contact with", and giving contact
+  // between two toys a second, differently-tuned number is how the two drift.
+  //
+  // THE MOMENTUM HANDOFF is what makes it read as a knock rather than as two
+  // cards refusing to overlap. Whatever closing speed the pair has along that
+  // line is taken off the one behind and given to the one in front, less
+  // LOOSE_PASS — so running the bear into the teapot sends the teapot off and
+  // pulls the bear up short, and a chain of three settles instead of ringing.
+  //
+  // BOTH AT HOME IS LEFT ALONE, and that exception is load-bearing. The authored
+  // arrangements put pieces deliberately close — a teapot beside a book on the
+  // same table — and those spots are measured. A rule that shoved them apart on
+  // the first frame would quietly rearrange every room in the game at boot. Only
+  // once a player has actually moved one (`atHome` goes false at the first shove
+  // and at every set-down) does the pair become theirs to resolve.
+  _separateLoose() {
+    const list = this._looseInPlay(_sepList);
+    if (list.length < 2) return;
+    const R = CONFIG.globe.radius;
+
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        if (a.atHome && b.atHome) continue;
+        const want = (a.reach + b.reach) * 0.5;
+        const gap = a.dir.angleTo(b.dir) * R;
+        if (gap >= want) continue;
+
+        // The great circle through the pair. Its normal is the axis both of
+        // them turn about — one forward along it, one back — so a single axis
+        // does the whole separation and keeps them on the line they were on.
+        _sepAxis.crossVectors(a.dir, b.dir);
+        if (_sepAxis.lengthSq() < 1e-12) {
+          // Stacked exactly, which has no line between them. Any bearing will
+          // do, and the pair only has to start disagreeing for the next frame
+          // to have one.
+          localFrame(a.dir, _looseE, _looseN);
+          _sepAxis.crossVectors(a.dir, _looseN);
+          if (_sepAxis.lengthSq() < 1e-12) continue;
+        }
+        _sepAxis.normalize();
+
+        // Which way "toward the other one" points, at each of their positions.
+        // Rotating about the axis is what moves them, so the direction of that
+        // motion is the axis crossed with where they stand — unit already, both
+        // being unit and perpendicular.
+        _sepTanA.crossVectors(_sepAxis, a.dir);
+        _sepTanB.crossVectors(_sepAxis, b.dir);
+
+        // The handoff, taken BEFORE they are moved apart, so it is measured on
+        // the approach that actually happened rather than on the correction.
+        const closing = a.vel.dot(_sepTanA) - b.vel.dot(_sepTanB);
+        if (closing > 0) {
+          const pass = closing * LOOSE_PASS;
+          a.vel.addScaledVector(_sepTanA, -pass);
+          b.vel.addScaledVector(_sepTanB, pass);
+        }
+
+        // Half the overlap each, as an arc. Their velocities turn with them so a
+        // scoot stays tangent, exactly as the travel step above does it.
+        const half = ((want - gap) * 0.5) / R;
+        _sepQ.setFromAxisAngle(_sepAxis, -half);
+        a.dir.applyQuaternion(_sepQ).normalize();
+        a.vel.applyQuaternion(_sepQ);
+        _sepQ.setFromAxisAngle(_sepAxis, half);
+        b.dir.applyQuaternion(_sepQ).normalize();
+        b.vel.applyQuaternion(_sepQ);
+
+        // Moved, so they have to be drawn where they now are — and either may
+        // have crossed a threshold doing it.
+        a.place();
+        b.place();
+        this._parentLoose(a);
+        this._parentLoose(b);
+      }
+    }
+  }
+
+  // A spot moved off any OTHER loose piece it landed on, to just clear of it.
+  // keepOffSolids's twin for the things that are not registered as solids —
+  // which is all of them, because a bear is something you walk through rather
+  // than round, and putting it in SOLIDS would make a knee-high toy a wall.
+  //
+  // That tier decision is right and it left a gap: passable to a BODY was being
+  // read as passable to everything, so nothing stopped one piece being set down
+  // inside another. This is the narrow rule that closes it — pieces exclude
+  // pieces, and go on excluding nobody else.
+  //
+  // One pass, like its twin, and the same reasoning applies: the spot moves by
+  // at most a piece's width, and the pieces it might land on next are a handful
+  // spread over a room. The separation in the shove is what catches anything
+  // that does slip through, on the next frame a shin comes near it.
+  // NO MARGIN ARGUMENT, deliberately. The distance two pieces settle at is
+  // decided once, in _separateLoose, and this has to land on exactly that
+  // number: a set-down that left them a hair closer than the shove wants would
+  // be shoved apart by the first frame a shin came near, so putting a bear down
+  // beside a teapot would make the teapot twitch.
+  keepOffLoose(spot, except) {
+    const R = CONFIG.globe.radius;
+    for (const n of this._looseInPlay(_perchList)) {
+      if (n === except) continue;
+      // Half of each piece's own reach, the same size the separation gives
+      // them — see the note there.
+      const want = ((n.reach + (except ? except.reach : n.reach)) * 0.5) / R;
+      const along = Math.min(1, Math.max(-1, spot.dot(n.dir)));
+      if (Math.acos(along) >= want) continue;
+      _looseOut.copy(spot).addScaledVector(n.dir, -spot.dot(n.dir));
+      if (_looseOut.lengthSq() < 1e-12) {
+        // Set down exactly on it: any bearing away will do.
+        localFrame(n.dir, _looseE, _looseN);
+        _looseOut.copy(_looseN);
+      }
+      _looseOut.normalize();
+      spot.copy(n.dir).multiplyScalar(Math.cos(want))
+        .addScaledVector(_looseOut, Math.sin(want)).normalize();
+    }
+    return spot;
+  }
+
+  // WHETHER SOMETHING IS ALREADY STANDING ON THIS PERCH, or null.
+  //
+  // Asked by the set-down, so that putting a second toy on an occupied stump is
+  // the little disaster it ought to be rather than two drawings in the same
+  // place — see putDownUnique, which sends the newcomer over the edge with the
+  // topple that already exists for a piece set down too near the rim.
+  //
+  // WITHIN THE PERCH'S FOOTPRINT IS ENOUGH, and it is enough only because of the
+  // fence above. A piece at floor level can no longer be inside a solid's
+  // footprint at all — `_fendSolids` ejects it — so anything found in there is
+  // something standing on top, and no height has to be tracked to know it. The
+  // two rules hold each other up.
+  looseOnPerch(perch, except) {
+    const edge = perch.topR !== undefined ? perch.topR : perch.r;
+    for (const n of this._looseInPlay(_perchList)) {
+      if (n === except) continue;
+      if (n.dir.dot(perch.dir) > Math.cos(edge)) return n;
+    }
+    return null;
   }
 
   // A trunk stops being drawn while you are standing in it.
@@ -8673,6 +9167,7 @@ ${shader.fragmentShader}`
     const away = state === 'away';
     loose.anchor.visible = !away;
     if (loose.body) loose.body.visible = state !== 'carried';
+    if (loose.shadow) loose.shadow.visible = state === 'world';
     this._relight();
   }
 
@@ -8894,7 +9389,7 @@ ${shader.fragmentShader}`
   // `landed` is the rig's own answer to "are you stood on something or are you
   // flying" — see the note at the hand, which is the one thing in here that
   // needs to know and cannot work it out for itself.
-  update(t, anchor, landed) {
+  update(t, anchor, landed, shooting = false) {
     const g = CONFIG.globe;
     this.world.position.y = Math.sin(t / g.bobPeriod * Math.PI * 2) * g.bob;
 
@@ -9196,7 +9691,15 @@ ${shader.fragmentShader}`
     // as you were up there. `landed` is isFirstPerson, which tests `alt` alone
     // — precisely because the hop deliberately never touches it. See the note
     // on hopHeight in config.js, which says so in as many words.
-    this.hand.update(t, !landed);
+    // ...AND WHEN THE LENS IS TURNED ROUND, for the same reason said a second
+    // way. The hand is parented to the CAMERA, so it rides wherever the camera
+    // goes — and in the selfie the camera is three units out in front of you.
+    // The kettle then floats in the bottom corner of a photograph of yourself,
+    // held by nobody, at a spot where your actual hands are plainly visible and
+    // plainly empty. `isFirstPerson` cannot catch this on its own: the selfie is
+    // a render transform and deliberately never moves the rig, which is what
+    // keeps every other rule honest and is exactly why this one has to be told.
+    this.hand.update(t, !landed || !!shooting);
 
     // Plucked grass growing back, and the clock plucks are dated by.
     this._tuftNow = t;

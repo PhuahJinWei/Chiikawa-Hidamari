@@ -75,9 +75,9 @@ import { activePhase } from './daylight.js';
 // note there — which matters more here than anywhere else, because a walk home
 // takes the better part of a minute and a flag that flickers once at the edge
 // of a front sends somebody out of their own front door and straight back in.
-import { isSheltering, snowPlayable, rainbowOut } from './weather.js';
+import { isSheltering, snowPlayable, rainbowOut, pondsFrozen } from './weather.js';
 import {
-  keepOffSolids, inBuilding, inLake, lakeReach, dirFromLatLon, underRoof,
+  keepOffSolids, inBuilding, inLake, lakeReach, dirFromLatLon, underRoof, inSolid,
 } from './sphere.js';
 
 // The one hour nobody is up for.
@@ -93,6 +93,12 @@ const GATHER_DRY = 0.30;
 const SNOWMAN_APART = 2.6;
 
 const _spot = new THREE.Vector3();
+const _leadFwd = new THREE.Vector3();
+const _leadRight = new THREE.Vector3();
+const _leadWant = new THREE.Vector3();
+const _leadNext = new THREE.Vector3();
+const _leadAxis = new THREE.Vector3();
+const _leadTan = new THREE.Vector3();
 const _tan = new THREE.Vector3();
 const _cross = new THREE.Vector3();
 
@@ -136,6 +142,140 @@ function between(a, b) { return a + Math.random() * (b - a); }
 // anybody does when nothing more pressing is going on. Pastimes belong beside it
 // there, each with its own clock, which is why the tier is a list rather than a
 // single fallback.
+// --------------------------------------------------------------- THE HOBBIES
+//
+// What somebody does when nothing more pressing is going on, DECLARED rather
+// than written.
+//
+// Every one of these is the same shape as a visit — pick a moment, walk
+// somewhere, do something there, leave, wait a while — and that skeleton took
+// three sessions of measurement to get right: the stall re-planning, the
+// give-up deadline, the berth push at the destination, the politeness
+// interplay. So no hobby brings its own tick. One mode below walks all of them,
+// and an entry here supplies only what differs.
+//
+//   who      whose hobby it is
+//   site     the prop it happens on, by scatter type — a world with none of
+//            that prop simply never offers the hobby
+//   bucket   what they say while they are at it, if their bank has any
+//   spin     radians a second they slide round the top of it, 0 to sit still
+//   sink     how far to lower them onto it, as a fraction of their drawn height
+//   stay     how long it lasts
+//   gap      how long before they feel like it again
+//
+// `sink` EXISTS BECAUSE A SEATED DRAWING HAS TWO BOTTOMS. Every other card in
+// this world is measured to its lowest drawn pixel, because for somebody stood
+// up that pixel IS their feet. Somebody SITTING has feet that dangle below the
+// thing they are sitting on, so anchoring the lowest pixel puts their seat a
+// leg's length into the air — measured, and it reads exactly as floating.
+// Lowering by a fraction of their own height puts the seat on the wood and lets
+// the feet hang in front of it, which is what the drawings show. It is the same
+// correction `interior.sitSink` makes for an undrawn sit, one step more precise
+// because here the artist has decided where the seat is.
+//
+// THE DURATIONS ARE NOT INTERCHANGEABLE. Usagi's is short because a slide is a
+// burst — past about forty seconds the circling becomes a loop you can see —
+// and Hachiware's is longer because a song is longer, and a seated character
+// with notes over their head is something you can stand and watch. The gaps are
+// minutes, deliberately: stumbling on Hachiware playing to an empty meadow
+// should read as a find rather than as a scheduled event, and at this cadence
+// you will see about one a session without going looking.
+const PASTIMES = [
+  {
+    key: 'pudding',
+    who: 'usagi',
+    site: 'puddingcup',
+    bucket: 'play',
+    // Doubled from 0.85 on request. At the pudding's slide radius this is about
+    // 1.1 units a second — faster than his own walk, which is the point: a
+    // slide should look barely in control, and at the old pace it read as a
+    // stroll in a circle.
+    spin: 1.7,
+    // Sprawled across the dome rather than perched on it, so he settles further.
+    sink: 0.16,
+    stayMin: 20000,
+    stayMax: 40000,
+    gapMin: 5 * 60 * 1000,
+    gapMax: 9 * 60 * 1000,
+  },
+  {
+    key: 'song',
+    who: 'hachiware',
+    site: 'stump',
+    bucket: 'sing',
+    spin: 0,
+    // ...and the notes over his head. Usagi has none: he is not singing, he is
+    // shouting, and a quaver over that would be describing the wrong noise.
+    tune: true,
+    // Sat upright with his legs over the front of the cut face.
+    sink: 0.10,
+    stayMin: 35000,
+    stayMax: 60000,
+    gapMin: 5 * 60 * 1000,
+    gapMax: 9 * 60 * 1000,
+  },
+];
+
+const PASTIME_FOR = {};
+for (const p of PASTIMES) PASTIME_FOR[p.who] = p;
+
+// ------------------------------------------------------------ BEING LED
+//
+// How far to one side of you a friend walks while you are holding their hand,
+// in world units, and how much faster than you they may move to keep up.
+//
+// BESIDE AND NOT BEHIND, which is both the nicer picture and the practical
+// answer to the one thing that could ruin this: a companion directly in front
+// of the camera is a companion you spend the whole walk looking past. At a
+// right angle to where you are looking they are at the edge of frame until you
+// turn your head, which is exactly where somebody you are walking with should
+// be.
+const LEAD_SIDE = 1.35;
+// HOW NEAR THEIR OWN HOBBY the 「いっておいで」 offer appears, in world units,
+// while you are leading them — see canSendToPlay, and the pill in main.js.
+//
+// AN OFFER AND NOT A TRIGGER, which is a design ruling rather than a repair.
+// The first build had them tear their hand away the moment they came in range,
+// and it read wrong for the reason the user named: a pastime is a RARE event,
+// and one that fires itself off mere proximity is a proximity effect, not an
+// occasion. Walking a friend to the thing they love and then telling them "go
+// on" is the player's moment, and a button is what hands it to them.
+const LEAD_LURE = 4.0;
+
+// ...and BEHIND, for the moment the side is refused. A doorway is 1.9 across
+// and two abreast do not fit, so they tuck in, follow you through, and come
+// back to your side when there is room. Slightly nearer than the side spot,
+// because somebody following you closely is following you.
+const LEAD_BACK = 1.15;
+// They are allowed to outpace you while catching up — a leash that could only
+// match your speed can never close a gap it has once opened, and every corner
+// opens one.
+const LEAD_CATCHUP = 1.45;
+// ...and NO NEARER TO YOU THAN THIS, ever, which is the fix for a bug with a
+// screenshot: a friend led through a turn could end up under the camera, and a
+// camera straight over a card's centre opens the billboard's lie-down blend —
+// the far-view machinery — so they were seen lying flat on the grass at your
+// feet. The tow now treats a bubble round you the way it treats a tree: steps
+// may leave it if they somehow start inside, and may never dive deeper in.
+// 0.8 keeps the camera's angle onto their centre comfortably below the blend's
+// 0.86 threshold at every eye height this game has.
+const LEAD_CLEAR = 0.8;
+// How far off the straight line to swing when a step is refused, in radians of
+// bearing — nearest first, alternating sides. Wider than the cast's own detour
+// needs to be, because this one has to make it round a house wall while keeping
+// up with somebody who is still walking.
+const LEAD_SWING = [0, 0.55, -0.55, 1.1, -1.1, 1.7, -1.7, 2.3, -2.3];
+
+// How near the perch they walk before climbing onto it, in world units. Far
+// enough out that the walk is not fighting the prop's own berth, near enough
+// that the hop up reads as one movement rather than as a teleport.
+const PASTIME_STANDOFF = 1.5;
+
+// How often somebody at their hobby says something, and the spread on it. Well
+// clear of the ambient chatter's own gap, because this is on top of it.
+const PASTIME_SAY_MIN = 5000;
+const PASTIME_SAY_MAX = 9000;
+
 const MODES = [
   {
     // Everybody, every night, whoever is watching — see MIDNIGHT_SLEEP.md.
@@ -155,6 +295,18 @@ const MODES = [
     exit: (hh, bot, s, t) => hh._shelterExit(bot, s, t),
   },
   {
+    // BEING LED BY THE HAND. Below the weather and the hour, above everything
+    // the cast decide for themselves — which is the whole ruling in one place:
+    // your choice outranks their own plans, and the sky outranks you. It starts
+    // raining, they let go and run for the door, and that is not a rule anybody
+    // wrote here.
+    key: 'held',
+    wants: (hh, bot) => hh.hand === bot,
+    enter: (hh, bot, s, t) => hh._heldEnter(bot, s, t),
+    tick: (hh, bot, s, t, w) => hh._heldTick(bot, s, t, w),
+    exit: (hh, bot, s, t) => hh._heldExit(bot, s, t),
+  },
+  {
     // Out into the snow, or out to look at a rainbow. `snowDone` is how one
     // character bows out of an occasion without ending it for the others.
     key: 'gather',
@@ -162,6 +314,22 @@ const MODES = [
     enter: (hh, bot, s, t) => hh._gatherEnter(bot, s, t),
     tick: (hh, bot, s, t) => hh._gatherTick(bot, s, t),
     exit: (hh, bot, s, t) => hh._gatherExit(bot, s, t),
+  },
+  {
+    // A HOBBY — see PASTIMES. Above the visit and below everything else, which
+    // is what "idle tier" means: it is something to do when nothing is
+    // happening, and the first thing dropped when something is.
+    //
+    // That placement is the whole of its interruption handling. Rain outranks
+    // it, so a shower ends the song and Hachiware runs for the door; midnight
+    // outranks it, so he stops and goes to bed; the snow gathering outranks it,
+    // so he puts the guitar down and joins in. None of those is written
+    // anywhere — they are three rows of a sorted list.
+    key: 'pastime',
+    wants: (hh, bot, s, w) => hh._wantsPastime(bot, s, w),
+    enter: (hh, bot, s, t) => hh._pastimeEnter(bot, s, t),
+    tick: (hh, bot, s, t, w) => hh._pastimeTick(bot, s, t, w),
+    exit: (hh, bot, s, t) => hh._pastimeExit(bot, s, t),
   },
   {
     // Ordinary life: the clock toward the next visit, the walk, the stay, the
@@ -182,6 +350,18 @@ export class Household {
   constructor({ globe, bots }) {
     this.globe = globe;
     this.bots = bots;
+    // WHOSE HAND YOU ARE HOLDING, or null. One at a time: you have two hands
+    // and one of them is doing the leading, which is also the only reading that
+    // keeps the walk legible.
+    this.hand = null;
+    // ...and where you are, which being led is the only thing in here that
+    // needs. Set by main.js beside `social`.
+    this.rig = null;
+    // WHO SPEAKS FOR THE CAST, set by main.js once social.js exists — a hobby
+    // is the only thing in here that says anything out loud, and it asks rather
+    // than reaching for a bubble itself. Null until wired, and every use is
+    // guarded, so a household without one is simply a quiet one.
+    this.social = null;
 
     // The places somebody can go home to, taken from the same registration the
     // walls themselves use — so the door they thread is the door that is
@@ -1429,7 +1609,7 @@ export class Household {
     // finger thrashing the time scrubber or the weather picker harmless: nothing
     // is staged, there is no transition state, and the answer to "what should
     // this character be doing" is recomputed from the world each frame.
-    const world = { bedtime, wet, playing, indoors };
+    const world = { bedtime, wet, playing, indoors, tMs, dtMs };
     for (const bot of this.bots) {
       const s = this.state.get(bot);
       if (!s.place) continue;
@@ -1445,6 +1625,511 @@ export class Household {
 
     this._snowman(tMs, playing);
     this._windows(dtMs);
+  }
+
+  // ---------------------------------------------------------- being led
+  //
+  // TAKEN AND GIVEN BACK by main.js, which is where a press on a pill lands.
+  // The mode does the rest, so nothing outside has to know what being led
+  // involves — and letting go is one call from anywhere, which the glide and
+  // the doorway both use.
+  takeHand(bot) {
+    if (!bot || this.hand === bot) return false;
+    this.hand = bot;
+    return true;
+  }
+
+  letGo() {
+    if (!this.hand) return false;
+    this.hand = null;
+    return true;
+  }
+
+  get handHeld() { return this.hand; }
+
+  // MID-PERFORMANCE, and so not to be interrupted — up on the pudding or the
+  // stump, sliding or singing. Asked by the focus and the taps in main.js.
+  //
+  // THE WALK THERE IS DELIBERATELY NOT INCLUDED. Stopping somebody on their way
+  // to the pudding to say hello is a nice thing that happens between friends,
+  // and it costs nothing: the cooldown is written on the way OUT of the mode, so
+  // an interrupted approach simply tries again later. What must not be
+  // interrupted is the thing itself — and the hand in particular, since `held`
+  // outranks `pastime`, so taking a perched singer's hand would pull them off
+  // the stump into a tow that assumes a standing body.
+  //
+  // `null` rather than false when they are free, so this reads at the call site
+  // like every other question about somebody here.
+  // A PLAIN BOOLEAN, not the pastime itself. Returning `s.pastime` was the
+  // obvious thing and it makes the answer depend on a field the question is not
+  // about: every caller asks "may I interrupt this person", none wants to know
+  // WHICH hobby, and a state whose `pastime` had not been written would answer
+  // "go ahead" to a question it had really said no to.
+  atPlay(bot) {
+    const s = this.state.get(bot);
+    // `busy` is the whole of being at it — the mode has three steps and the
+    // other two are the walk there and the frame it ends on.
+    return !!s && s.mode === 'pastime' && s.step === 'busy';
+  }
+
+  // ...and the same question asked of a Character, which is what the focus and
+  // the tap have in their hands. Costs a walk of three, and saves every caller
+  // keeping its own character-to-bot map.
+  playingAt(ch) {
+    for (const bot of this.bots) if (bot.ch === ch) return this.atPlay(bot);
+    return false;
+  }
+
+  // WHETHER 「いっておいで」 HAS ANYTHING TO SAY — you are leading somebody, they
+  // have a hobby with a drawing, and the thing it happens on is close by.
+  // Asked every frame by the pill builder, so it takes no side effects.
+  //
+  // Hands back the SITE as well as the pastime now, because the offer and the
+  // mark over the thing being offered have to be the same answer. Two callers
+  // each finding their own site would be two chances to disagree about which
+  // stump — and `perchSite` picks the nearest to a moving character, so they
+  // genuinely could.
+  canSendToPlay() {
+    const bot = this.hand;
+    if (!bot || !bot.ch.pastimeTex) return null;
+    const p = PASTIME_FOR[bot.spec.key];
+    if (!p) return null;
+    const site = this.globe.perchSite(p.site, bot.ch.dir);
+    if (!site) return null;
+    const near = bot.ch.dir.angleTo(site.dir) * CONFIG.globe.radius;
+    return near < LEAD_LURE ? { pastime: p, site } : null;
+  }
+
+  // ...and the press itself: let go, clear their cooldown, and off they run.
+  // The cooldown clears because being walked here by a friend is not a turn to
+  // be rationed — the rarity the gap protects is the SELF-started kind.
+  sendToPlay(tMs) {
+    const bot = this.hand;
+    const offer = this.canSendToPlay();
+    if (!bot || !offer) return false;
+    const p = offer.pastime;
+    const s = this.state.get(bot);
+    s.pastimeAt = 0;
+    this.letGo();
+    if (this.social && bot.dlg.has(p.bucket) && this.social.canChatter(bot.ch)) {
+      this.social.speak(bot, p.bucket, tMs);
+    }
+    return true;
+  }
+
+  // DRIVEN RATHER THAN WALKED, which is the whole of how this stays in step
+  // with you. `driven` is the flag the player's own body wears — "somebody else
+  // decides where this stands" — and setting it is what stops the wander from
+  // planning strolls that would fight the leash on the same frame.
+  _heldEnter(bot, s, tMs) {
+    const ch = bot.ch;
+    s.step = 'led';
+    ch.driven = true;
+    ch.errand = null;
+    ch.walking = false;
+    s.route = null;
+    // Whichever side they are already standing is the side they walk on, so
+    // taking a hand does not begin with them crossing in front of you.
+    s.leadSide = this._sideOf(ch.dir) >= 0 ? 1 : -1;
+  }
+
+  _heldTick(bot, s, tMs, world) {
+    const ch = bot.ch;
+    const rig = this.rig;
+    if (!rig) return;
+    const R = CONFIG.globe.radius;
+    const dt = world.dtMs;
+
+    // ...UNLESS THEY SEE THEIR OWN PUDDING.
+    //
+    // Leading somebody to the thing they love should not end with a menu. It
+    // ends with them letting go of your hand and running the last stretch,
+    // which is both the better picture and the honest one: you did the walking,
+    // and the last few steps are theirs.
+    //
+    // They drop the hand THEMSELVES — `letGo` here rather than a flag for
+    // main.js to notice — and the cooldown is cleared with it, because being
+    // walked to your own stump is not an occasion to be told you have had your
+    // turn for the next five minutes. The dispatcher does the rest: `held`
+    // stops wanting them on the very next frame and `pastime` is the next mode
+    // down that does.
+    // Where you are looking, flattened onto the ground you are standing on.
+    // Taken from the camera rather than from the stick, so a companion settles
+    // on the side of your VIEW — which is what "not in the way" means — and
+    // stays put while you stand still and turn on the spot.
+    this._leadFrame(rig.anchor);
+    // Their side first, then tucked in behind when the side has no room: a
+    // doorway is 1.9 across and two abreast do not fit through it.
+    const side = this._leadSpot(rig.anchor, _leadRight, s.leadSide * LEAD_SIDE);
+    let want = side;
+    if (!this._canStand(want)) {
+      want = this._leadSpot(rig.anchor, _leadFwd, -LEAD_BACK);
+      // A back spot refused as well is left AS the target anyway. Walking
+      // toward an illegal spot along legal ground is fine — the steps below are
+      // each checked, so they simply get as near as the world allows and stand.
+      // What stood here before was "fall back to the player's own anchor",
+      // which was the lying-flat bug: it marched them underneath the camera.
+    }
+
+    const gap = ch.dir.angleTo(want) * R;
+    const speed = CONFIG.player.walkSpeed * LEAD_CATCHUP;
+    const step = (speed / R) * (dt / 1000);
+    if (gap < 0.06) { ch.standAt(ch.dir, dt, { walking: false }); return; }
+
+    // ...AND ROUND WHATEVER IS IN THE WAY.
+    //
+    // The step is checked and not only the destination — a legal spot on the far
+    // side of a wall is still a walk through the wall — and the first version
+    // stopped there, refusing the step and returning. That is a companion who
+    // walks up to the first obstacle between you and stands at it for the rest
+    // of the walk: measured, closing from 6.69 units to 4.82 and then never
+    // moving again, because the player had been standing on the house doorstep
+    // and the straight line crossed the wall.
+    //
+    // So a refused step is swung aside rather than abandoned, nearest first and
+    // alternating, exactly as the cast's own detour does it — keeping a
+    // constant distance from something IS going around it, and the wide swings
+    // are what let them follow you round a corner rather than through it.
+    //
+    // Nothing is remembered between frames. The swing is re-chosen every step
+    // from where they have got to, so an obstacle that stops mattering stops
+    // being avoided on the very next frame.
+    let moved = false;
+    const gapToYou = ch.dir.angleTo(rig.anchor) * R;
+    for (const off of LEAD_SWING) {
+      if (!this._leadToward(ch.dir, want, _leadTan)) break;
+      if (off) _leadTan.applyAxisAngle(ch.dir, off).normalize();
+      _leadNext.copy(ch.dir).multiplyScalar(Math.cos(step))
+        .addScaledVector(_leadTan, Math.sin(step)).normalize();
+      // NEVER DEEPER INTO YOUR SPACE — see LEAD_CLEAR. Nearer than the bubble
+      // AND nearer than they already are is refused, so a friend who somehow
+      // starts inside it (you took their hand at arm's length) can walk out,
+      // and one outside it can never be steered through you by a turning side
+      // target. The swing then routes round you like round a tree.
+      const nextGap = _leadNext.angleTo(rig.anchor) * R;
+      if (nextGap < LEAD_CLEAR && nextGap < gapToYou - 1e-4) continue;
+      if (!this._canStand(_leadNext)) continue;
+      // Walking only when they are actually covering ground, so somebody
+      // keeping pace beside a standing player stands rather than jogs on the
+      // spot.
+      ch.standAt(_leadNext, dt, { walking: gap > 0.12 });
+      moved = true;
+      break;
+    }
+    // Boxed in on every bearing — rare, and the honest answer is to wait a
+    // frame. They are being led, so the thing that will free them is you
+    // moving, which is exactly what happens next.
+    if (!moved) ch.standAt(ch.dir, dt, { walking: false });
+  }
+
+  // LETTING GO IS PART OF LETTING GO, whoever decided it.
+  //
+  // The exit runs for two quite different reasons — you pressed the pill, or
+  // the sky took them — and only the first arrives with the hand already
+  // dropped. Without this the second left the household still believing it was
+  // being led: they ran for the door, waited out the shower, and then snapped
+  // back to your side the moment it cleared, having never been released. And
+  // the leash on your own walk went with it, so you stayed capped to a leading
+  // pace with nobody to lead.
+  //
+  // Idempotent, so the ordinary press — which drops the hand and lets the
+  // dispatcher notice — costs nothing here.
+  _heldExit(bot, s) {
+    const ch = bot.ch;
+    this.letGo();
+    ch.driven = false;
+    ch.walking = false;
+    ch.errand = null;
+    // A beat before they set off on their own again, so letting go reads as a
+    // parting rather than as somebody walking off mid-sentence.
+    ch.hold('rest', (this.rig ? 0 : 0) + performance.now() + 900);
+  }
+
+  // The local frame you are standing in: where you are looking, and your right.
+  // THE WAY YOU ARE FACING, asked of the RIG rather than of the camera.
+  //
+  // It read the camera's forward, which is the same thing right up until the
+  // selfie view swings the lens round to look back at you — and then it is
+  // exactly backwards. A friend led by the hand would swap from your left to
+  // your right the instant you turned the camera round, and back again when you
+  // turned it off, which is the sort of thing that looks like a physics bug
+  // rather than a camera one. The rig's own heading is what "beside you" was
+  // always about; the lens merely used to agree with it.
+  _leadFrame(anchor) {
+    if (this.rig && this.rig.facing) this.rig.facing(_leadFwd);
+    else _leadFwd.set(0, 0, -1).applyQuaternion(this.globe.camera.quaternion);
+    _leadFwd.addScaledVector(anchor, -_leadFwd.dot(anchor));
+    if (_leadFwd.lengthSq() < 1e-9) {
+      _leadFwd.set(0, 1, 0).cross(anchor);
+      if (_leadFwd.lengthSq() < 1e-9) _leadFwd.set(1, 0, 0).cross(anchor);
+    }
+    _leadFwd.normalize();
+    _leadRight.crossVectors(anchor, _leadFwd).normalize();
+  }
+
+  // The tangent at `from` pointing toward `to`. False when the two coincide and
+  // there is no direction to give.
+  _leadToward(from, to, out) {
+    out.copy(to).addScaledVector(from, -to.dot(from));
+    if (out.lengthSq() < 1e-12) return false;
+    out.normalize();
+    return true;
+  }
+
+  // A spot `units` along `tangent` from where you stand.
+  _leadSpot(anchor, tangent, units) {
+    const arc = units / CONFIG.globe.radius;
+    return _leadWant.copy(anchor).multiplyScalar(Math.cos(arc))
+      .addScaledVector(tangent, Math.sin(arc)).normalize();
+  }
+
+  // Which side of your view somebody is on: positive is your right.
+  _sideOf(dir) {
+    const rig = this.rig;
+    if (!rig) return 1;
+    this._leadFrame(rig.anchor);
+    return dir.dot(_leadRight);
+  }
+
+  // MAY A BODY BE HERE — the same three questions the cast's own pathing asks,
+  // in one place, because being led is the one walk that does not go through
+  // `_pickTarget` and so gets none of its fencing for free.
+  _canStand(dir) {
+    const keep = CONFIG.wander.wallKeep;
+    if (inSolid(dir, keep)) return false;
+    if (inBuilding(dir, keep)) return false;
+    if (!pondsFrozen()
+      && CONFIG.lakes.some((l) => inLake(dir, l, CONFIG.wander.waterKeep))) return false;
+    return true;
+  }
+
+  // ------------------------------------------------------------- the hobbies
+
+  // Whether they feel like it — and, once they are at it, whether they are
+  // still at it. Both answers come from here, because `wants` is asked every
+  // frame and a mode that stopped wanting to run mid-song would be exited by
+  // the dispatcher on the spot.
+  //
+  // `done` is set by the tick when the stay runs out, which is how a hobby ends
+  // itself: on the next frame this returns false, the dispatcher exits, and the
+  // cooldown is written by the exit. Nothing has to transition anybody.
+  _wantsPastime(bot, s, world) {
+    const p = PASTIME_FOR[bot.spec.key];
+    if (!p) return false;
+    // No drawing of them doing it, no doing it. The same courtesy a character
+    // with no sleep sheet gets: they simply never lie down.
+    if (!bot.ch.pastimeTex) return false;
+    if (s.mode === 'pastime') return s.step !== 'done';
+    if (world.tMs < (s.pastimeAt || 0)) return false;
+    // ...and the prop has to exist on this planet. A scatter that happened to
+    // place no stumps is a world with no songs in it, rather than a crash.
+    return !!this.globe.perchSite(p.site, bot.ch.dir);
+  }
+
+  _pastimeEnter(bot, s, tMs) {
+    const ch = bot.ch;
+    const p = PASTIME_FOR[bot.spec.key];
+    s.pastime = p;
+    s.step = 'walking';
+    // `hurrying` for the WALK only, exactly as the gathering does it and for
+    // the same measured reason: without it you standing anywhere near them
+    // holds the walk, and the one way anybody would use this feature — noticing
+    // Hachiware set off and following him — is the case that could never work.
+    // Cleared the moment they arrive, so a singer will still stop to talk.
+    ch.hurrying = true;
+    ch.release('rest');
+    this._aimAtPastime(bot, s, tMs);
+  }
+
+  // Walk there, climb on, do it, and be finished.
+  _pastimeTick(bot, s, tMs, world) {
+    const ch = bot.ch;
+    const p = s.pastime;
+    if (!p) { s.step = 'done'; return; }
+
+    if (s.step === 'busy') {
+      if (tMs > s.until) { s.step = 'done'; return; }
+      // ...and round they go. A slide is the drawing plus the movement: the
+      // sheet supplies the sprawl and this supplies the fact that the pudding
+      // is slippery. `spin` is zero for anybody whose hobby is to sit still.
+      if (p.spin) this._spinOnPerch(bot, s, world.dtMs);
+      // ...and the music, from wherever they have got to — a singer who slid
+      // would take their notes with them, which is why this reads the body
+      // rather than the perch.
+      if (p.tune) {
+        this.globe.tuneAt(ch.dir, s.perch ? s.perch.y : 0, world.dtMs, this.globe.camera);
+      }
+      // Something to say about it, on its own clock — and never over anybody
+      // else, which is the one rule a song has to keep. `speak` silences the
+      // rest of the cast, so a line fired on a fixed cadence would repeatedly
+      // cut off whatever conversation was happening; yielding instead is also
+      // just what somebody singing does when a friend starts talking.
+      if (tMs > (s.sayAt || 0)) {
+        s.sayAt = tMs + between(PASTIME_SAY_MIN, PASTIME_SAY_MAX);
+        if (this.social && !this.social.anyoneSpeaking()
+          && bot.dlg.has(p.bucket) && this.social.canChatter(ch)) {
+          this.social.speak(bot, p.bucket, tMs);
+        }
+      }
+      return;
+    }
+
+    if (!s.route || !s.route.length || tMs > s.giveUpAt) {
+      // Giving up is allowed, the way it is for the gathering and unlike
+      // bedtime: if they cannot get to the stump, they simply do not play
+      // today. The cooldown in the exit keeps them from trying again at once.
+      if (tMs > s.giveUpAt) { s.step = 'done'; return; }
+      this._aimAtPastime(bot, s, tMs);
+      return;
+    }
+
+    // THE DEADLINE MEASURES STALLING, NOT ELAPSED TIME — and getting that wrong
+    // here cost a whole afternoon of Usagi never reaching the pudding.
+    //
+    // Every other walk in this file proves its progress by ticking off a
+    // waypoint: `route.length` shrinks, and the deadline is pushed back. This
+    // route is ONE leg, so that never happens, and the check quietly became a
+    // stopwatch — he gave up 150 seconds after setting off however well the
+    // walk was going. Measured: closing steadily on the pudding from eight
+    // units out and abandoned mid-approach, every time.
+    //
+    // So progress is measured the only way a one-leg walk can measure it, by
+    // getting NEARER. Any real gain buys another window; drifting or circling
+    // buys nothing, which is what the deadline is actually for.
+    const gap = ch.dir.angleTo(s.route[0]) * CONFIG.globe.radius;
+    if (s.nearest === undefined || gap < s.nearest - 0.25) {
+      s.nearest = gap;
+      s.giveUpAt = tMs + CONFIG.sleep.retryMs;
+    }
+
+    if (this._walkRoute(s, ch, tMs)) {
+      const site = this.globe.perchSite(p.site, ch.dir);
+      if (!site) { s.step = 'done'; return; }
+      // UP THEY GO. `perchAt` is the cushion machinery one step generalised —
+      // stand them on top of a thing at its own height, wearing the drawing
+      // that thing calls for.
+      ch.hurrying = false;
+      ch.perchAt(site.dir, this._perchY(ch, site, p), 'pastime-1');
+      s.perch = site;
+      s.spin = 0;
+      s.step = 'busy';
+      s.until = tMs + between(p.stayMin, p.stayMax);
+      s.sayAt = tMs + 700;
+      return;
+    }
+    if (s.route.length !== s.legs) {
+      s.legs = s.route.length;
+      s.giveUpAt = tMs + CONFIG.sleep.retryMs;
+    }
+  }
+
+  // Round the top of the thing they are stood on. A small circle rather than a
+  // spin on the spot, because what the drawing shows is somebody being carried
+  // round by a surface they cannot grip — so the BODY has to travel.
+  //
+  // The radius is a fraction of the prop's own, so a bigger pudding is a wider
+  // slide without a number here saying so, and it never reaches the rim.
+  _spinOnPerch(bot, s, dtMs) {
+    const site = s.perch;
+    if (!site) return;
+    s.spin = (s.spin || 0) + s.pastime.spin * (dtMs / 1000);
+    const arc = site.r * 0.42;
+    _tan.set(0, 1, 0).cross(site.dir);
+    if (_tan.lengthSq() < 1e-9) _tan.set(1, 0, 0).cross(site.dir);
+    _tan.normalize().applyAxisAngle(site.dir, s.spin);
+    _spot.copy(site.dir).multiplyScalar(Math.cos(arc))
+      .addScaledVector(_tan, Math.sin(arc)).normalize();
+    bot.ch.perchAt(_spot, this._perchY(bot.ch, site, s.pastime), 'pastime-1');
+  }
+
+  // How high to stand them on the thing — its own top, less whatever the
+  // drawing needs to put its SEAT there rather than its lowest pixel. See
+  // `sink` in PASTIMES.
+  //
+  // Read off the posture's own measured plane rather than off `headTop`, which
+  // still describes whichever pose they are wearing at the moment it is asked —
+  // and at the moment this is asked, that is the standing one.
+  _perchY(ch, site, p) {
+    const pose = ch.pose && ch.pose['pastime-1'];
+    const drop = (p && p.sink) ? p.sink * (pose ? pose.headTop : 0) : 0;
+    return site.y - drop;
+  }
+
+  // Point them at a spot beside it and start the clock.
+  //
+  // BESIDE rather than at: the prop is solid, so a route that ended on its
+  // middle would be trimmed short of itself by the walker's own fencing and
+  // they would creep at it forever — the same failure a cushion had before the
+  // destination exemption existed. They walk to arm's length and climb.
+  _aimAtPastime(bot, s, tMs) {
+    const ch = bot.ch;
+    const p = s.pastime;
+    const site = this.globe.perchSite(p.site, ch.dir);
+    if (!site) { s.route = null; s.step = 'done'; return; }
+    const R = CONFIG.globe.radius;
+    // On the bearing they are already coming from, so nobody walks round a
+    // stump to reach the far side of it for no reason.
+    _tan.copy(ch.dir).addScaledVector(site.dir, -ch.dir.dot(site.dir));
+    if (_tan.lengthSq() < 1e-9) {
+      _tan.set(0, 1, 0).cross(site.dir);
+      if (_tan.lengthSq() < 1e-9) _tan.set(1, 0, 0).cross(site.dir);
+    }
+    _tan.normalize();
+    const arc = site.r + PASTIME_STANDOFF / R;
+    const at = _spot.copy(site.dir).multiplyScalar(Math.cos(arc))
+      .addScaledVector(_tan, Math.sin(arc)).normalize();
+    // Pushed off everything ELSE standing about, but not off the thing they are
+    // walking to — see keepOffSolids' exemption, which is what a destination
+    // handed to somebody means.
+    s.route = [keepOffSolids(at.clone(), CONFIG.wander.wallKeep, site.sprite)];
+    s.legs = 1;
+    s.giveUpAt = tMs + CONFIG.household.headingMax;
+    // A new destination is a new walk, so how near they have ever been to it is
+    // not yet known — see the progress test in the tick.
+    s.nearest = undefined;
+    ch.errand = null;
+  }
+
+  _pastimeExit(bot, s, tMs) {
+    const ch = bot.ch;
+    const p = s.pastime;
+    // The last few notes go with the song rather than hanging in the air over
+    // an empty stump.
+    if (p && p.tune) this.globe.tuneOff();
+    ch.hurrying = false;
+    ch.errand = null;
+    ch.walking = false;
+    s.route = null;
+    // DOWN OFF IT, and put somewhere they may legally stand. Standing up on the
+    // spot would leave them at the prop's own middle, inside a berth their own
+    // pathing refuses to enter — and a walker whose feet are somewhere illegal
+    // can never plan a step, which is the total-failure shape this project has
+    // been caught by twice. So the dismount ejects them the way the thaw does.
+    if (ch.perched) {
+      if (s.perch) {
+        const R = CONFIG.globe.radius;
+        _tan.copy(ch.dir).addScaledVector(s.perch.dir, -ch.dir.dot(s.perch.dir));
+        if (_tan.lengthSq() < 1e-9) {
+          _tan.set(0, 1, 0).cross(s.perch.dir);
+          if (_tan.lengthSq() < 1e-9) _tan.set(1, 0, 0).cross(s.perch.dir);
+        }
+        _tan.normalize();
+        const out = s.perch.r + (PASTIME_STANDOFF + 0.3) / R;
+        _spot.copy(s.perch.dir).multiplyScalar(Math.cos(out))
+          .addScaledVector(_tan, Math.sin(out)).normalize();
+        // One movement, not two — see standUpAt, and the character left standing
+        // half a unit above the grass that taught it.
+        ch.standUpAt(keepOffSolids(_spot, CONFIG.wander.wallKeep));
+      } else {
+        ch.standUp();
+      }
+    }
+    s.perch = null;
+    s.pastime = null;
+    // ...and not again for a while. Written on the way out rather than at the
+    // start, so a hobby cut short by rain still costs its full wait — otherwise
+    // a passing shower would be followed by the same song beginning again.
+    s.pastimeAt = tMs + between(p ? p.gapMin : 300000, p ? p.gapMax : 540000);
   }
 
   // WHERE SOMEBODY RESUMES FROM when a mode lets go of them — the one answer,

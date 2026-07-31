@@ -11,7 +11,8 @@ import { TowedBody } from './body.js';
 import { Character } from './character.js';
 import { Dialogue } from './dialogue.js';
 import {
-  dirFromLatLon, inLake, inBuilding, inSolid, perchUnder,
+  dirFromLatLon, inLake, inBuilding, inSolid, perchUnder, keepOffSolids,
+  auditSolids, solids,
 } from './sphere.js';
 import {
   activePhase, isAuto, setPhaseOverride,
@@ -31,6 +32,7 @@ import { Fishing } from './fishing.js';
 import {
   buildPlushie, buildTeapot, buildLantern, buildTrashBag, buildTrashBagAlt,
   buildPinkWeapon, buildBlueWeapon, buildOpenBook, buildHouseKey, buildGuitar,
+  buildCamera,
 } from './furniture.js';
 
 const stage = document.getElementById('stage');
@@ -182,6 +184,11 @@ const household = new Household({ globe, bots });
 // dozen places, and a tap on a friend reads better as `pokeBack(bot, ...)` at
 // the point the tap is handled than as a reach through an object.
 const social = new Social({ bots, byChar, globe, rig });
+// ...and the household borrows it, for the one thing in there that talks:
+// somebody at their hobby. See _pastimeTick.
+household.social = social;
+// ...and where you are standing, for the one mode that walks beside you.
+household.rig = rig;
 
 const throughWall = (ch) => social.throughWall(ch);
 const canChatter = (ch) => social.canChatter(ch);
@@ -401,6 +408,12 @@ try {
 // file: everything that speaks or reacts is gated on it, so the start card
 // cannot be talked over.
 let started = false;
+// When the ground last left your feet while holding a hand — see the release
+// in the frame loop, which waits out surface wobbles before letting go.
+let handAirAt = 0;
+// Whether your own body is currently wearing its pleased face — see the swap in
+// the frame, and PLAYER in cast.js for the sheet.
+let youGlad = 'normal';
 
 // --- pointer routing
 //
@@ -415,7 +428,12 @@ const pointers = new Map();
 // same thing — see `moves` above. What stays here is the arbitration between
 // the three kinds of finger, which is about all of them and so belongs to none.
 const look = { id: null, mode: null, ch: null, lastX: 0, lastY: 0, travel: 0 };
-const pinch = { a: null, b: null, start: 0 };
+// `mid` is where the two fingers are between them, and it is here because a
+// two-finger gesture says TWO things at once: the gap between them is the zoom,
+// and the point between them is where the hand is pointing. A map app has read
+// both from one gesture for twenty years. Only the selfie listens to the second
+// — see the pan in onMove.
+const pinch = { a: null, b: null, start: 0, midX: 0, midY: 0 };
 
 function touched() {
   const now = performance.now();
@@ -471,6 +489,11 @@ function pickCharacter() {
   let bestD = Infinity;
   for (const b of bots) {
     if (!b.ch.isVisible || throughWall(b.ch)) continue;
+    // ...and a tap cannot reach a performer either. The same rule the focus
+    // keeps, kept here too because the two are separate doors into the same
+    // room: the focus feeds the pills, a tap pokes somebody directly, and a
+    // rule enforced at one of them is a rule with a way round it.
+    if (household.playingAt(b.ch)) continue;
     const p = b.ch.hitTest(raycaster);
     if (!p) continue;
     const d = p.distanceToSquared(globe.camera.position);
@@ -626,6 +649,9 @@ const HAND_BUILDERS = {
     holder.rotation.z = Math.PI;
     return holder;
   },
+  // The camera is already authored upright with its decorated front toward the
+  // viewer, so the held copy needs no corrective model rotation.
+  camera: () => buildCamera(0.32).group,
 };
 const handMeshes = {};
 
@@ -672,6 +698,10 @@ const HAND_POSE = {
   guitar: {
     x: 0.52, y: -0.50, h: 0.36, w: 0.58,
     turn: -0.18, tip: 0.05, roll: -0.12,
+  },
+  camera: {
+    x: 0.50, y: -0.48, h: 0.23, w: 0.34,
+    turn: -0.14, tip: 0.04, roll: -0.04,
   },
 };
 
@@ -733,6 +763,12 @@ const CARRY = {
   guitar: {
     ...GRIP, x: 0.30, y: 0.37, size: 0.66,
     spin: -0.14, tilt: 0.08, roll: -0.12,
+  },
+  // Held high enough to look ready for a photograph, but below the face so the
+  // camera does not become a mask when a character carries it.
+  camera: {
+    ...GRIP, x: 0.27, y: 0.41, size: 0.32,
+    spin: -0.10, tilt: 0.04, roll: -0.04,
   },
 };
 
@@ -886,6 +922,41 @@ function putDownUnique(spot) {
     spot = null;
   }
   if (spot) {
+    // NOT INSIDE ANYTHING, and this is the tap catching up with the button.
+    //
+    // 「おく」 has always refused a spot inside a trunk or a wall — see
+    // canPlaceAt, which asks `inSolid` with the feet at infinity so that only
+    // the TOPLESS solids say no and a table stays somewhere to put things. The
+    // tap never asked at all: it took whatever `pickGround` returned, so aiming
+    // at the grass at the foot of a tree laid the bear inside the bark. Two ways
+    // of doing one thing, disagreeing about where a thing may be — which is the
+    // arrangement this codebase spends most of its comments avoiding.
+    //
+    // SLID RATHER THAN REFUSED, which is where it parts company with the button.
+    // A button pressed with nowhere to go can shake its head and say so; a tap
+    // is a place you pointed at, and answering it with nothing is indisting-
+    // uishable from a tap that missed. `keepOffSolids` puts it on the nearest
+    // ground outside — the same move a walk's destination gets — so the piece
+    // lands beside the trunk you aimed at, which is what you meant.
+    //
+    // THE FEET AT INFINITY, exactly as canPlaceAt asks it, and that argument is
+    // the whole reason this does not break setting things on tables: a solid
+    // with a `top` is skipped, so a stump and a table remain somewhere to put a
+    // thing rather than something to be pushed off, and the perch below still
+    // finds them. Only the topless solids — the trunks and the walls — eject.
+    //
+    // `PLACE.keep` rather than a number of its own, because the margin a set-
+    // down keeps off a trunk is not two decisions. Sharing it is what makes the
+    // tap and the button agree, which is the point of the whole paragraph.
+    //
+    // The pond and the home-snap above have already had their say, so what
+    // reaches here is an ordinary set-down on ordinary ground.
+    keepOffSolids(spot, PLACE.keep, null, 1e9);
+    // ...and off the other pieces, which nothing has ever tested. Two toys set
+    // down on one patch of floor stood inside each other; now the second is put
+    // beside the first, at exactly the distance the shove would settle them at —
+    // see keepOffLoose, which takes no margin of its own for that reason.
+    globe.keepOffLoose(spot, loose);
     // Anything with a top under this spot — out of doors that is a stump's cut
     // face, and it is the only place a set-down piece can be badly set down.
     const perch = perchUnder(spot, 1e9);
@@ -910,9 +981,22 @@ function putDownUnique(spot) {
       loose.anchor.position.addScaledVector(spot, perch.top);
       const arc = Math.acos(Math.max(-1, Math.min(1, spot.dot(perch.dir))));
       const edge = perch.topR !== undefined ? perch.topR : perch.r;
-      // Too near the rim: it goes down where you put it, and then it goes
-      // over. See topple() for why this is scripted rather than simulated.
-      if (arc > edge * CONFIG.uniques.perch) startTopple(id, spot, perch);
+      // ALREADY TAKEN, which is the other way a set-down on a surface can go
+      // wrong and the only one the rim test could never catch: a stump has room
+      // for one bear, and the second was being stood in the first.
+      //
+      // It goes over rather than being refused, and the choice is the same one
+      // the rim makes. A refusal is a tap that did nothing, and the piece is in
+      // your hands with no way to find out why; a topple is an ANSWER — you get
+      // to watch it wobble and fall off, which says "there is something there"
+      // far better than a shake of the head, and leaves the piece somewhere you
+      // can pick it up again. The comedy is the error message.
+      //
+      // Ordered so the rim keeps its say when both are true: a piece set on a
+      // taken perch AND out at its edge topples for whichever reason, and the
+      // one it reports does not matter because the outcome is identical.
+      const taken = globe.looseOnPerch(perch, loose);
+      if (taken || arc > edge * CONFIG.uniques.perch) startTopple(id, spot, perch);
     }
   } else {
     inventory.setUnique(id, { state: 'home' });
@@ -1196,6 +1280,19 @@ function startPinch() {
   pinch.a = ids[ids.length - 2];
   pinch.b = ids[ids.length - 1];
   pinch.start = gapBetween(pinch.a, pinch.b);
+  midOf(pinch);
+}
+
+// Where the pinch's two fingers are between them. Written into the pinch itself
+// rather than returned, because both readers want the PREVIOUS value as much as
+// the new one — a pan is a difference, and the only place that difference can be
+// taken is where the old midpoint still exists.
+function midOf(p) {
+  const pa = pointers.get(p.a);
+  const pb = pointers.get(p.b);
+  if (!pa || !pb) return;
+  p.midX = (pa.x + pb.x) / 2;
+  p.midY = (pa.y + pb.y) / 2;
 }
 
 function onDown(e) {
@@ -1271,8 +1368,31 @@ function onMove(e) {
       // floor of flight clears whatever roof is overhead (see zoomBy) and the
       // shell lifts off while you are above it (see Globe.update), so pinching
       // out of your own house rises through an opening roof into the sky.
-      rig.dolly(pinch.start / d);
+      // A PINCH MEANS TWO DIFFERENT THINGS, and in the selfie view it must not
+      // mean this one. `dolly` drives the ALTITUDE climb, so a pinch while the
+      // lens was turned round took you off the ground — which trips the
+      // airborne rule and drops the selfie into the far view. Framing a shot
+      // and being thrown into orbit is the least expected answer a gesture
+      // could give.
+      //
+      // Reassigned rather than swallowed: the fingers are already saying
+      // "nearer" or "further", and in a camera view that is the zoom.
+      if (rig.selfieOn) rig.selfieZoom(pinch.start / d);
+      else rig.dolly(pinch.start / d);
       pinch.start = d;
+    }
+    // ...and the OTHER half of the same gesture. Two fingers travelling together
+    // keep the gap constant and so say nothing to the zoom above; what they move
+    // is the point between them, and in the selfie that slides the lens round
+    // you. One gesture, two meanings, neither costing the other anything — which
+    // is why the pan went here rather than onto a third finger nobody has.
+    //
+    // Sideways only. The lens already rises and falls with the one-finger drag,
+    // and a second height control would be two knobs fighting over one number.
+    if (rig.selfieOn) {
+      const mx = pinch.midX;
+      midOf(pinch);
+      rig.selfiePan(pinch.midX - mx);
     }
     return;
   }
@@ -1546,7 +1666,12 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 // there is no other way to get off the ground while developing.
 stage.addEventListener('wheel', (e) => {
   e.preventDefault();
-  rig.dolly(e.deltaY > 0 ? 1.12 : 1 / 1.12);
+  // The wheel is the pinch's desktop twin and has to be reassigned with it, or
+  // a scroll while framing a shot would climb into the sky and take the selfie
+  // down with it. Same ratio, same direction — away from you is further out.
+  const f = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+  if (rig.selfieOn) rig.selfieZoom(f);
+  else rig.dolly(f);
   rig.markTouched(performance.now());
 }, { passive: false });
 
@@ -1560,6 +1685,84 @@ window.addEventListener('orientationchange', () => {
 // button and never reaches the stage's pointer handlers.
 const controls = document.getElementById('controls');
 const viewToggle = document.getElementById('view-toggle');
+const selfieToggle = document.getElementById('selfie-toggle');
+const selfieCap = document.getElementById('selfie-cap');
+const shotBtn = document.getElementById('shot-btn');
+const stickEl = document.getElementById('stick');
+const actionsEl = document.getElementById('actions');
+const shotFlash = document.getElementById('shot-flash');
+const poseBar = document.getElementById('pose-bar');
+const poseWrap = document.getElementById('pose-wrap');
+const poseToggle = document.getElementById('pose-toggle');
+const poseCap = document.getElementById('pose-cap');
+const unlockNote = document.getElementById('unlock');
+
+// WHAT YOUR FACE MAY DO FOR A PICTURE.
+//
+// Four, and four is the number rather than the six `EXPRESSIONS` has. `sleepy`
+// and `worried` are things that HAPPEN to somebody; nobody chooses them for a
+// photograph, and a row of six with two nobody presses is a worse row than one
+// of four that all earn their place.
+//
+// The first is 「おまかせ」 and is not a face at all — it is the app deciding,
+// which is what it did before there was a picker: pleased while somebody's hand
+// is in yours, resting otherwise. Keeping it as the DEFAULT entry means the
+// picker adds a choice without taking the old behaviour away from anybody who
+// never opens it.
+const POSES = [
+  { key: null, word: 'おまかせ' },
+  { key: 'normal', word: 'すまし' },
+  { key: 'happy', word: 'にっこり' },
+  { key: 'delight', word: 'だいすき' },
+  { key: 'surprise', word: 'びっくり' },
+];
+
+// Which one is pressed, or null for おまかせ. Cleared when the view is turned
+// off, so a pose is something you strike for a shot rather than a mood you
+// leave your body wearing for the rest of the session.
+let youPose = null;
+
+for (const pose of POSES) {
+  const b2 = document.createElement('button');
+  b2.type = 'button';
+  b2.className = 'pose-pick';
+  b2.textContent = pose.word;
+  b2.addEventListener('click', () => {
+    youPose = pose.key;
+    paintPoses();
+    // ...and the drawer shuts behind the choice. A picker that stays open after
+    // it has been answered is a picker sitting on top of the thing it was for —
+    // and here that thing is the photograph.
+    openPoses(false);
+    touched();
+  });
+  poseBar.appendChild(b2);
+}
+
+// Open or shut, and the button remembers which so it can be pressed again.
+function openPoses(open) {
+  poseWrap.classList.toggle('is-open', open);
+  poseToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+onPress(poseToggle, () => {
+  openPoses(!poseWrap.classList.contains('is-open'));
+  touched();
+});
+
+function paintPoses() {
+  const kids = poseBar.children;
+  for (let i = 0; i < kids.length && i < POSES.length; i++) {
+    kids[i].classList.toggle('is-on', POSES[i].key === youPose);
+  }
+  // THE COLLAPSED BUTTON SAYS WHICH FACE IS CHOSEN, which is what the row used
+  // to say by being visible. A drawer that shows nothing of its contents makes
+  // you open it to find out what you already decided.
+  const now = POSES.find((q) => q.key === youPose);
+  const word = now ? now.word : POSES[0].word;
+  if (poseCap.textContent !== word) poseCap.textContent = word;
+}
+paintPoses();
 const viewCap = document.getElementById('view-cap');
 const viewGlyph = document.getElementById('view-glyph');
 // The sky chip: one reading for the hour and the weather both, and one panel
@@ -2124,7 +2327,187 @@ document.addEventListener('keydown', (e) => {
 // it is a place you walk into, not a mode you switch out of. It works from
 // indoors like anywhere else: the roof is something the lift clears and the
 // shell gets out of the way of, not a reason to refuse.
+// JUST THE LENS. Nothing about where you stand changes — see the note on
+// CONFIG.player.selfieDist — so this is one call and no bookkeeping.
+//
+// STAYS ALIVE WHILE HOLDING A HAND, deliberately, where そらへ greys out. The
+// far view steers by sliding the planet under you, which is not a walk anybody
+// can be led along; turning the camera round is not steering at all, and the
+// hand-holding selfie is the whole reason this view exists.
+// TAKE THE PICTURE.
+//
+// The scene is re-rendered into a target rather than scraped off the canvas —
+// see Globe.photo for why that is the only reliable way here — so this can be
+// pressed on any frame without the loop knowing anything about it.
+//
+// Saved by handing the browser a download. On a phone installed as a PWA that
+// is the share sheet, which is where a photograph wants to go anyway; on a
+// desktop it is a file. Either way the app itself keeps nothing, which is the
+// same promise the rest of this world makes about storage.
+// ---------------------------------------------------------------- the sheet
+//
+// WHAT HAPPENS TO A PHOTOGRAPH once it exists. It is shown before it goes
+// anywhere, which is the nicer moment and also the only mechanism that works on
+// every phone: a silent `<a download>` of a blob is unreliable on iOS, where it
+// may open a tab or do nothing visible, and "nothing visible" after a shutter
+// press is indistinguishable from a broken button.
+//
+// NOTHING LEAVES THE DEVICE. The picture is made in the browser's own memory,
+// previewed from an object URL, and saved or shared by the browser's own APIs.
+// There is no upload, no endpoint and nothing stored — which is why this works
+// identically on a static host like GitHub Pages, where there is no server to
+// talk to even if it wanted one.
+const photoSheet = document.getElementById('photo-sheet');
+const photoImg = document.getElementById('photo-img');
+const photoShare = document.getElementById('photo-share');
+const photoSave = document.getElementById('photo-save');
+const photoClose = document.getElementById('photo-close');
+
+// The picture currently on the sheet, and the URL showing it. Held together so
+// that closing can free the second and forget the first in one place — an
+// object URL left behind is a copy of a megabyte the page can never reclaim.
+let photoBlob = null;
+let photoUrl = null;
+
+function showPhoto(blob) {
+  closePhoto();
+  photoBlob = blob;
+  photoUrl = URL.createObjectURL(blob);
+  photoImg.src = photoUrl;
+  photoSheet.classList.remove('is-gone');
+  // The share sheet is offered only where it can actually carry a FILE.
+  // `canShare` with the payload is the only honest test: plenty of browsers
+  // have `navigator.share` for links and would reject an image, and a button
+  // that throws is worse than one that was never there.
+  photoShare.classList.toggle('is-gone', !canSharePhoto(blob));
+}
+
+function canSharePhoto(blob) {
+  if (!navigator.canShare || !navigator.share) return false;
+  try {
+    return navigator.canShare({
+      files: [new File([blob], 'hidamari.png', { type: 'image/png' })],
+    });
+  } catch {
+    return false;
+  }
+}
+
+function closePhoto() {
+  photoSheet.classList.add('is-gone');
+  photoImg.removeAttribute('src');
+  if (photoUrl) URL.revokeObjectURL(photoUrl);
+  photoUrl = null;
+  photoBlob = null;
+}
+
+onPress(photoClose, closePhoto);
+
+onPress(photoSave, () => {
+  if (!photoBlob) return;
+  const url = URL.createObjectURL(photoBlob);
+  const a2 = document.createElement('a');
+  a2.href = url;
+  a2.download = `hidamari-${Date.now()}.png`;
+  document.body.appendChild(a2);
+  a2.click();
+  a2.remove();
+  // Freed on a timer rather than in the same tick as the click: revoking
+  // immediately races the download on some browsers and hands over an empty
+  // file. Its own URL rather than the preview's, so closing the sheet cannot
+  // pull the rug from under a save still in flight.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+});
+
+onPress(photoShare, async () => {
+  if (!photoBlob) return;
+  const file = new File([photoBlob], `hidamari-${Date.now()}.png`, { type: 'image/png' });
+  try {
+    await navigator.share({ files: [file] });
+  } catch {
+    // Cancelled, or refused by the platform. Neither is an error worth saying
+    // anything about — the sheet is still open and ほぞん is still there.
+  }
+});
+
+// Whether the camera is already yours — the latch the unlock notice fires off.
+// See the frame, which is where it flips.
+//
+// SEEDED FROM THE PACK, and starting it at `false` was a bug rather than a
+// choice. The notice belongs to the EDGE — the moment an ability you did not
+// have arrives — and a pack restored out of localStorage is not an edge: you
+// were already carrying the camera when the app opened. Starting false made the
+// boot itself look like the edge, so anybody who owned the camera was told they
+// had just found it every single time they opened the game, forever. A greeting
+// that cannot stop being a greeting is noise, and noise is what a first-time
+// notice has to spend to be worth anything.
+//
+// This is why there is no saved flag beside the pack. The pack IS the flag: the
+// only question the notice ever needed answered is "did this just become true",
+// and a value read at boot answers it without a second thing to keep in step.
+//
+// WITHIN a visit it goes back down when the camera leaves your hands, so a
+// pickup always announces itself — see the frame. The two rules are not in
+// tension: the boot seed suppresses the repeat you did not ask for, and the
+// reset restores the one you did.
+let camSeen = inventory.slotOf('hachiwareCamera') >= 0;
+let unlockTimer = 0;
+
+function showUnlock() {
+  unlockNote.classList.remove('is-gone');
+  // Restarted from the top rather than merely un-hidden: a CSS animation on an
+  // element that was already showing does not replay, and this element is shown
+  // once per session today and could be shown for a second reason tomorrow.
+  unlockNote.style.animation = 'none';
+  void unlockNote.offsetWidth;
+  unlockNote.style.animation = '';
+  clearTimeout(unlockTimer);
+  // Taken away when the animation has finished holding its last invisible
+  // frame, so nothing is left in the layout or read out by a screen reader.
+  unlockTimer = setTimeout(() => unlockNote.classList.add('is-gone'), 4400);
+}
+
+let shotBusy = false;
+async function takePhoto() {
+  if (shotBusy || !rig.isFirstPerson) return;
+  // Not while you are still looking at the last one — the sheet is over the
+  // viewfinder, so a second press would photograph a picture of a photograph.
+  if (photoBlob) return;
+  shotBusy = true;
+  // The flash first, so the press answers instantly rather than after a
+  // readback and an encode. Restarted by hand: the class has to leave the
+  // element before it can be re-applied, or a second press within the animation
+  // does nothing at all.
+  shotFlash.classList.remove('is-firing');
+  void shotFlash.offsetWidth;
+  shotFlash.classList.add('is-firing');
+  touched();
+  try {
+    const blob = await globe.photo(1080);
+    if (blob) showPhoto(blob);
+  } finally {
+    shotBusy = false;
+  }
+}
+
+onPress(shotBtn, takePhoto);
+
+onPress(selfieToggle, () => {
+  if (!rig.isFirstPerson) return;
+  rig.toggleSelfie();
+  // A pose belongs to the picture, not to the body — see POSES. Turning the
+  // lens away puts your face back to whatever the app would have chosen.
+  if (!rig.selfieOn) { youPose = null; paintPoses(); }
+  touched();
+  syncInteract();
+});
+
 onPress(viewToggle, () => {
+  // NOT WHILE YOU ARE HOLDING SOMEBODY'S HAND. The far view steers by sliding
+  // the whole planet under you, which is not a walk anybody could be led along
+  // — and letting go silently to allow it would take the decision away from
+  // you. The pill greys out for the same reason 「はしる」 does; see the loop.
+  if (household.handHeld) return;
   if (rig.goingUp) rig.goToGround();
   else rig.goToSky();
 });
@@ -2239,6 +2622,29 @@ const FOCUS = {
   // you stand and talk. `meet` is the greeting distance exactly — walk close
   // enough to be said hello to and you are close enough to answer — so the
   // button appears on the same line the world already draws around somebody.
+  // HALF-ANGLES IN THE GROUND PLANE, for the verbs about a PLACE — the water,
+  // and the stump or pudding 「いっておいで」 sends a friend to.
+  //
+  // The projection test above replaced angles for OBJECTS and was right to: a
+  // cone says nothing about up and down, and a thing at your feet is 75 degrees
+  // below a gaze that only reaches 47. A place is the case the projection cannot
+  // serve. A pond has no point to project — it is a shape you stand at the edge
+  // of — and a perch site's own point is under a friend who is about to be
+  // standing on it, so "is it in the picture" answers a question about the
+  // friend rather than about the spot.
+  //
+  // `cone` to acquire and `keep` to hold, the same doctrine the frame test runs
+  // on and for the same reason: without the second number a verb about a place
+  // blinks off and on for the whole length of a walk past it.
+  //
+  // The site pair is narrower than the water pair on purpose. A pond is wide and
+  // you are on its shore; a stump is one small thing among several, and on a
+  // planet this size two sites can be four units apart — a cone wide enough to
+  // hold both would be back to picking for you, which is the whole complaint
+  // that made this a button rather than a tripwire.
+  siteCone: 0.42,
+  siteKeep: 0.72,
+  waterKeep: 1.05,
   meet: CONFIG.social.greetArc,
   meetHold: CONFIG.social.greetArc + 1.1,
   // HOW MUCH HARDER IT IS TO TAKE THE FOCUS OFF SOMEBODY YOU ARE TALKING TO.
@@ -2385,6 +2791,18 @@ function eachCandidate(fn) {
 function eachFriend(fn) {
   for (const b of bots) {
     if (!b.ch.isVisible) continue;
+    // NOT WHILE THEY ARE PERFORMING. Up on the pudding or the stump they are
+    // busy in a way nothing else in this world is busy: every people-verb here
+    // would break it, and 「てをつなぐ」 would break it badly — `held` outranks
+    // `pastime` in the mode table, so a hand taken mid-song pulls a perched
+    // body into a tow that assumes a standing one.
+    //
+    // Withheld at the FOCUS rather than pill by pill, which also takes the mark
+    // off their head with it: the mark's whole job is to say "your words land
+    // here", and it must not say that about somebody who is not listening. You
+    // can still stand and watch, and they still sing their own lines. The walk
+    // there is fair game — see atPlay.
+    if (household.playingAt(b.ch)) continue;
     // ...AND NOT THROUGH A WALL, which the projection cannot catch: somebody sat
     // at home projects onto the front of the house perfectly well, as
     // throughWall's own note says. It is the same rule a tap already obeys — see
@@ -2590,7 +3008,7 @@ const ixEl = document.getElementById('interact');
 // keeps it — and the whole point of the gaps below is that kin stand together.
 // Splitting them to seat one of them would be spending the grouping to buy the
 // anchor, when both fit.
-const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'give', 'swap', 'giveBack'];
+const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'hold', 'play', 'give', 'swap', 'giveBack'];
 
 // WHAT EACH VERB IS ABOUT, which is what the gaps in the column are drawn from.
 //
@@ -2630,6 +3048,8 @@ const IX_GROUP = {
   // ...and the friend in front of you, topmost, nearest the mark over their
   // head. See IX_ORDER for why they moved up here.
   talk: 'friend',
+  hold: 'friend',
+  play: 'friend',
   give: 'friend',
   swap: 'friend',
   giveBack: 'friend',
@@ -2644,6 +3064,12 @@ const IX_GLYPH = {
   // A speech bubble with its tail down — the one shape in this set that needs no
   // explaining, and the same rounded box the dialogue itself is drawn in.
   talk: '<path d="M4.4 5.6h15.2v9.6h-8.4l-4 3.2v-3.2H4.4Z"/>',
+  // Two hooks meeting in the middle — the plainest drawing of a link there is,
+  // and the one shape in this set that means the same thing at 20px as at 200.
+  hold: '<path d="M10.6 8.2a3.4 3.4 0 0 0 0 7.6h1.2"/><path d="M13.4 15.8a3.4 3.4 0 0 0 0-7.6h-1.2"/>',
+  // A four-point sparkle: the thing you are sending them to is a delight, and
+  // this is the plainest drawing of one.
+  play: '<path d="M12 4.5l1.7 5.8L19.5 12l-5.8 1.7L12 19.5l-1.7-5.8L4.5 12l5.8-1.7Z"/>',
   // The same arrow the other way about — away from you, toward them. The pair
   // are deliberately mirror images: 「わたす」 and 「かえして」 are one object
   // making one journey, and which way it is going is the whole of the
@@ -2694,6 +3120,24 @@ const ACTIONS = {
   // handing over — so the WORD carries it, the way つける／けす carries the
   // lamp's.
   talk: { word: () => 'はなす', run: talkToMate },
+  // ONE PILL FOR BOTH HALVES, and the word says which. Taking a hand and
+  // letting go are the same gesture from opposite ends, and a second pill for
+  // the release would sit greyed out for the whole of the time it was not
+  // wanted — which is the thing this stack exists to avoid.
+  hold: {
+    word: () => (household.handHeld ? 'てをはなす' : 'てをつなぐ'),
+    run: toggleHold,
+  },
+  // 「いっておいで」 — you led them here, and this is you letting them go to it.
+  //
+  // A BUTTON AND NOT A TRIPWIRE, by request and by ruling: a pastime is a rare
+  // event, and one that fired itself off mere nearness read as a proximity
+  // effect rather than as an occasion. The moment belongs to the player now —
+  // walk them over, then say go on.
+  play: {
+    word: () => 'いっておいで',
+    run: () => { if (household.sendToPlay(performance.now())) touched(); },
+  },
   give: {
     word: () => (inventory.heldUnique ? 'かす' : 'わたす'),
     run: handToMate,
@@ -2775,7 +3219,13 @@ const ACTIONS = {
 // the ordinary answer — hands free, facing nothing — and an empty stack leaves
 // this corner to jump and sprint alone.
 function actionsNow() {
-  if (!rig.isFirstPerson) return [];
+  // THE HAND SURVIVES A BUMP. `isFirstPerson` reads eye height against the
+  // surface UNDER you, and that surface moves — stepping over a stump, a table
+  // edge or the doorstep lip drops you "airborne" for the few frames the ease
+  // takes. Emptying the stack on those frames made 「てをはなす」 blink off and
+  // on, which read as the hold itself stuttering. While a hand is genuinely
+  // held, the release pill stays put whatever the ground is doing.
+  if (!rig.isFirstPerson) return household.handHeld ? ['hold'] : [];
 
   // THE ROD TAKES THE WHOLE STACK. A bite is a window under a second wide, and
   // あげる! sharing the corner with しまう would lose fish to a mis-tap on the
@@ -2817,6 +3267,13 @@ function actionsNow() {
   // reason the world verbs do: standing near two friends, "which one" is a
   // question only facing can answer.
   if (mate) list.push('talk');
+  // ...and the hand. Offered beside a friend, and ALSO while one is already
+  // held whoever you happen to be facing — otherwise letting go would mean
+  // turning back to face somebody you are already walking with.
+  if (mate || household.handHeld) list.push('hold');
+  // ...and the send-off, only while you are leading somebody, their own thing
+  // is close by, AND YOU ARE LOOKING AT IT. See playSite.
+  if (playSite()) list.push('play');
   // Two hands full of uniques — yours and theirs — is a SWAP rather than a
   // gift, because they have nowhere to put a second one. See the `swap` entry.
   const loan = loanFrom(mate);
@@ -2838,6 +3295,32 @@ function actionsNow() {
   return list;
 }
 
+// THE STUMP OR THE PUDDING 「いっておいで」 WOULD SEND THEM TO, or null. One
+// question, asked once a frame by both the pill and the mark — see the note on
+// canSendToPlay about why they must not each find their own.
+//
+// PROXIMITY WAS NOT ENOUGH, and the stack's own rule says why: a verb about an
+// object is unusable without knowing which object, and being near cannot say.
+// This one predated the rule. Standing between a stump and a pudding four units
+// apart, the old pill named neither and picked for you; worse, on a planet this
+// small a hobby site is within the lure of half the places you might stroll, so
+// the offer sat in the corner for most of a led walk and stopped reading as an
+// occasion at all — which is the same thing the auto-trigger did wrong, and the
+// reason it became a button in the first place.
+//
+// NARROW TO ACQUIRE, WIDE TO KEEP, the doctrine the whole focus system runs on.
+// Without the second half this blinked off and on for the length of a walk past
+// a stump — the shoreline bug, and the bulb's before it. `playAim` is the latch;
+// nothing else reads it.
+let playAim = false;
+function playSite() {
+  const offer = household.canSendToPlay();
+  if (!offer) { playAim = false; return null; }
+  const off = bearingTo(offer.site.dir);
+  playAim = off <= (playAim ? FOCUS.siteKeep : FOCUS.siteCone);
+  return playAim ? offer : null;
+}
+
 // The lake, which cannot be a focus: it is a place rather than an object, with
 // no single point to stand in front of. So it gets the facing test on its own
 // terms — near enough to cast, and looking AT the water rather than along the
@@ -2849,7 +3332,14 @@ function facingWater() {
   if (!fishing.canCastFrom(rig.anchor)) return false;
   const school = globe.fish;
   if (!school || !school.pond) return true;
-  return bearingTo(school.pond.centre) <= FOCUS.keep;
+  // `FOCUS.keep` STOOD HERE AND HAD NOT EXISTED FOR SOME TIME. The cone pair it
+  // came from was deleted when objects moved to the projection test, and this
+  // line kept asking for one of them — so the comparison was `angle <= undefined`,
+  // which is false for every angle there is. Beside any pond with fish in it,
+  // 「つる」 could not appear at all; only the `!school.pond` shortcut above ever
+  // returned true. Found while giving 「いっておいで」 the same kind of gate, which
+  // is why the two now read from one named pair. See FOCUS.waterKeep.
+  return bearingTo(school.pond.centre) <= FOCUS.waterKeep;
 }
 
 // The light this button would flip: the one in your hand first, otherwise the
@@ -2944,6 +3434,42 @@ function loanFrom(who) {
 // It also stamps the greeting clock, for the same reason the tap does — without
 // it, walking the last half-metre after pressing would have them welcome you to
 // a conversation you had just started.
+// TAKE A HAND, OR GIVE IT BACK.
+//
+// The whole of the feature from this side is two calls, because the household's
+// `held` mode does the walking and its place in the priority list does the
+// interrupting. What belongs here is only what is not the cast's business: the
+// leash on your own walk, and the fact that you cannot climb into the sky with
+// somebody's hand in yours.
+function toggleHold() {
+  if (household.handHeld) {
+    releaseHand();
+    return;
+  }
+  if (!mate || !mate.bot) return;
+  const bot = mate.bot;
+  if (!household.takeHand(bot)) return;
+  rig.leash = true;
+  // A run drags them; the cap in the rig already refuses one, and disarming
+  // here stops the button being left lit over a walk that cannot sprint.
+  rig.sprintOn = false;
+  rig.focus = bot.ch;
+  // They answer being taken by the hand, which is what makes it an exchange
+  // rather than a state change. `pokeBack` also starts their attention window,
+  // so somebody you are walking with keeps giving you their attention.
+  pokeBack(bot, bot.dlg.has('greetBack') ? 'greetBack' : 'poke', performance.now());
+  touched();
+}
+
+// Letting go — from the pill, from taking off, or because the world took them.
+// Safe to call at any time, which is what lets three different places use it
+// without any of them checking first.
+function releaseHand() {
+  if (!household.letGo()) return;
+  rig.leash = false;
+  touched();
+}
+
 function talkToMate() {
   if (!mate) return;
   const now = performance.now();
@@ -3201,6 +3727,13 @@ function updateMark() {
   globe.setGrabMark(grabOn ? focus.loose : null);
   const mateOn = rig.isFirstPerson && mate && !mate.bot.dlg.isVisible;
   globe.setMateMark(mateOn ? mate.bot.ch : null);
+  // ...and the stump or the pudding, while the send-off is on offer. Read from
+  // the same call the pill reads so the mark can never point at a different
+  // stump from the one the button would use — see playSite, which is memoised
+  // by the frame order below rather than by a cache: this runs after the stack
+  // is built, in the same frame, off the same latch.
+  const play = rig.isFirstPerson ? playSite() : null;
+  globe.setSpotMark(play ? play.site : null);
 }
 
 // --- drawing the stack
@@ -3975,7 +4508,10 @@ function frame(now) {
   // The keys' turn at the throttle, before the rig reads it. A thumb on the pad
   // writes on its own events and wins outright while it is down — see the
   // precedence note in move-input.js — so on a touch device this is a no-op.
-  moves.tick();
+  // ...and it takes the frame's own step now, because in the selfie the same
+  // keys drive the camera instead, and a swing measured in frames rather than
+  // in time pans at whatever rate the machine happens to render at.
+  moves.tick(dt);
 
   rig.update(dt, now);
   const inside = insideHouse();
@@ -4055,6 +4591,23 @@ function frame(now) {
   // The scenery dresses off the same number, from inside the scene — see
   // `dressAt`, which is one threshold precisely so that the cast and the bushes
   // cannot change on different frames.
+  // WHAT YOUR OWN FACE IS DOING, which nothing asked until there was a view
+  // that looks at it. You have no line bank and so no expression of your own;
+  // this is the one thing worth saying with it — pleased, while somebody's hand
+  // is in yours. Everything else is the resting face, as before.
+  //
+  // OUTSIDE THE SNOW EDGE BELOW, and that is the whole of why it is here rather
+  // than three lines further down. That block runs only on the frame the cover
+  // crosses `dressAt`, so a face swap inside it would have waited for the
+  // weather to change before your expression could — which on a clear day is
+  // never. The same edge-guard trap the hand's own leash fell into once.
+  // A CHOSEN POSE WINS, and おまかせ falls back to what this always did.
+  const want = youPose || (household.handHeld ? 'happy' : 'normal');
+  if (want !== youGlad) {
+    youGlad = want;
+    you.setExpression(want);
+  }
+
   const wrapped = lying > CONFIG.weather.dressAt;
   if (wrapped !== dressed) {
     dressed = wrapped;
@@ -4090,7 +4643,7 @@ function frame(now) {
   // The rig also answers whether you are on the ground, because it is the only
   // thing that can. The scene sees a camera that has been lifted, and cannot
   // tell a jump or a tabletop from the sky — see the hand in scene.js.
-  globe.update(now, rig.anchor, rig.isFirstPerson);
+  globe.update(now, rig.anchor, rig.isFirstPerson, rig.selfieOn);
 
   // The rod, if it is out. It reels itself in when you walk off; leaving the
   // ground is the one thing it cannot see from the anchor alone, so that is
@@ -4188,9 +4741,104 @@ function frame(now) {
     const onFoot = rig.isFirstPerson;
     if (jumpBtn.classList.contains('is-off') === onFoot) {
       jumpBtn.classList.toggle('is-off', !onFoot);
-      sprintBtn.classList.toggle('is-off', !onFoot);
       if (!onFoot) rig.sprintOn = false;
     }
+
+    // THE HAND, EVERY FRAME — not on the takeoff edge above.
+    //
+    // These three lived inside that block and were wrong there in a way worth
+    // recording: it fires only when the on-foot state CHANGES, so a hand let go
+    // by the WEATHER — which happens with both feet on the ground — left the
+    // leash on your walk and the pills lying about it until the next time you
+    // happened to take off. Measured: capped to a leading pace with nobody to
+    // lead, for the rest of the session.
+    //
+    // OFF THE GROUND IS OUT OF REACH — but only once you are genuinely off it.
+    // `onFoot` flickers false for a few frames whenever the surface under you
+    // changes height (a stump, the doorstep lip), and releasing on the first of
+    // them broke the hold on an ordinary walk. Half a second of continuous air
+    // is a glide or the sky climb; a surface wobble never lasts that long.
+    // Climbing out of the world takes the selfie with it: `setSelfie` refuses
+    // off the ground, and this is what stands it down rather than leaving a
+    // switch on that nothing is honouring.
+    if (!onFoot && rig.selfieOn) rig.setSelfie(false);
+
+    if (onFoot) handAirAt = 0;
+    else if (household.handHeld) {
+      if (!handAirAt) handAirAt = now;
+      else if (now - handAirAt > 550) releaseHand();
+    }
+    // ...and if the world let go for you, your own walk is free again. The
+    // household drops the hand inside its own mode exit; this keeps the two in
+    // step without either having to know about the other.
+    if (rig.leash && !household.handHeld) rig.leash = false;
+    // ...and who else the lens should make room for. A point rather than a
+    // person, so the rig stays ignorant of the household — see pairAim.
+    rig.pairAim = household.handHeld ? household.handHeld.ch.dir : null;
+    sprintBtn.classList.toggle('is-off', !onFoot || !!household.handHeld);
+    viewToggle.classList.toggle('is-off', !!household.handHeld);
+    // NO CAMERA, NO CAMERA BUTTON. The ability lives in Hachiware's compact
+    // camera — the loose piece resting in the cave — and exists exactly while
+    // that piece is in your pack or your hand. `slotOf` covers both, because
+    // the hand IS a slot; 'placed' and 'given' and 'home' all empty it, so
+    // setting the camera down on a stump takes the feature with it, and picking
+    // it back up returns it, with no bookkeeping beyond what the pouch already
+    // does. Hidden rather than greyed: an ability you have not found is not
+    // disabled, it is undiscovered — the button appearing IS the unlock.
+    //
+    // ...and if the camera leaves your hands MID-SHOT — set down, lent to a
+    // friend — the view stands down the same way it does when your feet leave
+    // the ground: by this frame noticing, not by every exit path having to
+    // remember. The photo sheet is deliberately not closed with it; a picture
+    // already taken is yours, however the camera left.
+    const hasCam = inventory.slotOf('hachiwareCamera') >= 0;
+    if (rig.selfieOn && !hasCam) rig.setSelfie(false);
+    selfieToggle.classList.toggle('is-gone', !hasCam);
+    // ...and on the frame it BECOMES true, say so. Announced from here rather
+    // than from the pickup itself because there is more than one way for a
+    // camera to reach your hands — off the cave floor, out of the pouch, handed
+    // back by a friend — and the thing worth announcing is the ability arriving
+    // rather than any one of the ways it can.
+    //
+    // A rising edge, not a state: `camSeen` starts at whatever the saved pack
+    // says, so opening the game already carrying the camera is not a discovery
+    // and says nothing. See the seed above.
+    //
+    // AND IT RESETS WHEN THE CAMERA GOES, so picking it up again says it again.
+    // This line was left out at first, on the grounds that telling you twice is
+    // noise — which is the wrong worry by a mile. The notice is four seconds
+    // long, it appears while your attention is on the thing you just picked up
+    // rather than on the corner it is pointing at, and MISSING IT COSTS YOU THE
+    // WHOLE FEATURE: nothing else in the game ever mentions the camera again.
+    // A repeat costs four seconds to somebody who is deliberately juggling the
+    // thing. The asymmetry is not close, and it is the general rule for any
+    // notice that teaches rather than confirms — make it recoverable, and let
+    // the player earn the repeat by doing the thing that earned it the first
+    // time.
+    if (hasCam && !camSeen) { camSeen = true; showUnlock(); }
+    else if (!hasCam) camSeen = false;
+    // Off the ground there is nothing to look back at — and the far view has
+    // the camera anyway, so the switch would be a promise this cannot keep.
+    // The word turns over with the state, exactly as そらへ's does.
+    selfieToggle.classList.toggle('is-off', !onFoot);
+    const selfieWord = rig.selfieOn ? 'まえを みる' : 'じぶんを みる';
+    if (selfieCap.textContent !== selfieWord) selfieCap.textContent = selfieWord;
+    selfieToggle.setAttribute('aria-pressed', rig.selfieOn ? 'true' : 'false');
+    // The shutter and the poses come and go with the view they belong to.
+    const shooting = rig.selfieOn && onFoot;
+    shotBtn.classList.toggle('is-gone', !shooting);
+    poseWrap.classList.toggle('is-gone', !shooting);
+    // A drawer left hanging open under a button that has just gone is a panel
+    // floating in a corner attached to nothing. Shut on the way out rather than
+    // hidden with it, so pressing じぶんを みる again finds it closed.
+    if (!shooting && poseWrap.classList.contains('is-open')) openPoses(false);
+    // ...and the walking controls go the other way. Hidden rather than greyed,
+    // because in this view they are not disabled — they are irrelevant, and the
+    // screen is a viewfinder. move-input.js refuses them all independently, so
+    // a keyboard cannot walk you out of a shot either; this is only what the
+    // eye sees. See MoveInput.frozen.
+    stickEl.classList.toggle('is-gone', rig.selfieOn);
+    actionsEl.classList.toggle('is-gone', rig.selfieOn);
 
     // What you are looking at, then what that lets you do, then the ring that
     // says so. STRICTLY THIS ORDER: every verb in the stack is now a question
@@ -4353,6 +5001,35 @@ if ('serviceWorker' in navigator && !IS_LOCAL) {
   });
 }
 
+// DO ANY TWO FOOTPRINTS OVERLAP — asked once, out loud, and only while
+// developing. See auditSolids in sphere.js for why this is worth a boot check:
+// every ejection in this project is single-pass, which is correct exactly as
+// long as the props it ejects from do not intersect, and nothing else in the
+// game will ever tell you when that stops being true.
+//
+// A warning rather than a throw. An overlap is usually cosmetic — two bushes
+// sharing a hand's width of ground — and refusing to start over it would be a
+// worse bug than the one it reports. What it buys is that the day a piece of
+// furniture is authored on top of another, the reason is in the console instead
+// of being inferred from a bear that keeps getting stuck in a corner.
+if (IS_LOCAL) {
+  const clashes = auditSolids();
+  if (clashes.length) {
+    const R = CONFIG.globe.radius;
+    console.warn(
+      `[hidamari] ${clashes.length} overlapping solid footprint(s) — `
+      + 'ejections are single-pass and can land inside the neighbour. '
+      + 'Point peek.html at these to see them.',
+      clashes.map((c) => ({
+        pair: `#${c.i}+#${c.j}`,
+        overlap: +(c.overlap * R).toFixed(3),
+        radii: [+(c.a.r * R).toFixed(2), +(c.b.r * R).toFixed(2)],
+        tops: [c.a.top, c.b.top],
+      })),
+    );
+  }
+}
+
 // Handle for poking at the scene from the console while developing. Never
 // defined on the deployed site.
 if (IS_LOCAL) {
@@ -4364,6 +5041,30 @@ if (IS_LOCAL) {
     // `greetedKey` — which can be read, and set to 0 to try the thing again
     // without waiting out the cooldown.
     bots, rig, globe, household, you, fishing, inventory, social,
+    // The frame itself, so the whole of it can be driven by hand. A headless or
+    // hidden tab gets no `requestAnimationFrame` at all, which means the HUD
+    // paint — the half of every feature that decides what is on screen — is
+    // simply not running, and "the button did not appear" cannot be told apart
+    // from "no frame ever ran". Call it a few times with rising timestamps.
+    frame,
+    // The footprint check the boot ran, kept reachable so it can be asked again
+    // after a config edit without a reload — and so that "it printed nothing"
+    // can be told apart from "it never ran", which is the one thing a silent
+    // check can never say for itself.
+    // The collision discs themselves, which is what you want in front of you
+    // the moment anything is clipping: every one of them is `{dir, r}` plus a
+    // `top` if it is something you can stand on, and that pair is the whole of
+    // what the world means by solid.
+    solids: () => solids(),
+    audit: () => ({
+      // How many footprints were compared, so that a clean result reads as
+      // "checked and clean" rather than as "the list was empty".
+      checked: solids().length,
+      overlaps: auditSolids().map((c) => ({
+        pair: `#${c.i}+#${c.j}`,
+        overlap: +(c.overlap * CONFIG.globe.radius).toFixed(3),
+      })),
+    }),
     // THE SKY, by hand. `sky('rain')` holds it there; `sky()` gives it back to
     // the schedule. Every key in WEATHERS is fair game — see weather.js.
     //

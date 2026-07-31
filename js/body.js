@@ -153,6 +153,22 @@ export class TowedBody {
     // than under the camera.
     const fade = Math.min(1, Math.max(0, (rig.alt - BODY_LO) / (BODY_HI - BODY_LO)));
 
+    // ...AND WHETHER YOU ARE LOOKING AT YOURSELF, which is a different question
+    // from how high you are and must stay one.
+    //
+    // The selfie view wants the body DRAWN on the ground, where the altitude
+    // fade is zero. It emphatically does not want anything else the fade
+    // carries: the leash below is `BODY_LEASH * fade`, so borrowing this number
+    // for it would let the body trail several units behind you on a walk — you
+    // would be filming a friend of yours who is not quite keeping up. Same for
+    // the glide lift and the transit slides, which are all facts about being
+    // airborne.
+    //
+    // So the fade keeps its meaning and only the OPACITY takes the larger of
+    // the two. On the ground in a selfie, `fade` is 0 — leash zero, feet under
+    // you, standing pose — and `shown` is 1.
+    const shown = Math.max(fade, rig.selfie || 0);
+
     // The leash tightens as you come down, and reaching zero exactly where the
     // body finishes fading is what removes the last seam: on the way up the body
     // is released to stay behind, and on the way down it is drawn home, arriving
@@ -232,8 +248,8 @@ export class TowedBody {
       lift: GLIDE_LIFT * this.glide * fade,
       posture: fade > 0 && this.glide > 0.5 ? 'fly' : 'stand',
     });
-    you.fade = fade;
-    you.root.visible = fade > 0.004;
+    you.fade = shown;
+    you.root.visible = shown > 0.004;
     if (you.root.visible) you.update(dtMs, now, camera);
   }
 }

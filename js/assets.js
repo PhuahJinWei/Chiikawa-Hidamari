@@ -128,6 +128,19 @@ export const FLOWER_TEXTURE_VARIANTS = 4;
 // into the ground, they are lit exactly once, by the pool lying on them.
 export const MUSHROOM_VARIANTS = 2;
 
+// THE NOTES OVER A SINGER — `asset/images/effects/tune-N.webp`, one drawing per
+// note shape, picked from at random as each one floats up.
+//
+// A COUNT for the same reason every other variant here is one: assets.js awaits
+// every fetch, so probing for "however many exist" is not available, and a
+// number that lies is a start screen that never turns into an invitation. Draw
+// a fifth, change this to 5, add its path to sw.js.
+//
+// WebP because they are flat two-colour shapes with a lot of transparency, and
+// because nothing about a note needs a lossless edge — the same trade the pack
+// tiles make, at a twentieth of their size.
+export const TUNE_VARIANTS = 4;
+
 // Flip to true once `sun.png` and `moon.png` exist in asset/images/, and add
 // both to sw.js. Until then the sky paints the soft disc it always has, so this
 // costs nothing to leave off — and being a flag rather than a hopeful fetch, it
@@ -195,6 +208,7 @@ const ICONS = {
   chiikawaWeapon: 'special-chiikawa-fork',
   hachiwareWeapon: 'special-hachiware-fork',
   hachiwareGuitar: 'special-hachiware-guitar',
+  hachiwareCamera: 'special-hachiware-camera',
   chiikawaHouseKey: 'special-chiikawa-housekey',
 };
 
@@ -266,6 +280,13 @@ export async function loadArt(onProgress) {
   // The tree sheets went the same way, and `stump.png` with them out of WORLD
   // above — 199KB between them, the heaviest art in the project, fetched and
   // decoded on every cold visit for cards the cull is careful never to show.
+  // The notes, in their own folder and their own list on IMG — they belong to
+  // nobody's sheet and are not scenery, so they get neither table.
+  IMG.tune = [];
+  for (let v = 1; v <= TUNE_VARIANTS; v++) {
+    jobs.push(load(`${BASE}effects/tune-${v}.webp`).then((img) => { IMG.tune[v - 1] = img; }));
+  }
+
   for (const [prefix, count, key] of [
     ['flower', FLOWER_VARIANTS],
     ['flower-texture', FLOWER_TEXTURE_VARIANTS, 'flowerTexture'],

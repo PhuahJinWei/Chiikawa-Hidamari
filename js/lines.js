@@ -490,6 +490,24 @@ const hachiware = {
   ],
   // See the note on Chiikawa's. Hachiware hands it back the way Hachiware does
   // everything — cheerfully, and already looking forward to the next time.
+  // WHAT HE SINGS, on a stump, with a guitar — see PASTIMES in household.js.
+  //
+  // Hachiware's alone, and it had to be him: he is the one who finishes his
+  // sentences, so he is the one who can carry a tune with words in it. The
+  // lines are short because they are sung between strums rather than spoken,
+  // and none of them is ABOUT singing — somebody announcing that they are
+  // singing is not singing.
+  sing: [
+    { t: '♪ たん、たたん、たーん', expr: 'happy', w: 2 },
+    { t: '♪ はれた ひの うたー', expr: 'happy' },
+    { t: '♪ ららら、らー', expr: 'happy', w: 2 },
+    { t: '♪ きみと ぼくの、さんぽの うたー', expr: 'happy' },
+    { t: 'ふふ、いい かんじ!', expr: 'happy' },
+    { t: '♪ ひだまり、ひだまりー', expr: 'happy' },
+    { t: 'この きょく、いま つくった', expr: 'happy' },
+    { t: '♪ たん、たん、たーん…', expr: 'normal' },
+  ],
+
   handBack: [
     { t: 'はい、どうぞ! かして くれて ありがとう!', expr: 'happy' },
     { t: 'たのしかったよ〜! また かしてね!', expr: 'happy' },
@@ -674,6 +692,23 @@ const usagi = {
   ],
   // See the note on Chiikawa's. Usagi hands it back without ceremony and
   // without a word of actual Japanese, which is the whole of Usagi.
+  // ON TOP OF A PUDDING AND SLIDING, which is the loudest he ever gets — see
+  // PASTIMES in household.js.
+  //
+  // Almost no words even by his standards, because he is moving too fast to
+  // have any. What varies is LENGTH rather than vocabulary: that is the only
+  // dial a character without language has, and a long 「ウラララララ!!」 against
+  // a flat 「ヤ」 is the difference between a whoop and a wobble.
+  play: [
+    { t: 'ウラララララララ!!', expr: 'happy', w: 3 },
+    { t: 'ヤッハーーー!!', expr: 'happy', w: 2 },
+    { t: 'ウラ!!', expr: 'surprise' },
+    { t: 'ヤ! ヤ! ヤ!', expr: 'happy', w: 2 },
+    { t: 'プルルルルルル!!', expr: 'happy' },
+    { t: 'ウ…ラ…（まわってる）', expr: 'surprise' },
+    { t: 'ヤーーーッ!!!', expr: 'happy' },
+  ],
+
   handBack: [
     { t: 'ウラ! （さしだした）', expr: 'happy' },
     { t: 'ヤ〜ハ! ウラ!', expr: 'happy' },

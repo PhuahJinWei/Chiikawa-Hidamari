@@ -2904,6 +2904,205 @@ export function buildGuitar(h) {
   };
 }
 
+// ---------------------------------------------------- Hachiware's camera
+//
+// A tiny, toy-like compact camera rather than a realistic mechanical one. The
+// reference is read mostly by five broad marks: charcoal lower body, ivory top
+// band, an offset raised viewfinder, one large ringed lens, and a sparse row of
+// little controls. Each mark is real geometry so it survives both a straight-on
+// inventory view and the three-quarter view used while it is carried.
+
+function cameraPanelShape(w, h, topRadius, bottomRadius) {
+  const s = new THREE.Shape();
+  const x0 = -w / 2;
+  const x1 = w / 2;
+  const tr = Math.min(topRadius, w / 2, h / 2);
+  const br = Math.min(bottomRadius, w / 2, h / 2);
+  s.moveTo(x0 + br, 0);
+  s.lineTo(x1 - br, 0);
+  s.quadraticCurveTo(x1, 0, x1, br);
+  s.lineTo(x1, h - tr);
+  s.quadraticCurveTo(x1, h, x1 - tr, h);
+  s.lineTo(x0 + tr, h);
+  s.quadraticCurveTo(x0, h, x0, h - tr);
+  s.lineTo(x0, br);
+  s.quadraticCurveTo(x0, 0, x0 + br, 0);
+  s.closePath();
+  return s;
+}
+
+function cameraPanel(group, w, ht, depth, topR, bottomR, bevel, mat,
+  x, y, z, weight = INK_SMALL) {
+  return part(group, (pad) => {
+    const geo = cabinetExtrude(
+      cameraPanelShape(
+        w + pad * 2,
+        ht + pad * 2,
+        topR + pad,
+        bottomR + pad,
+      ),
+      depth + pad * 2,
+      bevel,
+    );
+    geo.translate(0, -pad, 0);
+    return geo;
+  }, mat, (m) => {
+    m.position.set(x, y, z);
+  }, weight);
+}
+
+export function buildCamera(h) {
+  const g = new THREE.Group();
+  const body = fillMat(PAL.cameraBody);
+  const side = fillMat(PAL.cameraSide);
+  const top = fillMat(PAL.cameraTop);
+  const lens = fillMat(PAL.cameraLens);
+  const glass = fillMat(PAL.cameraGlass);
+
+  const W = h * 1.60;
+  const D = h * 0.42;
+  const LOWER = h * 0.64;
+  const BAND = h * 0.28;
+  const BODY_TOP = LOWER + BAND;
+  const corner = h * 0.075;
+  const bevel = h * 0.018;
+
+  // The lower case and top band are separate wrapped solids. Their meeting
+  // edges supply the single strong horizontal line across front, sides and
+  // back instead of printing a stripe on one face only.
+  cameraPanel(
+    g, W, LOWER, D, h * 0.022, corner, bevel,
+    [body, side], 0, 0, 0, INK,
+  );
+  cameraPanel(
+    g, W, BAND, D, corner, h * 0.018, bevel,
+    [top, top], 0, LOWER, 0, INK,
+  );
+
+  const front = D / 2 + bevel * 0.35;
+  const rear = -front;
+
+  // Raised offset viewfinder. The pale housing is visible from every side;
+  // the two recessed grey panes distinguish its front and back from a handle.
+  const vfW = h * 0.35;
+  const vfH = h * 0.22;
+  const vfD = D * 0.58;
+  const vfX = -W * 0.28;
+  const vfY = BODY_TOP - h * 0.015;
+  cameraPanel(
+    g, vfW, vfH, vfD, h * 0.040, h * 0.030, h * 0.012,
+    [top, top], vfX, vfY, 0, INK_SMALL,
+  );
+
+  const vfPaneW = vfW * 0.52;
+  const vfPaneH = vfH * 0.39;
+  for (const face of [-1, 1]) {
+    cameraPanel(
+      g, vfPaneW, vfPaneH, h * 0.010, h * 0.018, h * 0.018, h * 0.004,
+      glass,
+      vfX,
+      vfY + vfH * 0.31,
+      face * (vfD / 2 + h * 0.008),
+      INK_SMALL * 0.72,
+    );
+  }
+
+  // Concentric lens barrel. The dark outer drum, pale trim and cool glass are
+  // three shallow cylinders, each slightly farther forward than the last.
+  const lensX = W * 0.15;
+  const lensY = LOWER * 0.48;
+  // Deliberately oversized against the small case. The reference camera is
+  // identified by its lens before any of its tiny controls, so the barrel
+  // occupies nearly three quarters of the charcoal panel's height.
+  const lensR = h * 0.235;
+  const ring = (radius, thick, z, mat, weight) => part(
+    g,
+    (pad) => new THREE.CylinderGeometry(
+      radius + pad,
+      radius + pad,
+      thick + pad * 2,
+      28,
+    ),
+    mat,
+    (m) => {
+      m.position.set(lensX, lensY, z);
+      m.rotation.x = Math.PI / 2;
+    },
+    weight,
+  );
+  ring(lensR, h * 0.055, front + h * 0.020, lens, INK_SMALL);
+  ring(lensR * 0.76, h * 0.026, front + h * 0.055, top, INK_SMALL * 0.72);
+  ring(lensR * 0.51, h * 0.022, front + h * 0.078, glass, INK_SMALL * 0.68);
+
+  // The small square flash, the oval sensor and the outlined top-band control.
+  cameraPanel(
+    g, h * 0.090, h * 0.090, h * 0.015,
+    h * 0.018, h * 0.018, h * 0.004,
+    top,
+    -W * 0.10,
+    LOWER * 0.63,
+    front + h * 0.016,
+    INK_SMALL * 0.70,
+  );
+
+  part(g, (pad) => new THREE.CylinderGeometry(
+    h * 0.028 + pad,
+    h * 0.028 + pad,
+    h * 0.014 + pad * 2,
+    16,
+  ), top, (m) => {
+    m.position.set(W * 0.36, LOWER * 0.64, front + h * 0.017);
+    m.rotation.x = Math.PI / 2;
+  }, INK_SMALL * 0.62);
+
+  cameraPanel(
+    g, h * 0.095, h * 0.088, h * 0.014,
+    h * 0.018, h * 0.018, h * 0.004,
+    top,
+    W * 0.31,
+    LOWER + BAND * 0.42,
+    front + h * 0.017,
+    INK_SMALL * 0.72,
+  );
+  cameraPanel(
+    g, h * 0.048, h * 0.045, h * 0.009,
+    h * 0.010, h * 0.010, h * 0.003,
+    glass,
+    W * 0.31,
+    LOWER + BAND * 0.54,
+    front + h * 0.029,
+    INK_SMALL * 0.50,
+  );
+
+  // Narrow case seams on front and back, plus the long dark top slot from the
+  // plan view. These are strokes rather than outlined solids, so they stay as
+  // quiet secondary details beside the lens.
+  for (const z of [rear - h * 0.008, front + h * 0.010]) {
+    const seam = new THREE.Mesh(
+      new THREE.BoxGeometry(h * 0.010, LOWER * 0.55, h * 0.010),
+      lens,
+    );
+    seam.position.set(-W * 0.25, LOWER * 0.44, z);
+    g.add(seam);
+  }
+  const topSlot = new THREE.Mesh(
+    new THREE.BoxGeometry(h * 0.42, h * 0.010, h * 0.020),
+    lens,
+  );
+  topSlot.position.set(W * 0.10, BODY_TOP + h * 0.016, h * 0.02);
+  g.add(topSlot);
+
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  return {
+    group: g,
+    fills: [body, side, top, lens, glass],
+    top: box.max.y,
+    rx: Math.max(box.max.x, -box.min.x),
+    rz: Math.max(box.max.z, -box.min.z),
+  };
+}
+
 // ---------------------------------------------------------- the nightstand
 //
 // A bedside cabinet: four feet, a carcass, a top slab that overhangs it, two
@@ -4068,6 +4267,7 @@ export const BUILD = {
   fridge: buildFridge,
   puddingcup: buildPuddingCup,
   guitar: buildGuitar,
+  camera: buildCamera,
   nightstand: buildNightstand,
   trashbag: buildTrashBag,
   trashbag2: buildTrashBagAlt,

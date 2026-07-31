@@ -457,6 +457,30 @@ export class Character {
     // It never bites in practice; `momonga-fly-snow.png` is drawn.
     this.snowFlyTex = snowSheets.fly ? sheetTex(snowSheets.fly) : this.flyTex;
 
+    // A HOBBY, which is a posture like the glide and measured like one — see
+    // POSTURES in cast.js. Usagi across the top of a pudding and Hachiware on a
+    // stump with a guitar are each a different silhouette from their standing
+    // sheet, so each gets a plane cut from its own drawing rather than the
+    // standing one squashed to fit.
+    //
+    // Absent for anybody who has not been drawn one, and the mode simply never
+    // offers them a pastime — the same half-drawn courtesy as a missing blink.
+    const past = sheets['pastime-1'];
+    if (past) {
+      this.pastimeTex = sheetTex(past);
+      this.pose['pastime-1'] = measure(
+        cachedCanvas(`sheet|${past.src}`, () => paintSheet(past)),
+      );
+    } else {
+      this.pastimeTex = null;
+    }
+    // ...and the same wrapped up. Falls back to the summer hobby rather than to
+    // standing, for the glide's reason: the posture IS the shape, and a momonga
+    // put back on its feet mid-glide is the one substitution that reads as a
+    // fault. Both drawings exist, so this never bites.
+    this.snowPastimeTex = snowSheets['pastime-1']
+      ? sheetTex(snowSheets['pastime-1']) : this.pastimeTex;
+
     this.bodyMesh = new THREE.Mesh(
       this.pose.stand.geo,
       spriteMaterial(this.sheet.normal),
@@ -828,9 +852,11 @@ export class Character {
     const sit = this.dressed ? this.snowSitTex : this.sitTex;
     const fly = this.dressed ? this.snowFlyTex : this.flyTex;
     const blink = this.dressed ? this.snowBlinkTex : this.blinkTex;
+    const hobby = this.dressed ? this.snowPastimeTex : this.pastimeTex;
     const posed = (this.posture === 'sit' && sit) ? sit
       : (this.posture === 'fly' && fly) ? fly
-        : null;
+        : (this.posture === 'pastime-1' && hobby) ? hobby
+          : null;
     const tex = posed
       || ((this._blinking && blink) ? blink : this._sheetTex);
     if (this.bodyMesh.material.map === tex) return;
@@ -868,6 +894,15 @@ export class Character {
     // number the grip is written in is a fraction of THIS pose's height.
     this._placeHold();
   }
+
+  // OFF THEIR FEET AND STAYING THERE. Sitting on a cushion and sitting on a
+  // pudding are the same fact to everything that asks: the wander is skipped,
+  // the ground shadow is off, and standing up is somebody else's decision.
+  //
+  // Written as a question rather than as `posture === 'sit'` repeated in three
+  // places, which is what it was — and the third of those is the one that would
+  // have been forgotten, sending somebody on a stroll off the top of a stump.
+  get perched() { return this.posture === 'sit' || this.posture === 'pastime-1'; }
 
   _setPosture(name) {
     if (this.posture === name) return;
@@ -1514,11 +1549,16 @@ export class Character {
   // its surface is. The seat is on the planet like everything else now, so
   // sitting is standing at its spot lifted by its height, with the posture
   // sheet or the sink doing the rest.
-  sitAt(dir, y) {
+  sitAt(dir, y) { this.perchAt(dir, y, 'sit'); }
+
+  // The same thing one step more general: stand them on top of something at
+  // height `y`, wearing whichever posture that thing calls for. A cushion takes
+  // `sit`; a pudding and a stump take the hobby drawing.
+  perchAt(dir, y, posture = 'sit') {
     this.dir.copy(dir).normalize();
     this.walking = false;
     this.errand = null;
-    this._setPosture('sit');
+    this._setPosture(posture);
     this.seatY = y;
     this._sync(CONFIG.globe.radius + y);
     // No ground shadow while they are off the ground. The seat casts its own,
@@ -1527,8 +1567,24 @@ export class Character {
     this.shadowHolder.visible = false;
   }
 
+  // DOWN OFF IT AND ONTO SOMEWHERE ELSE, in one movement.
+  //
+  // Getting off a thing is two facts — the posture changes and the body moves —
+  // and doing them apart leaves the second one unsaid to the scene graph.
+  // `root.position` is written by `_sync`, so setting `dir` by hand and calling
+  // `standUp` separately puts them back on their feet at the OLD radius:
+  // measured at 8.59 on a planet of 8, which is Hachiware standing in mid-air
+  // at stump height until his next step happened to sync him.
+  standUpAt(dir) {
+    this.dir.copy(dir).normalize();
+    this._setPosture('stand');
+    this.seatY = 0;
+    this._sync(CONFIG.globe.radius);
+    this.shadowHolder.visible = true;
+  }
+
   standUp() {
-    if (this.posture !== 'sit') return;
+    if (!this.perched) return;
     this._setPosture('stand');
     this.seatY = 0;
     // Off the seat and onto whatever the floor is at their feet. Standing up is
@@ -1554,7 +1610,7 @@ export class Character {
     // and a stroll taken from a cushion would be a stroll through the seat.
     // Driven, there is none either: the rig already stood the body somewhere
     // this frame — see standAt. Asleep, obviously none.
-    if (this.posture !== 'sit' && !this.driven && !this.asleep) {
+    if (!this.perched && !this.driven && !this.asleep) {
       this._wander(dtMs, tMs, watcher);
       // The vertical, AFTER the walk, because it asks what is under where they
       // now are: run it first and a step that carried somebody off a lip would

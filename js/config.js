@@ -596,6 +596,16 @@ export const PAL = {
   guitarSide: '#9D6138',
   guitarDark: '#4F352A',
 
+  // Hachiware's compact camera: charcoal enamel under an ivory top band, with
+  // a near-black lens barrel and a cool grey glass centre. It stays deliberately
+  // simple and high-contrast so the little controls remain readable in the
+  // cave's dim interior.
+  cameraBody: '#3E4346',
+  cameraSide: '#303537',
+  cameraTop: '#F7F4EE',
+  cameraLens: '#262323',
+  cameraGlass: '#555458',
+
   // Chiikawa's house key: a bright toy-like yellow that stays distinct from
   // the cream paper and brass lantern, with the shared furniture ink supplying
   // the dark outline around its silhouette and square hole.
@@ -1763,6 +1773,117 @@ export const CONFIG = {
     // and you outrun the friends you came to walk with, and the planet stops
     // feeling like anywhere.
     walkSpeed: 1.7,
+    // ------------------------------------------------- THE SELFIE VIEW
+    //
+    // A camera held out at arm's length in front of you, looking back — see
+    // `selfie` in camera-control.js.
+    //
+    // IT IS PRESENTATION, NOT SIMULATION, and that ruling is what makes the
+    // whole feature cheap. The lens moves at render time; `anchor`, `alt` and
+    // `isFirstPerson` do not, so every system that reads where you STAND —
+    // the verb stack, the acknowledgment distances, the hand's tow, the
+    // airborne release — carries on being right without being told. The
+    // alternative, a third rig state beside ground and sky, would have needed a
+    // carve-out in every one of them.
+    //
+    // A BILLBOARD WORLD CAN ONLY DO THIS ONE. Every character turns to face the
+    // lens, so a camera behind you would show Momonga walking away while
+    // looking back over their shoulder — the one shot this art cannot make. A
+    // selfie asks everybody to look at the camera, which is exactly what they
+    // already do.
+    //
+    // 3.4 units back frames you from about the knees up with a friend beside
+    // you, which is the shot this exists for. The lens sits at 1.9 — a shade
+    // above a 2.02-unit Momonga's eyeline, the angle a held-out arm actually
+    // gives — and aims at 1.25, chest height, so the horizon sits behind your
+    // shoulder rather than through your head.
+    selfieDist: 3.4,
+    // ...and how much further back when there are TWO of you. A friend walks
+    // 1.35 to your side, and at the single-portrait distance that put them half
+    // out of frame — measured, cropped down the middle at the screen edge. The
+    // shot this view exists for is the pair of you, so the lens takes a step
+    // back to hold it. Read off `leash`, which is already true exactly while a
+    // hand is being held.
+    selfiePair: 1.2,
+    // ...and how far a pinch may take it, either way. The near end is a
+    // shoulders-up portrait and the far end has the hillside behind you in it;
+    // past either the shot stops being of anybody. The world may still pull the
+    // lens nearer than you asked — see the march — but never further.
+    selfieMin: 2.2,
+    selfieMax: 5.5,
+    // HOW FAR ROUND YOU THE LENS MAY BE SLID, in radians — 30° each way. The
+    // arc, the zoom range above and the pitch's own lift are together the
+    // "fixed area" the camera may be moved in: a box around your shoulders that
+    // you cannot drive the camera out of, so no framing is ever a lost camera.
+    selfieSideMax: 0.52,
+    // Radians of swing per pixel of two-finger drag. A third of the screen is
+    // most of the arc, which is the rate a map app pans at and the one a thumb
+    // already knows.
+    selfiePanSens: 0.0022,
+    // ...and how much of that a held key is worth per second, IN THE SAME
+    // PIXELS, so the two surfaces go through one conversion rather than each
+    // carrying its own idea of how far a pan is. 170 crosses the whole arc in
+    // about a second and a half, which is a beat longer than a drag takes and
+    // is the right way round: a key is held, a finger is aimed.
+    selfiePanKey: 170,
+    // ...and the zoom's twin, in e-folds per second. The whole range from a
+    // portrait to the hillside is a ratio of 2.5, so 0.6 crosses it in about a
+    // second and a half too.
+    selfieZoomKey: 0.6,
+    // What a LENS needs to clear a trunk, as against the 0.15 berth a walking
+    // body keeps. Trunks are registered at 0.13–0.20 radians, so the body's
+    // margin was very nearly doubling every tree on the planet; this is enough
+    // that the near plane does not cut into the bark and no more. See
+    // _selfieReach, which measures what that was costing.
+    selfieClear: 0.02,
+    // How fast the lens slides round a tree it cannot see past. Slower than the
+    // 90ms the distance eases at, because a sideways slide is a much bigger
+    // thing to see than a few inches of dolly: at 90 it reads as the camera
+    // being knocked, at 260 as it stepping round.
+    selfieDodgeMs: 260,
+    selfieHigh: 1.9,
+    selfieAim: 1.25,
+    // How far the lens may be pushed up or down by a swipe, from `selfieHigh`.
+    // Enough for a low hero angle or a look down at the two of you; not enough
+    // to reach either pole of the shot, where the framing stops being a selfie.
+    selfieSwing: 1.5,
+    selfieLow: 0.85,
+    selfieTop: 3.6,
+    // How near the lens may ever come when the world pushes it in — see the
+    // march in _selfieReach. Below about this it is inside your own card.
+    selfieNear: 1.5,
+    // `selfieRoom: 2.1` stood here — a flat cap on the lens under any roof, on
+    // the grounds that a room is 4.5 across and a tight portrait is the only
+    // framing that fits. The reasoning was sound and the number could not carry
+    // it: 2.1 is the room's radius, so it was right on the rug and wrong at
+    // every other spot, and because it did not move with you it gave the SAME
+    // answer everywhere — 1.85 in all directions from anywhere in the house.
+    // It also sat below `selfieMin`, which made the pinch dead indoors.
+    // The room's own dome does the job now; see _selfieReach and roofHeight.
+    //
+    // What a lens needs between it and the plaster. The camera is a point, so
+    // this is near-plane clearance rather than a body's berth — the same
+    // distinction `selfieClear` draws for trunks. Big enough that the ceiling
+    // never crosses the near plane, small enough that it costs the room almost
+    // nothing: at 0.15 a lens at the default height reaches 2.2 of the 2.25
+    // there is, so the WALL stops it rather than this.
+    selfieHead: 0.15,
+    // Long enough to read as the camera being swung round rather than cut to,
+    // short enough that it never feels like waiting for a transition.
+    selfieEaseMs: 260,
+
+    // ...AND THE PACE YOU KEEP WHILE HOLDING SOMEBODY'S HAND.
+    //
+    // The cast walk at 0.80 and you at 1.70, so towing a friend at your own
+    // speed drags them along at twice their gait — feet sliding, the walk cycle
+    // running at a pace no drawing of them was made for, and the whole thing
+    // reading as pulling a toy on a string rather than as walking together.
+    //
+    // 1.10 is the compromise: still faster than they walk, because you ARE
+    // leading and a leash that matched their pace could never close a gap; slow
+    // enough that the difference reads as consideration rather than as lag.
+    // Walking hand in hand being slower is the fiction working, not a limit.
+    leadSpeed: 1.10,
     accelMs: 260,        // ease in and out; instant start/stop reads as ice
 
     // The run, armed by the sprint button: walkSpeed times this while a run is
@@ -2571,6 +2692,11 @@ export const CONFIG = {
       // back toward the left wall, leaving the bedding path unobstructed.
       { art: 'guitar', at: -2.70, out: 2.95, h: 1.28, spin: -1.13,
         lean: 1.12, lift: 0.615, item: 'hachiwareGuitar' },
+      // The compact camera rests upright near the right side of the cave. It is
+      // far enough in from the cabinet and fork to remain visible and reachable
+      // without narrowing the clear path through the middle.
+      { art: 'camera', at: 2.20, out: 2.35, h: 0.32,
+        item: 'hachiwareCamera' },
       // Chiikawa's former bare bulb, wired into the apex of the cave.
       //
       // `night: true` STOOD HERE and is gone from both bulbs. It meant "the
@@ -2654,6 +2780,30 @@ export const CONFIG = {
     // every couple of seconds is pacing, which reads as agitated rather than as
     // at home. Standing a good while and then drifting to the window is what
     // being indoors looks like.
+    // ------------------------------------------------------- THE NOTES
+    //
+    // What floats over somebody singing — see tuneAt in scene.js and `tune` in
+    // the PASTIMES table.
+    //
+    // A POOL OF FIVE, launched about every four fifths of a second and living a
+    // second and a half, so two or three are usually in the air at once. Fewer
+    // reads as punctuation rather than as music; more turns a stump into a
+    // fountain, and the drawings are big enough to crowd a small screen fast.
+    tuneCount: 5,
+    tuneEveryMs: 800,
+    tuneMs: 1500,
+    // How wide a note is drawn, in world units. About a third of a Chiikawa —
+    // plainly a mark rather than an object, and still legible on a phone.
+    tuneSize: 0.62,
+    // How far above the singer's own height they start, and how far they climb.
+    // The lift clears their head; the rise is what makes it a release.
+    tuneLift: 1.55,
+    tuneRise: 1.15,
+    // ...and how far they wander sideways on the way up, either way. Enough
+    // that no two take the same path, small enough that they stay over the
+    // singer rather than drifting off across the meadow.
+    tuneDrift: 0.55,
+
     potterMin: 6000,
     potterMax: 15000,
 
