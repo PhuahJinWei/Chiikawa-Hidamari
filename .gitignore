@@ -7,6 +7,17 @@ asset/generated test image/
 # Dev-only art preview page — imports js/art.js, not part of the site
 preview.html
 
+# Placement workbench — parks the camera inside a home for measuring
+# furniture positions (window.peek console). Dev tool, index.html never
+# loads it.
+peek.html
+js/peek.js
+
+# Retired art. Every reference in runtime JS is a comment noting the
+# drawings were archived here when foliage/grass became built geometry;
+# nothing fetches from this folder. Includes dated WIP screenshots.
+asset/images/legacy/
+
 # Contact sheets captured by goldens.html. The RIG is kept (goldens.html,
 # js/goldens.js, dev/compare.py) because every phase of the lighting rework is
 # verified with it; its output is not, at 2.4MB a sheet and regenerable in
