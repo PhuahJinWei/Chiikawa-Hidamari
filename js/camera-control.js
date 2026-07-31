@@ -46,13 +46,16 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import {
   dirFromLatLon, localFrame, inLake, lakeReach, lakeNormal,
-  inBuilding, buildingNormal, keepOutside, inScenery, buildings,
-  inSolid, solidNormal, keepOffSolids, groundUnder,
+  inBuilding, buildingNormal, keepOutside, inScenery, buildings, underRoof,
+  inSolid, solidNormal, keepOffSolids,
 } from './sphere.js';
-// One place decides whether a pond will carry somebody — see pondsFrozen. The
-// rig asks it about your feet; character.js asks the same function about
-// theirs, which is what stops you and a friend disagreeing about the same pond.
-import { pondsFrozen } from './weather.js';
+// Gravity and the surface underfoot, which the cast share — see walker.js.
+import { Walker } from './walker.js';
+// One place decides whether a pond will carry somebody — see pondsFrozen, and
+// `isWater` beside it, which is the whole of what the rig asks about ponds while
+// you are on your feet. character.js asks the same function about their feet,
+// which is what stops you and a friend disagreeing about the same pond.
+import { pondsFrozen, isWater } from './weather.js';
 
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -116,20 +119,10 @@ const SIGHT_SAMPLES = 4;
 const _bearing = new THREE.Vector3();
 const _sight = new THREE.Vector3();
 
-// Whether a spot is WATER — which a frozen pond is not.
-//
-// The three readers below are the whole of what the rig asks about ponds while
-// you are on your feet: may I step here, where does a tap resolve to, and am I
-// somehow standing in one. All three take the same answer, so the gate sits on
-// this one function and the two beside it rather than at each use.
-//
-// `inLake` underneath is untouched, and everything that PLACES a permanent
-// thing goes on refusing the pond whether or not it is frozen. See pondsFrozen.
-function isWet(dir, margin) {
-  if (pondsFrozen()) return false;
-  for (const lake of CONFIG.lakes) if (inLake(dir, lake, margin)) return true;
-  return false;
-}
+// `isWet` stood here — the freeze gate and a scan of the lakes, which is the
+// same four lines character.js and the body-tow each carried their own copy of.
+// It is `isWater` in weather.js now, next to the `pondsFrozen` it reads, so the
+// three readers share one answer by structure rather than by discipline.
 
 // Move a spot out of any lake it landed in, straight out to the nearest rim.
 // Used for the two cases that name a destination outright — a tap and a
@@ -151,25 +144,12 @@ function isWet(dir, margin) {
 // a shore, which is also somewhere you can stand — but a shore is where the
 // props are thickest, so clearing water last lets it have the final say over a
 // prop rather than the other way round.
-// Whether a spot is under a roof at all — wall band, doorway or open floor.
-//
-// NOT what `inBuilding` answers, and the difference is the whole reason this
-// exists. That one reports which building's WALL a spot is in, and deliberately
-// returns null once you are past the inner arc — "indoors, and free" — which is
-// precisely where somebody standing in a room is. Asked "are you inside?" about
-// the middle of Chiikawa's house it says no, which is right for the collision it
-// was written for and exactly backwards for framing. Measured: closeIn's indoor
-// exemption never once fired, and a conversation in the house retreated through
-// the front wall and out onto the grass.
-//
-// The outer radius is the roof's own edge, so this is one dot product per
-// building against a list of two.
-function underRoof(dir) {
-  for (const b of buildings()) {
-    if (dir.dot(b.dir) > Math.cos(b.r)) return true;
-  }
-  return false;
-}
+// A local `underRoof` stood here, and it was the same dot-product-per-building
+// that sphere.js already exported under that exact name — the only differences
+// being a boolean instead of the building, and no margin. Both callers here want
+// the truthiness, which the shared one gives for free. Keeping a second copy of
+// a question this load-bearing (see the note on it in sphere.js, and the two
+// bugs that came of asking `inBuilding` instead) is how the two drift.
 
 function keepClear(spot) {
   keepOutside(spot, CONFIG.player.wallKeep);
@@ -266,35 +246,24 @@ export class PlanetCamera {
     this.drive = 0;          // eased throttle, 0..1
     this.goto = null;        // unit surface direction from a tap-to-walk
     this.stepPhase = 0;
-    // THE VERTICAL, and it is three numbers rather than the one clock it used
-    // to be. The hop was a parabola read off `_hopT` and added at render time,
-    // which is all a jump needs to be while there is nowhere to land but the
-    // spot you left. There is now: stumps outdoors and every piece of furniture
-    // indoors have tops (see groundUnder in sphere.js), so a jump has to be able
-    // to END somewhere other than where it started.
-    //
-    //   stand   the height of the surface holding you up. 0 is the planet.
-    //   feet    where your feet actually are. Equal to `stand` while you are
-    //           stood on something, and only different in the air.
-    //   _vy     how fast they are moving, under gravity.
+    // THE VERTICAL, and it is no longer this class's to own. The hop was once a
+    // parabola read off `_hopT` and added at render time, which is all a jump
+    // needs to be while there is nowhere to land but the spot you left. There is
+    // now: stumps outdoors and every piece of furniture indoors have tops (see
+    // groundUnder in sphere.js), so a jump has to be able to END somewhere other
+    // than where it started — and once that is true, "how high are this body's
+    // feet" stops being a camera question. It is in walker.js, where the cast can
+    // ask it too; see the note at the top of that file for why having asked it
+    // twice was the one real asymmetry left in the world's rules.
     //
     // `alt` keeps its old meaning — the EYE's height, and the channel the pinch
     // and the sky button drive — so the landed/airborne split it decides is
     // untouched by any of this. What changes is that the landed value of it is
-    // `stand + eyeHeight` rather than eyeHeight flat, which is what standing on
-    // something means. The gap between feet and stand is added at render exactly
-    // where the hop used to be, so a jump that lands where it took off composes
-    // the identical height it always did.
-    this.stand = 0;
-    this.feet = 0;
-    this._vy = 0;
-    this._air = false;
-    // How far BELOW the surface the drawn eye still is, while it catches up
-    // with a snap the model already made — see _fall and player.pullMs. It is
-    // the only one of these four that is not part of the model at all: nothing
-    // asks it where you are, and it exists so that a ground height which has to
-    // change instantly does not have to LOOK as though it did.
-    this._pull = 0;
+    // `body.stand + eyeHeight` rather than eyeHeight flat, which is what standing
+    // on something means. The gap between the feet and the surface they belong to
+    // is added at render exactly where the hop used to be, so a jump that lands
+    // where it took off composes the identical height it always did.
+    this.body = new Walker(CONFIG.player);
     // The run. `sprintOn` is armed by a tap on the sprint button and stands
     // down BY ITSELF when you stop — see _walk — so it means "this movement
     // is a run", never "running is switched on": there is no state to forget
@@ -354,7 +323,7 @@ export class PlanetCamera {
   // hop is the exact bug the old separate hop channel existed to avoid. `stand`
   // is the surface you belong to, and it does not move while you are in the air
   // above it.
-  get eyeAlt() { return this.stand + CONFIG.camera.eyeHeight; }
+  get eyeAlt() { return this.body.stand + CONFIG.camera.eyeHeight; }
 
   // Strictly: both feet down. Not "close to the ground" — walking and
   // head-turning only exist here, and everywhere else is the globe view.
@@ -640,6 +609,54 @@ export class PlanetCamera {
     this._stepOrSlide(A, step);
   }
 
+  // GO ROUND THE THING WHOSE OUTWARD NORMAL IS `toward`. True if a step was
+  // taken; false leaves the frame untouched for the caller to try something else.
+  //
+  // The one ladder, where there were three transcriptions of it — the wall, the
+  // prop and the shore each carried their own, and the wall's and the prop's were
+  // identical to the character. They are one move because they are one idea: take
+  // the part of your travel that points INTO the obstacle back out, then, if that
+  // tangent gets nowhere, lean progressively further out until something does.
+  //
+  // The two reasons the ladder is needed are different and both still apply,
+  // which is why it is worth having said them where they were rather than only
+  // here:
+  //
+  //   A CIRCLE (a wall, a trunk) needs it because the tangent holds your distance
+  //   CONSTANT. Fine while you are outside it, useless the moment you are a hair
+  //   inside — and a hair inside is exactly where a refusal leaves you, so every
+  //   following step starts there. Measured pressing into a wall at 60 degrees:
+  //   stuck for 276 frames out of 300, throttle wide open, a third of a unit
+  //   travelled.
+  //
+  //   AN ELLIPSE (a shore) needs it because `inLake` measures in gnomonic angles
+  //   and `lakeNormal` is that same ellipse's gradient, so the two agree only to
+  //   first order. On a lake nearly twice as wide as it is tall a step along what
+  //   ought to be the tangent dips back inside — pinned at an ellipse value of
+  //   1.0009, too far out for the escape to fire and too far in for any tangent
+  //   to clear. Leaning out fixes it without anyone deriving the exact metric.
+  //
+  // The degenerate fallbacks are stacked rather than chosen per caller: head-on
+  // at the middle there is no tangent, so either way round will do (the cross),
+  // and if even that collapses the outward normal itself is a direction. The
+  // shore used to jump straight to the normal in that case; it still gets there,
+  // as the ladder's last rung, having tried along the shore first — which is what
+  // the other two already did and is the better answer for all three.
+  _slideRound(A, step, toward) {
+    const into = -this.travelDir.dot(toward);
+    if (into <= 0) return false;               // already heading away from it
+    _slide.copy(this.travelDir).addScaledVector(toward, into);
+    if (_slide.lengthSq() < 1e-10) _slide.crossVectors(A, toward);
+    if (_slide.lengthSq() < 1e-10) _slide.copy(toward);
+    _slide.normalize();
+    for (const mix of LEAN_OUT) {
+      _cand.copy(_slide).multiplyScalar(1 - mix).addScaledVector(toward, mix);
+      if (_cand.lengthSq() < 1e-10) continue;
+      if (this._tryStep(A, step, _cand.normalize())) return true;
+    }
+    return false;
+  }
+
   // One step along travelDir, unless it would land in a lake.
   //
   // Water is a wall you slide along rather than one you stop at. A flat refusal
@@ -665,34 +682,7 @@ export class PlanetCamera {
     // slides you along the room's rim, because the wall is the same wall from
     // both sides.
     if (this._hitWall && buildingNormal(A, this._hitWall, _toward)) {
-      const into = -this.travelDir.dot(_toward);
-      if (into > 0) {
-        _slide.copy(this.travelDir).addScaledVector(_toward, into);
-        // Straight at the centre leaves no tangent to pick; either way round
-        // the wall is as good as the other.
-        if (_slide.lengthSq() < 1e-10) _slide.crossVectors(A, _toward);
-        if (_slide.lengthSq() > 1e-10) {
-          _slide.normalize();
-          // The same ladder the shores need, and for a reason worth writing
-          // down because it is NOT the reason the lakes need one.
-          //
-          // A lake's ladder exists because its rim is an ellipse and the
-          // tangent is only correct to first order. A circle has no such
-          // excuse — and it still gets stuck, because the tangent holds your
-          // distance CONSTANT. That is fine when you are outside the wall and
-          // useless the moment you are a hair inside it, which is exactly where
-          // you end up: you are stopped at the boundary, so every step after
-          // that starts on it. Measured pressing into the wall at 60 degrees:
-          // stuck for 276 frames out of 300, throttle wide open, having moved
-          // a third of a unit. Leaning progressively outward always finds a way
-          // along.
-          for (const mix of LEAN_OUT) {
-            _cand.copy(_slide).multiplyScalar(1 - mix).addScaledVector(_toward, mix);
-            if (_cand.lengthSq() < 1e-10) continue;
-            if (this._tryStep(A, step, _cand.normalize())) return;
-          }
-        }
-      }
+      if (this._slideRound(A, step, _toward)) return;
       // Inside one somehow — a building placed on top of you, or a spot that
       // slipped through. Walk straight out, the way the water escape does.
       if (inBuilding(A, CONFIG.player.wallKeep)) {
@@ -701,34 +691,14 @@ export class PlanetCamera {
       }
     }
 
-    // A trunk or a stump. Identical in shape to the wall above, and
-    // deliberately a separate branch rather than a shared one: the two lists
-    // answer different questions and a prop has no doorway, no inside and no
-    // second face to decide between, so the only thing it would share is six
-    // lines that are about to read the same either way.
-    //
-    // A prop gets the wall's lean-out ladder for the wall's reason and not the
-    // shore's. The tangent to a circle holds your distance constant, which is
-    // fine until you have been stopped ON the boundary — and once you have, that
-    // is where every following step starts, so a tangent that neither gains nor
-    // loses ground never gets clear. Leaning progressively outward finds a way
-    // round, and finds it on the first rung whenever there is room.
+    // A trunk or a stump. The same ladder, and it stays a separate BRANCH even
+    // though it no longer holds a separate copy of the move: the two lists
+    // answer different questions, and a prop has no doorway, no inside and no
+    // second face to decide between — so what differs is which normal is handed
+    // over and what happens when the ladder fails, which is all that is left
+    // here now.
     if (this._hitProp && solidNormal(A, this._hitProp, _toward)) {
-      const into = -this.travelDir.dot(_toward);
-      if (into > 0) {
-        _slide.copy(this.travelDir).addScaledVector(_toward, into);
-        // Straight at the middle leaves no tangent to pick; either way round
-        // the trunk is as good as the other.
-        if (_slide.lengthSq() < 1e-10) _slide.crossVectors(A, _toward);
-        if (_slide.lengthSq() > 1e-10) {
-          _slide.normalize();
-          for (const mix of LEAN_OUT) {
-            _cand.copy(_slide).multiplyScalar(1 - mix).addScaledVector(_toward, mix);
-            if (_cand.lengthSq() < 1e-10) continue;
-            if (this._tryStep(A, step, _cand.normalize())) return;
-          }
-        }
-      }
+      if (this._slideRound(A, step, _toward)) return;
     }
 
     for (const lake of CONFIG.lakes) {
@@ -736,27 +706,7 @@ export class PlanetCamera {
       // lakeNormal. Getting that wrong pins you to a shore with the throttle
       // wide open and nothing to show why.
       if (!lakeNormal(A, lake, _toward)) continue;
-      const into = -this.travelDir.dot(_toward);
-      if (into <= 0) continue;                    // already heading out
-      _slide.copy(this.travelDir).addScaledVector(_toward, into);
-      if (_slide.lengthSq() < 1e-10) _slide.copy(_toward);
-      _slide.normalize();
-
-      // The tangent first, then progressively more of the way out.
-      //
-      // The tangent alone is not enough, which cost an afternoon. `inLake`
-      // measures in gnomonic angles and `lakeNormal` is that same ellipse's
-      // gradient, so the two agree only to first order — and on a lake nearly
-      // twice as wide as it is tall, a step along what ought to be the tangent
-      // dips back inside. That pinned the walk to a shore at an ellipse value
-      // of 1.0009: too far out for the escape below to trigger, too far in for
-      // any tangent to clear. Leaning out fixes it without anyone having to
-      // derive the exact metric.
-      for (const mix of LEAN_OUT) {
-        _cand.copy(_slide).multiplyScalar(1 - mix).addScaledVector(_toward, mix);
-        if (_cand.lengthSq() < 1e-10) continue;
-        if (this._tryStep(A, step, _cand.normalize())) return;
-      }
+      if (this._slideRound(A, step, _toward)) return;
     }
 
     // Somehow standing in the water — a lake resized underneath you, or a spot
@@ -785,7 +735,7 @@ export class PlanetCamera {
     // At your feet's height, like the refusal above. Standing ON something is
     // not being stuck inside it, and asking at ground level would read every
     // table you were stood on as a trap and shove you off it.
-    const stuck = inSolid(A, CONFIG.player.wallKeep, this._reach);
+    const stuck = inSolid(A, CONFIG.player.wallKeep, this.body.reach);
     if (stuck) {
       // Stood exactly on its centre there is no outward bearing to compute, and
       // it is the one place that needs none: every direction from the middle of
@@ -812,7 +762,7 @@ export class PlanetCamera {
 
     if (!force) {
       _probe.copy(A).applyQuaternion(_q).normalize();
-      if (isWet(_probe, CONFIG.player.shoreKeep)) return false;
+      if (isWater(_probe, CONFIG.player.shoreKeep)) return false;
       // Which building refused it, remembered rather than merely reported: the
       // slide below needs to know WHICH wall it is against, and asking again
       // from where we are standing would come back empty — we are outside it,
@@ -829,7 +779,7 @@ export class PlanetCamera {
       // across. `stepUp` is added because a kerb you may walk up must not also
       // be a kerb you are stopped by — the two rules meet at the same lip, and
       // disagreeing by a hair there is a floor you stick to.
-      const prop = inSolid(_probe, CONFIG.player.wallKeep, this._reach);
+      const prop = inSolid(_probe, CONFIG.player.wallKeep, this.body.reach);
       if (prop) { this._hitProp = prop; return false; }
     }
 
@@ -1051,149 +1001,42 @@ export class PlanetCamera {
   // re-arming on the way down would let a rhythm of taps hold you hovering.
   // True when the jump actually started, which is what the answer keys on.
   hop() {
-    if (!this.isFirstPerson || this._air) return false;
-    const p = CONFIG.player;
-    // The speed that makes hopHeight over hopMs under the gravity _fall uses:
-    // for a symmetric arc peaking at H after T/2, v0 is 4H/T. Written as a
-    // conversion rather than a number so the two config values keep meaning
-    // exactly what they say, and a taller or slower hop stays a hop.
-    this._vy = (4 * p.hopHeight) / (p.hopMs / 1000);
-    this._air = true;
-    return true;
+    // Off the planet there is no ground to push against, which is the rig's
+    // question rather than the body's — the walker only knows whether the feet
+    // are already in the air. Both refusals still hold; they are just asked by
+    // whichever of the two can actually answer.
+    if (!this.isFirstPerson) return false;
+    return this.body.hop();
   }
 
-  // Put the feet on whatever is under a spot, and forget any fall in progress.
-  // For arrivals, which choose a place to be rather than travelling to one.
+  // Put the feet on whatever is under a spot. For arrivals, which choose a place
+  // to be rather than travelling to one — see Walker.standOn for why it is asked
+  // with infinite reach and no ledge.
   //
-  // Asked with infinite reach, so it finds the highest thing under the spot
-  // rather than the highest thing you could have fallen onto — an arrival is
-  // placed, not dropped. In practice it is nearly always the floor, because
-  // every spot an arrival picks has been through keepClear, and furniture is
-  // solid now, so a tap cannot choose a table to stand on.
-  // No ledge margin here, unlike every other reader. The ledge is the overhang
-  // you keep while WALKING off something, and an arrival has not walked
-  // anywhere — granted it, a spot chosen beside a table (which is where
-  // keepClear puts every spot near one, at wallKeep out from its rim) counts as
-  // over the table, and you are placed standing on the furniture without having
-  // jumped. That was six of the six pieces in the room, on arrival, before
-  // anybody touched a control.
+  // In practice it is nearly always the floor, because every spot an arrival
+  // picks has been through keepClear, and furniture is solid, so a tap cannot
+  // choose a table to stand on.
   _standOn(spot) {
-    this.stand = groundUnder(spot, Infinity);
-    this.feet = this.stand;
-    this._vy = 0;
-    this._air = false;
-    // Nothing to catch up with: this is a placement, not a movement, and a lag
-    // carried into one would ease the eye up from a spot it was never at.
-    this._pull = 0;
+    this.body.standOn(spot);
   }
 
-  // How high the walk is allowed to treat itself as being, for deciding what
-  // is a wall and what is a floor. One number, asked by the step refusal, the
-  // stuck-escape and the mount below, because three answers to "how high are
-  // you" is three chances for a lip you can climb onto but not stand on.
-  //
-  //   on the ground   your feet plus the kerb you may walk up
-  //   rising          your feet plus the ledge you may catch
-  //   falling         your feet, and nothing added — a surface you are dropping
-  //                   past is not one you are getting onto
-  get _reach() {
-    const p = CONFIG.player;
-    if (!this._air) return this.feet + p.stepUp;
-    return this.feet + (this._vy > 0 ? p.mantle : 0);
-  }
-
-  // Gravity, and the surface underfoot. The whole of the vertical model.
-  //
-  // Two states and the traffic between them. In the AIR the feet integrate
-  // under gravity until they meet whatever is beneath them, which is how a hop
-  // can finish on a stump it did not start on. On the GROUND the feet follow
-  // the surface: a rise of up to `stepUp` is walked up without asking, and
-  // ground that falls away is walked off, which starts a fall with no upward
-  // speed rather than a jump.
+  // Gravity, and the surface underfoot — all of which is walker.js's now. What
+  // is left here is the one thing that is genuinely the CAMERA's business:
   //
   // MOVING `stand` MOVES `alt` WITH IT, by the same amount, and that pairing is
   // what makes every one of these transitions invisible. Height is composed as
-  // `alt + (feet - stand)`, so adding d to `stand` and d to `alt` leaves the sum
+  // `alt + body.lift`, so adding d to `stand` and d to `alt` leaves the sum
   // where it was — the eye does not jump at the moment of landing, it simply
   // stops falling. Get that wrong and every arrival on a table is a lurch.
+  //
+  // `update` returns exactly that d, on the frames there is one, which is why it
+  // returns anything at all: a body drawn straight off its own feet has nothing
+  // to do here and ignores the number.
   _fall(dtMs) {
-    const p = CONFIG.player;
-    const R = CONFIG.globe.radius;
-    // A long frame — a tab coming back from the background — must not drop you
-    // through the floor before anybody has had a chance to see where you were.
-    const dt = Math.min(dtMs, 50) / 1000;
-    const ledge = p.ledge / R;
-    const g = (8 * p.hopHeight) / ((p.hopMs / 1000) ** 2);
-
-    let move = 0;
-    if (this._air) {
-      const rising = this._vy > 0;
-      this._vy -= g * dt;
-      this.feet += this._vy * dt;
-      // NO LEDGE WHILE RISING, and that one asymmetry is what keeps the mantle
-      // honest. The ledge is forgiveness for leaving a surface — it stops a
-      // floor sampled once a frame dropping you the moment your centre clears
-      // the rim — and it has no business being forgiveness for ARRIVING on one.
-      // Granted both ways it is wider than wallKeep, so the spot the walk stops
-      // you at is already inside the grab: measured, hopping on the spot while
-      // pressed against a table climbed onto it, for all six pieces of furniture
-      // and without anybody asking to go up. Withheld on the way up, you have to
-      // put yourself over the thing — a tenth of a unit of walking, which is
-      // nothing while you hold the stick and impossible while you do not.
-      const ground = groundUnder(this.anchor, this._reach, rising ? 0 : ledge);
-      // Rising: catch the lip. `_reach` has already added the mantle, so this
-      // fires for a surface up to that far above the feet — the pull-up onto a
-      // table that the jump alone cannot reach. Falling: land on it, and reach
-      // adds nothing, so only a surface genuinely at or under the feet counts.
-      if ((rising && ground > this.stand + 1e-4) || (!rising && this.feet <= ground)) {
-        // Banked BEFORE the feet are moved, because it is exactly the distance
-        // they are about to be moved by. Added rather than assigned: a catch
-        // that lands while an earlier one is still easing off inherits the
-        // remainder instead of throwing it away, which is what stops a second
-        // pull-up snapping out the first.
-        this._pull += ground - this.feet;
-        move = ground - this.stand;
-        this.feet = ground;
-        this.stand = ground;
-        this._vy = 0;
-        this._air = false;
-      }
-    } else {
-      const ground = groundUnder(this.anchor, this._reach, ledge);
-      if (ground > this.stand + 1e-4) {
-        // A kerb. Anything taller than stepUp is not reachable this way — it is
-        // solid until you are above it, so the walk never brought you here.
-        //
-        // It banks the same lag as a catch, and it needs it just as badly: a
-        // step up is a whole kerb of eye movement in one frame, arriving while
-        // you walk on the flat. This was invisible for as long as stepUp was
-        // 0.25 and nothing in the world was under it — the rule ran on nothing.
-        // Raising it to 0.32 to take in the cushions is what made the step real,
-        // and a real step needs the ease or it is a stair that teleports you.
-        this._pull += ground - this.feet;
-        move = ground - this.stand;
-        this.stand = ground;
-        this.feet = ground;
-      } else if (ground < this.stand - 1e-4) {
-        // Walked off the edge of something. No upward speed: a step off a table
-        // is a step, not a leap.
-        this._air = true;
-        this._vy = 0;
-      }
-    }
-
+    const move = this.body.update(dtMs, this.anchor);
     if (move !== 0) {
       this.alt += move;
       this.altT += move;
-    }
-
-    // ...and the lag giving itself up. Against the clock like everything else
-    // that eases here, so it means the same on a 120Hz phone as on a 60Hz one.
-    // Zeroed rather than left to decay forever, since it is added into a
-    // position every frame and an exponential never actually arrives.
-    if (this._pull !== 0) {
-      this._pull *= Math.exp(-dtMs / p.pullMs);
-      if (Math.abs(this._pull) < 1e-4) this._pull = 0;
     }
   }
 
@@ -1256,7 +1099,7 @@ export class PlanetCamera {
     // eye is measured from, and `altT` was set before anybody knew where that
     // surface was going to be.
     this._standOn(this.anchor);      // clears the pull with it
-    if (this.altT <= CONFIG.camera.eyeHeight + this.stand + 1e-3) {
+    if (this.altT <= CONFIG.camera.eyeHeight + this.body.stand + 1e-3) {
       this.altT = this.eyeAlt;
       this.alt = this.altT;
     }
@@ -1341,8 +1184,7 @@ export class PlanetCamera {
       // pull goes with it for the same reason: it is a debt against a surface
       // you have just left, and paying it out on landing somewhere else would
       // ease the eye up out of ground it was never under.
-      if (this._air) { this._air = false; this._vy = 0; this.feet = this.stand; }
-      this._pull = 0;
+      this.body.release();
     }
 
     // The walk cycle: head rises on each footfall, and tips a little from side
@@ -1362,27 +1204,18 @@ export class PlanetCamera {
     const bob = Math.abs(Math.sin(this.stepPhase)) * p.bobAmp * gait;
     const roll = Math.sin(this.stepPhase * 0.5) * p.rollAmp * gait;
 
-    // The hop rides beside the bob, in the one place height is composed. A
-    // parabola rather than a sine: fast off the ground, hanging at the top,
-    // fast back down, which is what "jumped" looks like from inside the head
-    // doing it. It finishes on its own clock even if a pinch starts a climb
-    // mid-air — half a second of half a unit against a climb of tens is
-    // invisible, and cutting it dead would be a pop where nothing popped.
-    // The gap between your feet and the surface they belong to, added in the one
-    // place height is composed — exactly where the hop's parabola used to be
-    // added, and meaning the same thing whenever the jump ends where it began.
-    // Where it does not, `alt` has already been moved by the same amount in the
-    // other direction (see _fall), so the sum never jumps.
+    // The jump rides beside the bob, in the one place height is composed —
+    // exactly where the hop's parabola used to be added, and meaning the same
+    // thing whenever a jump ends where it began. Where it does not, `alt` has
+    // already been moved by the same amount in the other direction (see _fall),
+    // so the sum never jumps. `body.lift` is that gap less the pull, which is
+    // what makes the cancellation true of CATCHES as well as of falls; the
+    // reasoning is with the number, in walker.js.
     //
-    // Less the pull, which is what makes that true of CATCHES as well as falls.
-    // The cancellation only works when the feet were already level with the
-    // ground they land on, which is a fall and is not a mantle: catching a lip
-    // moves the feet as well as the surface, and the two no longer cancel. The
-    // pull is precisely the leftover, so subtracting it here holds the eye still
-    // on the frame of the catch and then hands the difference back over pullMs.
-    const hop = this.feet - this.stand - this._pull;
-
-    const height = R + this.alt + bob + hop;
+    // It finishes on its own clock even if a pinch starts a climb mid-air — half
+    // a second of half a unit against a climb of tens is invisible, and cutting
+    // it dead would be a pop where nothing popped.
+    const height = R + this.alt + bob + this.body.lift;
 
     const A = this.anchor;
     this._viewTangent(this._T);

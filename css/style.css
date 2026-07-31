@@ -92,6 +92,29 @@ html, body {
   touch-action: none;
 }
 
+/* WHERE THE KEYBOARD IS.
+
+   Nothing here was suppressing focus — there is no `outline: none` anywhere — so
+   a keyboard player was already getting a ring. They were getting the BROWSER'S
+   ring, though: a hard black hairline over a pastel meadow, on controls whose
+   whole language is soft rings and white rims. This is the same idea said in the
+   app's own accent, and `outline` follows `border-radius` on its own, so one rule
+   fits a circle, a pill and a tile alike.
+
+   `:focus-visible` and not `:focus`, which is the whole reason this is safe on a
+   touch-first app: it fires for a keyboard and stays out of the way of a thumb. */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The two that already carry a white rim get the offset pushed out past it, or
+   the ring lands ON the rim and reads as part of the button rather than as
+   something happening to it. */
+.ctl-icon:focus-visible,
+.chip:focus-visible,
+.act:focus-visible { outline-offset: 5px; }
+
 /* Said, but not shown. For the half of a label that an icon is already carrying
    to anybody who can see the icon. */
 .sr-only {
@@ -316,44 +339,13 @@ html, body {
 
 .controls.is-ready { opacity: 1; }
 
-/* THINNER THAN THE REST OF THE SET, on purpose.
-
-   `--ring-w` is where the ring ENDS, measured in from the edge, and `--ring-gap`
-   is where it starts — so what you actually see is the difference between them.
-   At 5 and 2 that was 3px of mauve, and on a 46px pill three of them stacked in a
-   column that read as a fence. At 3.5 it is 1.5px: the same ring, the same
-   language, a third of the weight.
-
-   The stack is the one family that wants this. The thumb circles are 80px and 64px
-   and carry 4px happily; these are the smallest things on the screen and there are
-   up to five of them touching. Fractional widths are safe here in a way they are
-   not on a border — box-shadow spread keeps them, `border-width` floors them. */
-.ctl {
-  --ring-w: 3.5px;
-  --ring-gap: 2px;
-  pointer-events: auto;
-  font-family: inherit;
-  font-weight: 700;
-  color: var(--ink);
-  background: var(--face);
-  border: none;
-  box-shadow: var(--shell);
-  cursor: pointer;
-  padding: 0;
-  transition: transform 0.12s ease, background 0.15s ease;
-}
-
-/* Presses go DOWN, not just smaller. A soft-shadowed object that only shrinks
-   reads as receding; dropping it into its own shadow at the same time is what
-   makes it read as pressed. */
-.ctl:active {
-  transform: translateY(2px) scale(0.96);
-  box-shadow:
-    inset 0 0 0 var(--ring-gap, 2px) var(--face),
-    inset 0 0 0 var(--ring-w) var(--ring),
-    0 0 0 3px var(--rim),
-    0 1px 4px rgba(91, 76, 68, 0.2);
-}
+/* `.ctl` and `.ctl:active` stood here — the base recipe every control in this
+   corner used to share, back when they were word-pills. Nothing wears the bare
+   class any more: the two verbs became `.ctl-icon`, and the clock and the sky
+   became `.chip`. What is left of it lives on in those, including the thin ring
+   the pills were given (3.5 out to a 2px gap, so 1.5px shows), which is now the
+   chip's. A base class with no subjects is worse than no base class — it reads
+   as the thing to edit. */
 
 .ctl-stack {
   display: flex;
@@ -385,7 +377,15 @@ html, body {
   font-family: inherit;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: transform 0.12s ease;
 }
+
+/* THE WHOLE BUTTON DIPS, disc and word together. The dip used to sit on the disc
+   alone, which left the caption hanging still while the thing it belongs to sank
+   — two halves of one object moving independently, which is the sort of thing you
+   feel before you can name. The shadow still tightens on the disc, because that
+   is the only part of it that has one. */
+.ctl-icon:active { transform: translateY(2px) scale(0.96); }
 
 .ctl-disc {
   --ring-w: 4px;
@@ -397,11 +397,10 @@ html, body {
   border-radius: 50%;
   background: var(--face);
   box-shadow: var(--shell);
-  transition: transform 0.12s ease, box-shadow 0.16s ease;
+  transition: box-shadow 0.16s ease;
 }
 
 .ctl-icon:active .ctl-disc {
-  transform: translateY(2px) scale(0.94);
   box-shadow:
     inset 0 0 0 var(--ring-gap) var(--face),
     inset 0 0 0 var(--ring-w) var(--ring),

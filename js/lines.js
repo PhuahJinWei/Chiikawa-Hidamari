@@ -6,6 +6,12 @@
 //   Hachiware — fluent and upbeat, finishes sentences, encourages you
 //   Usagi     — barely words at all, pure volume and momentum
 //
+// Chiikawa's ordinary chatter stays close to the small things that occupy him:
+// work, the weeding exam, food, and whether his friends are safe. Hachiware
+// turns those same things into plans, questions, discoveries, and invitations.
+// Usagi gets fewer lines on purpose. Japanese in parentheses is reserved for
+// visible actions; it never translates the noises and makes him secretly fluent.
+//
 // expr: normal | happy | delight | sleepy | worried | surprise
 // w: relative weight for the weighted random pick (default 1)
 //
@@ -14,13 +20,13 @@
 // or you brought them something — and spending it on an idle line would make
 // both occasions ordinary, which is the whole of why it is not spent there.
 //
-// `night` is the biggest bucket any of them has, and deliberately. Night is the
+// `night` is the broadest time-of-day bucket, and deliberately. Night is the
 // hour they are most awake, out under the stars, so it carries the stargazing —
-// and it stayed the biggest when midnight was carved out of the far end of it,
+// and it stayed broad when midnight was carved out of the far end of it,
 // because what midnight took was the hours nobody was using it for. Chiikawa is
 // quietly floored by it, Hachiware has a fact about it, Usagi just points.
 //
-// `midnight` is its opposite and is deliberately small: two lines each, sleepy,
+// `midnight` is its opposite and is deliberately small: four lines each, sleepy,
 // said on the way to bed. It is reached by the ordinary time-of-day chatter, so
 // it is what somebody says while they are still UP at that hour — which is most
 // of the walk home and nothing after it.
@@ -53,6 +59,10 @@ const chiikawa = {
     { t: '…ねむくなってきた', expr: 'sleepy' },
     { t: 'ずっと こうしてたいなぁ…', expr: 'happy' },
     { t: 'そばに いてくれて ありがと…', expr: 'happy' },
+    { t: 'おしごと…ちゃんと できるかな', expr: 'worried' },
+    { t: 'おやつ…まだ あるかな', expr: 'normal' },
+    { t: 'くさむしり…もっと じょうずに なりたい', expr: 'normal' },
+    { t: 'みんな、いま なにしてるかな…', expr: 'normal' },
   ],
   ask: [
     { t: 'ごはん、たべた…?', expr: 'normal' },
@@ -60,6 +70,10 @@ const chiikawa = {
     { t: 'ちゃんと ねてる…?', expr: 'worried' },
     { t: 'いいこと、あった…?', expr: 'happy' },
     { t: 'むりして ない…?', expr: 'worried' },
+    { t: 'いっしょに、くさむしり する…?', expr: 'happy' },
+    { t: 'おしごと…たいへん?', expr: 'worried' },
+    { t: 'なにか みつけた…?', expr: 'surprise' },
+    { t: 'おやつ、はんぶんこ する…?', expr: 'happy' },
   ],
   narrate: [
     { t: '（きょうの ごはん、なににしよ…）', expr: 'normal' },
@@ -67,18 +81,37 @@ const chiikawa = {
     { t: '（がんばったら、なんとか なるかな）', expr: 'normal' },
     { t: '（…なにか わすれてる きがする）', expr: 'surprise' },
     { t: '（くもが ゆっくり うごいてる…）', expr: 'happy' },
+    { t: '（こんどこそ…ごきゅう…）', expr: 'normal' },
+    { t: '（さすまた、れんしゅう しなきゃ…）', expr: 'worried' },
+    { t: '（みんなで たべると…おいしい）', expr: 'happy' },
+    { t: '（あしたのぶんも…のこしておこ）', expr: 'normal' },
   ],
   morning: [
     { t: 'おはよ…', expr: 'sleepy' },
     { t: 'あさだ…! すごい…', expr: 'happy' },
+    { t: 'ふぁ…、まだ ねむい…', expr: 'sleepy' },
+    { t: 'あさの くうき…、すきかも', expr: 'happy' },
+    { t: 'きょうも、がんばろ…', expr: 'normal' },
+    { t: 'はやおき、できた…!', expr: 'happy' },
+    { t: 'おしごとの じゅんび…しなきゃ', expr: 'normal' },
   ],
   noon: [
     { t: 'おひるだ…', expr: 'normal' },
     { t: 'ひなたが あったかい…', expr: 'happy' },
+    { t: 'おなか…、すいちゃった', expr: 'worried' },
+    { t: 'かげが、ちいさい…', expr: 'surprise' },
+    { t: 'ちょっと、ひるねしたい…', expr: 'sleepy' },
+    { t: 'いい てんき…、へへ', expr: 'happy' },
+    { t: 'ごほうび…なにに しよ', expr: 'happy' },
   ],
   evening: [
     { t: 'そらが あかい…', expr: 'happy' },
     { t: 'きょうも おつかれさま…', expr: 'happy' },
+    { t: 'もう、こんな じかん…', expr: 'surprise' },
+    { t: 'かえりみち…、いっしょに いこ?', expr: 'happy' },
+    { t: 'ゆうがた、ちょっと さみしい…', expr: 'worried' },
+    { t: 'そら、だんだん くらく なってく…', expr: 'normal' },
+    { t: 'きょうも、ぶじで よかった…', expr: 'happy' },
   ],
   night: [
     { t: 'もう おそいよ…?', expr: 'worried' },
@@ -89,10 +122,13 @@ const chiikawa = {
     { t: 'くらいけど…、こわく ないよ', expr: 'happy' },
     { t: 'ずっと みてたく なっちゃう…', expr: 'happy' },
     { t: 'ねむい…、けど まだ みてたい', expr: 'sleepy' },
+    { t: 'ハチワレたちも…みてるかな', expr: 'happy' },
   ],
   midnight: [
     { t: 'もう…、ねなきゃ…', expr: 'sleepy' },
     { t: 'ふぁ…、おやすみ…', expr: 'sleepy' },
+    { t: 'しずか…、だね…', expr: 'sleepy' },
+    { t: 'め、あいちゃう…', expr: 'sleepy' },
   ],
   // THE WEATHER, named after the weathers exactly as the four above are named
   // after the hours — see the ambient pick in dialogue.js, which reaches for
@@ -195,10 +231,14 @@ const chiikawa = {
     { t: 'なぁに…?', expr: 'normal' },
     { t: 'ん?', expr: 'surprise' },
     { t: 'よんだ…?', expr: 'happy' },
+    { t: 'あっ…どうしたの…?', expr: 'surprise' },
+    { t: 'これ…みてほしいの?', expr: 'normal' },
   ],
   greetBack: [
     { t: 'また きてくれた…!', expr: 'happy' },
     { t: 'さっきぶり…!', expr: 'happy' },
+    { t: 'あ…! もどってきた…', expr: 'happy' },
+    { t: 'もういっかい…あえた', expr: 'happy' },
   ],
   meet: [
     { t: 'あ…、いた', expr: 'happy' },
@@ -225,6 +265,8 @@ const chiikawa = {
   giftAgain: [
     { t: 'また…? いいの…?', expr: 'happy' },
     { t: 'さっきのも、まだ だいじに もってる…', expr: 'happy' },
+    { t: 'こんなに…もらって いいの…?', expr: 'surprise' },
+    { t: 'ちゃんと…しまっておくね', expr: 'happy' },
   ],
   // Their favourite — see `likes` in cast.js. Chiikawa's is a fistful of
   // weeds, which is the most Chiikawa thing that could possibly be true.
@@ -257,6 +299,11 @@ const hachiware = {
     { t: 'ふふん、なんだか いい きぶん!', expr: 'happy' },
     { t: 'すこし やすんでいきなよ', expr: 'normal' },
     { t: 'あわてなくて だいじょうぶ。じかんは あるよ', expr: 'normal' },
+    { t: 'しごとも みんなで やると、ちょっと たのしいね', expr: 'happy' },
+    { t: 'あとで みんなにも こえを かけようかな', expr: 'normal' },
+    { t: 'おなかが すくと、なんでも おいしく みえるねぇ', expr: 'happy' },
+    { t: 'どうぐの ていれも しておかなくちゃ', expr: 'normal' },
+    { t: 'うたってたら、なんだか げんきが でてきた!', expr: 'happy' },
   ],
   ask: [
     { t: 'きょうは どんな いちにちだった?', expr: 'normal' },
@@ -264,24 +311,48 @@ const hachiware = {
     { t: 'なにか こまってること、ない?', expr: 'worried' },
     { t: 'たまには やすんだほうが いいよ?', expr: 'normal' },
     { t: 'すきな たべものって なに?', expr: 'happy' },
+    { t: 'おしごと、うまく いってる?', expr: 'normal' },
+    { t: 'なにか おもしろいもの、みつけた?', expr: 'happy' },
+    { t: 'いっしょに くさむしり しにいく?', expr: 'happy' },
+    { t: 'こんど どこへ いってみたい?', expr: 'happy' },
   ],
   narrate: [
     { t: '（あしたは なにを しようかな）', expr: 'normal' },
     { t: '（こういう じかんが、いちばん しあわせかも）', expr: 'happy' },
     { t: '（あとで ちいかわに おしえてあげよう）', expr: 'happy' },
     { t: '（かぜの おとが きこえる…）', expr: 'normal' },
+    { t: '（ちいかわ、しけんの れんしゅうしてるかな）', expr: 'normal' },
+    { t: '（うさぎにも あとで こえを かけよう）', expr: 'happy' },
+    { t: '（この みち、どこまで つづいてるんだろう）', expr: 'normal' },
+    { t: '（きょうの ごほうび、なにに しようかな）', expr: 'happy' },
+    { t: '（ギター、あとで ひこうっと）', expr: 'happy' },
   ],
   morning: [
     { t: 'おはよう! きょうも いい ひに なるよ', expr: 'happy' },
     { t: 'あさの くうき、きもちいいね!', expr: 'happy' },
+    { t: 'あさは いちにちで いちばん しずかなんだって', expr: 'normal' },
+    { t: 'よく ねむれた? ぼくは ばっちり!', expr: 'happy' },
+    { t: 'さあ、なにから やろうか!', expr: 'happy' },
+    { t: 'あさひ、まぶしいねぇ', expr: 'happy' },
+    { t: 'あさのうちに、くさむしり してこようかな', expr: 'normal' },
   ],
   noon: [
     { t: 'おひるだ! なにか たべた?', expr: 'happy' },
     { t: 'ひざしが つよいね。むりしないで', expr: 'normal' },
+    { t: 'いまが いちにちで いちばん あかるい じかんだよ', expr: 'happy' },
+    { t: 'ひかげで やすむのも だいじだからね', expr: 'normal' },
+    { t: 'おひるね、しちゃう?', expr: 'happy' },
+    { t: 'ごごも いい かんじに なりそう!', expr: 'happy' },
+    { t: 'おひるごはん、みんなで たべようよ!', expr: 'happy' },
   ],
   evening: [
     { t: 'ゆうやけ、きれいだねぇ', expr: 'happy' },
     { t: 'きょうも よく がんばったね', expr: 'happy' },
+    { t: 'そらが あかいのは、ひかりが とおくを とおるからなんだ', expr: 'happy' },
+    { t: 'そろそろ かえる じゅんび しようか', expr: 'normal' },
+    { t: 'よるは すぐ くるからね。きを つけて!', expr: 'normal' },
+    { t: 'この じかんの そら、ぼく けっこう すきだな', expr: 'happy' },
+    { t: 'みんな ぶじだったし、きょうは いい ひだね!', expr: 'happy' },
   ],
   night: [
     { t: 'ほしが みえるよ。ほら、あそこ', expr: 'happy', w: 2 },
@@ -291,10 +362,13 @@ const hachiware = {
     { t: 'ながれぼし! おねがいごと、まにあった?', expr: 'surprise' },
     { t: 'ならんで みると、もっと きれいだよ', expr: 'happy' },
     { t: 'ねなくても へいきさ。きょうは とくべつ!', expr: 'happy' },
+    { t: 'ほしの ならび、きのうと すこし ちがうね', expr: 'surprise' },
   ],
   midnight: [
     { t: 'さすがに ねむくなってきたなぁ', expr: 'sleepy' },
     { t: 'ぼく、そろそろ かえるね。おやすみ!', expr: 'sleepy' },
+    { t: 'よふかしは よくないよ〜', expr: 'sleepy' },
+    { t: 'あしたも あるからね。ね?', expr: 'sleepy' },
   ],
   // Hachiware does weather the way Hachiware does everything: cheerfully, and
   // with a fact about it. The storm line is the one worth keeping if these are
@@ -377,10 +451,15 @@ const hachiware = {
     { t: 'ん? どうしたの?', expr: 'normal' },
     { t: 'よんだ? なになに?', expr: 'happy' },
     { t: 'おっと、びっくりした!', expr: 'surprise' },
+    { t: 'なにか みつけた?', expr: 'happy' },
+    { t: 'いっしょに いく?', expr: 'happy' },
+    { t: 'うん、きいてるよ!', expr: 'normal' },
   ],
   greetBack: [
     { t: 'おかえり! はやかったね', expr: 'happy' },
     { t: 'また あえたね!', expr: 'happy' },
+    { t: 'おかえり! こんどは どこへ いく?', expr: 'happy' },
+    { t: 'また きてくれたんだね!', expr: 'happy' },
   ],
   meet: [
     { t: 'やあ! なにしてたの?', expr: 'happy' },
@@ -402,6 +481,8 @@ const hachiware = {
   giftAgain: [
     { t: 'さっきも もらったのに… ありがと!', expr: 'happy' },
     { t: 'こんなに もらって いいのかなぁ', expr: 'happy' },
+    { t: 'また くれるの? うれしいなぁ!', expr: 'happy' },
+    { t: 'ちゃんと たいせつに しまっておくね!', expr: 'happy' },
   ],
   giftLove: [
     { t: 'おさかな! ぼく これ だいすきなんだ!', expr: 'surprise' },
@@ -429,40 +510,62 @@ const usagi = {
     { t: 'ウララ〜', expr: 'happy' },
     { t: 'ハァ…', expr: 'sleepy' },
     { t: 'フゥン', expr: 'normal' },
+    { t: 'ツツ ウラウラ', expr: 'happy' },
+    { t: 'ハァ?', expr: 'surprise' },
   ],
   ask: [
     { t: 'ウラ?', expr: 'surprise', w: 2 },
     { t: 'ヤ?', expr: 'normal' },
     { t: 'ウラ ウラ?', expr: 'happy' },
+    { t: 'フゥン?', expr: 'normal' },
   ],
   narrate: [
     { t: '（ウラ…）', expr: 'normal' },
     { t: '（…プルルル）', expr: 'sleepy' },
     { t: 'ウ ラ ラ', expr: 'happy' },
+    { t: 'ウララララ…', expr: 'happy' },
   ],
   morning: [
-    { t: 'ウラーッ!! （あさだ）', expr: 'happy' },
+    { t: 'ウラーッ!!', expr: 'happy' },
     { t: 'ヤハ!! ヤハ!!', expr: 'happy' },
+    { t: 'ウ…ラ…', expr: 'sleepy' },
+    { t: 'ヤーッハーッ!!!', expr: 'happy' },
+    { t: 'ウラ', expr: 'normal' },
+    { t: 'プルルルルル…（のび）', expr: 'sleepy' },
+    { t: 'ヤハァーッ!!', expr: 'happy' },
   ],
   noon: [
-    { t: 'ウラ! （はら へった）', expr: 'surprise' },
+    { t: 'ウラ!', expr: 'surprise' },
     { t: 'ハーッ', expr: 'normal' },
+    { t: 'ウララララ!!', expr: 'happy' },
+    { t: 'ヤ…', expr: 'worried' },
+    { t: 'ウラ!! ウラ!!', expr: 'happy' },
+    { t: 'フンフン♪', expr: 'happy' },
+    { t: 'ウラッ! ウラッ!', expr: 'happy' },
   ],
   evening: [
-    { t: 'ウラ…（きれい）', expr: 'happy' },
+    { t: 'ウラ…', expr: 'happy' },
     { t: 'ヤ〜ハ〜', expr: 'happy' },
+    { t: 'ウラーーーッ!! （そらを さした）', expr: 'surprise' },
+    { t: 'ハァ…', expr: 'normal' },
+    { t: 'ヤ! ヤ!', expr: 'happy' },
+    { t: 'ウラ…ウラ…（ゆっくり あるく）', expr: 'sleepy' },
+    { t: 'プルルル…', expr: 'normal' },
   ],
   night: [
-    { t: 'ウラ…（ほし）', expr: 'surprise', w: 2 },
+    { t: 'ウラ…', expr: 'surprise', w: 2 },
     { t: 'ウラーーッ!!', expr: 'surprise' },
     { t: 'ヤ〜…（みあげてる）', expr: 'happy' },
     { t: 'ウラ! ウラ!! （ゆびさし）', expr: 'happy' },
-    { t: 'ハァ…（きれい）', expr: 'happy' },
-    { t: 'プルルル…（ねむい）', expr: 'sleepy' },
+    { t: 'ハァ…', expr: 'happy' },
+    { t: 'プルルル…', expr: 'sleepy' },
+    { t: 'ウララ…', expr: 'happy' },
   ],
   midnight: [
-    { t: 'ハァ…（ねる）', expr: 'sleepy' },
+    { t: 'ハァ…', expr: 'sleepy' },
     { t: 'ウラ…', expr: 'sleepy' },
+    { t: 'プルルル…', expr: 'sleepy' },
+    { t: 'ヤ…', expr: 'sleepy' },
   ],
   // Usagi has no home to run to — see `hide` in household.js, which sends him
   // through whichever door is nearest — and the bank is written for somebody
@@ -536,10 +639,12 @@ const usagi = {
   poke: [
     { t: 'ウラ?!', expr: 'surprise', w: 2 },
     { t: 'ヤ!', expr: 'happy' },
+    { t: 'ハァ?', expr: 'surprise' },
   ],
   greetBack: [
-    { t: 'ウラ! また!', expr: 'happy' },
+    { t: 'ウラ! ウラ!', expr: 'happy' },
     { t: 'ヤハ!', expr: 'happy' },
+    { t: 'ウララーッ!', expr: 'happy' },
   ],
   meet: [
     { t: 'ウラ!', expr: 'happy' },
@@ -550,7 +655,7 @@ const usagi = {
     { t: 'ヤ〜', expr: 'happy' },
   ],
   water: [
-    { t: 'ウラ?! （みず）', expr: 'surprise' },
+    { t: 'ウラ?!', expr: 'surprise' },
     { t: 'プルルル…', expr: 'normal' },
   ],
   gift: [
@@ -561,9 +666,10 @@ const usagi = {
   giftAgain: [
     { t: 'ウラ! ウラ!', expr: 'happy' },
     { t: 'フンフン♪', expr: 'happy' },
+    { t: 'ヤハ! ヤハ!', expr: 'happy' },
   ],
   giftLove: [
-    { t: 'ウラ────ッ!!! （きのこ）', expr: 'surprise', w: 2 },
+    { t: 'ウラ────ッ!!!', expr: 'surprise', w: 2 },
     { t: 'ヤハーッ!! ヤハーッ!!', expr: 'happy' },
   ],
   // See the note on Chiikawa's. Usagi hands it back without ceremony and

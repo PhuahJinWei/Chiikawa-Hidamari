@@ -25,8 +25,10 @@ import { WATER_STENCIL } from './water.js';
 // Asked of the director for the same reason the hour is: one place decides. A
 // pond that is ground to one walker and water to another would be a pond two
 // characters disagreed about while standing on it together.
-import { pondsFrozen } from './weather.js';
+import { pondsFrozen, isWater } from './weather.js';
 import { fitHeld, heldMaterials } from './furniture.js';
+// Gravity and the surface underfoot, shared with the rig — see walker.js.
+import { Walker } from './walker.js';
 
 function clampUnit(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
@@ -210,10 +212,62 @@ export class Character {
     this.home = new THREE.Vector3(0, 1, 0);
     this.target = new THREE.Vector3(0, 1, 0);
     this.walking = false;
-    this.restUntil = 0;
+    // THE VERTICAL, the same one the rig runs — see walker.js. It is inert for
+    // most of a session, because nothing steers them onto anything: a target is
+    // pushed off every prop by keepOffSolids and every step of the path is
+    // trimmed against the same list. What it buys is that the cases which DO put
+    // a character above the floor — a kerb walked over on the way past, a piece
+    // of bedding, whatever a future errand thinks of — are drawn at the height
+    // they are actually at instead of clipping through it, and that walking off
+    // the edge of one is a fall rather than a teleport.
+    //
+    // The driven body gets one too and never runs it: the rig owns that body's
+    // height and hands it over through standAt. See update().
+    this.ground = new Walker(CONFIG.wander);
+    // `restUntil` and `busyUntil` stood here as plain fields. Both are entries
+    // in the ledger below now — 'rest' and 'talk' — so there is one store and
+    // one question rather than a field per reason.
     this.walkPhase = 0;
     this.attentive = false;   // set by main: true for whoever you came to see
-    this.busyUntil = 0;       // stopped to talk to one of the others
+
+    // ----------------------------------------------------------- THE HOLDS
+    //
+    // EVERY REASON THIS BODY IS NOT WALKING, in one place, each with a name and
+    // a time it runs out.
+    //
+    // There were five of these as separate fields — `restUntil`, `busyUntil`,
+    // the acknowledgment clock, the attention clock, and the seated check —
+    // written from three different files, and answering "why is this character
+    // standing still" meant reading all of them and knowing which outranked
+    // which. That question is the one every behaviour bug in this project has
+    // opened with, so it is worth being able to ask it directly: `heldBy(tMs)`
+    // names the reason.
+    //
+    // TWO KINDS, and the difference is real rather than bookkeeping:
+    //
+    //   an INTERRUPT hold stops a walk already in progress — you came over,
+    //   somebody started talking to them, the hour turned
+    //   a plain hold only stops them STARTING one — the rest between strolls
+    //
+    // Keeping them apart is what lets a rest be lazy: somebody mid-stroll with
+    // a rest booked walks it out and rests at the far end, which is what a rest
+    // between strolls means. Folding the two together would stop them dead
+    // wherever the timer happened to land.
+    this._holds = new Map();
+    // BEING NOTICED, which is three small pieces of state and no longer a
+    // question asked fresh every frame. See the pause in _wander.
+    //
+    //   _noticed   whether you are inside their personal space RIGHT NOW, held
+    //              across frames so that crossing INTO it is an event. The
+    //              radius it is measured against widens once it is true — see
+    //              closeSlack — so this is also where the hysteresis lives.
+    //   'noticed'  the ledger entry the pause books. After it runs out they
+    //              carry on with you standing there, which is the whole point.
+    //   _attnUntil when being the one you came to see stops holding them.
+    this._noticed = false;
+    this._attnUntil = 0;
+    this._attnWas = false;
+    this._visiting = false;
 
     // There is no "which world" field any more, because there is only one
     // world: indoors is a place you stand, not a stage you are on. Anyone who
@@ -581,8 +635,11 @@ export class Character {
   placeAt(lat, lon, radius) {
     surfacePoint(lat, lon, 1, this.dir).normalize();
     this.home.copy(this.dir);
-    this.restUntil = 600 + Math.random() * 3000;
-    this._sync(radius);
+    this.hold('rest', 600 + Math.random() * 3000);
+    // Put down on whatever is under the spot rather than dropped onto it — a
+    // placement, not a fall. See Walker.standOn.
+    this.ground.standOn(this.dir);
+    this._sync(radius + this.ground.drawFeet);
   }
 
   // Answer a hop with a hop, `delayMs` from now — a beat chosen by the caller,
@@ -594,6 +651,91 @@ export class Character {
   hopBack(delayMs) {
     if (this._hopT >= 0 || this._hopWait > 0) return;
     this._hopWait = Math.max(1, delayMs);
+  }
+
+  // ------------------------------------------------------------- the holds
+  //
+  // Book one. Later of the two if this reason is already booked, so two callers
+  // asking for the same thing cannot shorten each other — the pinned rests that
+  // hold somebody indoors are written every frame and would otherwise reset to
+  // a nearer deadline than one somebody else had set.
+  hold(reason, until, interrupt = false) {
+    const had = this._holds.get(reason);
+    if (had && had.until >= until) return;
+    this._holds.set(reason, { until, interrupt });
+  }
+
+  // ...and the other way, which one caller genuinely needs: SHORTEN a booking
+  // rather than extend it. A guest ticking off a waypoint caps their rest at a
+  // beat, because the walk machinery grants a full one at every arrival and
+  // eight seconds in a doorway mid-errand reads as stuck rather than as shy.
+  capHold(reason, until) {
+    const had = this._holds.get(reason);
+    if (!had) return;
+    if (had.until > until) had.until = until;
+  }
+
+  // Let one go early. `restUntil = 0` was how this used to be said, and it is
+  // what somebody in a hurry does to their own rest.
+  release(reason) { this._holds.delete(reason); }
+
+  // Is this ONE reason live? For the callers that care which — a slip should
+  // not interrupt a conversation, whatever else might be holding somebody.
+  holding(reason, tMs) {
+    const h = this._holds.get(reason);
+    if (!h) return false;
+    if (tMs < h.until) return true;
+    this._holds.delete(reason);
+    return false;
+  }
+
+  // WHY THEY ARE NOT MOVING, or null. The whole reason the ledger exists —
+  // console-friendly, and the first thing to ask of a character standing
+  // somewhere they should not be.
+  //
+  // `visited` is checked first and is not in the map, because it is the one
+  // hold with a shape a deadline cannot carry: being the one you came to see
+  // lasts a set time BUT ONLY WHILE YOU ARE STILL THERE, so walking away frees
+  // them inside the window. It is recomputed every frame from geometry in
+  // _wander; folding it in here is what keeps this the single question.
+  // An INTERRUPTING reason is reported ahead of a plain one, whatever order
+  // they were booked in. Both are true, but only one of them is the answer
+  // anybody wants: "resting" is what a character does between strolls and says
+  // nothing, while "somebody is talking to them" is the thing you were asking
+  // about. Insertion order would otherwise decide, which is not a fact about
+  // the character at all.
+  heldBy(tMs) {
+    const stopped = this.stoppedBy(tMs);
+    if (stopped) return stopped;
+    for (const [reason, h] of this._holds) {
+      if (tMs < h.until) return reason;
+      this._holds.delete(reason);
+    }
+    return null;
+  }
+
+  // ...and the same question restricted to the holds that STOP A WALK rather
+  // than merely postpone one. See the note on the ledger for why the two are
+  // not the same list.
+  stoppedBy(tMs) {
+    if (this._visiting) return 'visited';
+    for (const [reason, h] of this._holds) {
+      if (tMs >= h.until) { this._holds.delete(reason); continue; }
+      if (h.interrupt) return reason;
+    }
+    return null;
+  }
+
+  // SOMETHING PASSED BETWEEN YOU — a greeting, a poke, a present. Starts the
+  // attention window over, so a friend you are actually spending time with goes
+  // on giving you their attention for as long as that is true.
+  //
+  // Called on the exchanges you DO rather than on the lines they say: ambient
+  // chatter refreshing this would mean anybody who happened to be talking near
+  // you never went back to their day, which is the freeze again wearing a
+  // different clock. See wander.attnMs.
+  notice(tMs) {
+    this._attnUntil = tMs + CONFIG.wander.attnMs;
   }
 
   // Position on the sphere is kept as a unit direction, because wandering is a
@@ -1010,14 +1152,24 @@ export class Character {
     // and paths are trimmed to it, and neither of those leaves anybody within
     // it — and a third of a unit is inside the width of the card doing the
     // walking. From ordinary ground the same measurement is zero.
-    const standing = inSolid(this.dir, wall);
+    // AT THEIR OWN FEET'S HEIGHT, which is what makes a kerb a kerb for them and
+    // not a wall. It is the reading the rig has always used and they never had:
+    // a prop with a `top` at or below their reach is something they are ON or
+    // can step onto, not something in the way. Below `wander.stepUp` — a rug,
+    // the low bedding — they walk over it and the walker carries them up; above
+    // it, every stump and box and table is as solid to them as it was, and as it
+    // is to you. The two answers agreeing is the whole point: a friend strolling
+    // over something you are stopped by says the rule is about you rather than
+    // about the world, and so does the reverse.
+    const reach = this.ground.reach;
+    const standing = inSolid(this.dir, wall, reach);
     for (let i = 1; i <= PATH_STEPS; i++) {
       _probe.copy(this.dir).lerp(_dest, i / PATH_STEPS).normalize();
-      const prop = inSolid(_probe, wall);
+      const prop = inSolid(_probe, wall, reach);
       const propOk = !prop
         || prop === goal
         || (prop === standing && _probe.angleTo(prop.dir) > prop.r);
-      if (!this._inWater(_probe, keep)
+      if (!isWater(_probe, keep)
         && !inBuilding(_probe, wall)
         && propOk
         && Math.abs(_probe.y) <= poleLimit) continue;
@@ -1133,21 +1285,11 @@ export class Character {
     return false;
   }
 
-  // Whether a direction sits in WATER — which a frozen pond is not.
-  //
-  // The gate belongs here rather than at each call site because this is the one
-  // question the cast ask about ponds while they are walking, and the answer
-  // "it is ground now" is true for every one of those askers at once. `inLake`
-  // underneath is untouched and stays the plain geometric fact: everything that
-  // PLACES something permanent still avoids the pond, frozen or not, because a
-  // stump does not grow on a pond in July on the strength of a cold January.
-  _inWater(dir, margin) {
-    if (pondsFrozen()) return false;
-    for (const lake of CONFIG.lakes) {
-      if (inLake(dir, lake, margin)) return true;
-    }
-    return false;
-  }
+  // `_inWater` stood here. It was the freeze gate and a scan of the lakes —
+  // character for character the same method the rig carried as `isWet` and the
+  // body-tow open-coded a third time. It is `isWater` in weather.js now, beside
+  // the `pondsFrozen` it reads, so "may a body stand here" has one answer for
+  // everybody who walks rather than three that happened to agree.
 
   // `watcher` is where you are STOOD — a surface direction and a height above
   // it — or null when you are not on the planet at all.
@@ -1217,20 +1359,56 @@ export class Character {
     // still waits, indoors as much as out: that half is about what they are
     // doing, not about how much floor happens to be between you.
     const roofed = !!underRoof(this.dir);
-    const playerHere = !!watcher && watcher.alt < cfg.noticeAlt && (
-      (this.attentive && dot > Math.cos(cfg.noticeArc / R))
-      || (!roofed && dot > Math.cos(cfg.closeArc / R))
-    );
-    if (!this.hurrying && (tMs < this.busyUntil || playerHere)) {
+    const onFoot = !!watcher && watcher.alt < cfg.noticeAlt;
+
+    // A PAUSE ON THE EDGE, NOT A HOLD WHILE YOU STAND THERE.
+    //
+    // Both halves below used to be plain predicates — near them, or being
+    // visited — and a predicate with no clock in it cannot express "noticed
+    // you". It can only express "is currently near", which is what froze the
+    // cast solid for as long as anybody stood among them. What was wanted all
+    // along is an event: they see you arrive, they stop, and then they carry
+    // on. See wander.ackMin.
+    //
+    // Crossing IN is the event, so the state has to be remembered — and the
+    // radius widens once they have noticed, or somebody stood exactly on the
+    // line would re-notice every frame and be held forever by a rule designed
+    // to stop holding them.
+    const arc = (this._noticed ? cfg.closeArc + cfg.closeSlack : cfg.closeArc) / R;
+    const near = onFoot && !roofed && dot > Math.cos(arc);
+    if (near !== this._noticed) {
+      this._noticed = near;
+      // Only entering is worth a pause. Leaving simply re-arms it.
+      if (near) {
+        this.hold('noticed', tMs + cfg.ackMin + Math.random() * (cfg.ackMax - cfg.ackMin), true);
+      }
+    }
+
+    // ...and the same treatment for being the one you came to see, which needs
+    // it more rather than less: `attentive` is a focus that is never cleared, so
+    // without a window this held them from the tap onward. The window opens on
+    // the tap and every exchange after it pushes the end back — see notice().
+    if (this.attentive && !this._attnWas) this.notice(tMs);
+    this._attnWas = this.attentive;
+    // The one hold a deadline cannot express on its own — see heldBy.
+    this._visiting = this.attentive && onFoot && tMs < this._attnUntil
+      && dot > Math.cos(cfg.noticeArc / R);
+
+    // ONE QUESTION, where there were three. `busyUntil`, the acknowledgment
+    // clock and the attention window were each checked here by hand, in an
+    // order that had to be remembered; the ledger knows which of its entries
+    // stop a walk and answers for all of them at once. Adding a fourth reason
+    // is a `hold` call somewhere and no change to this line.
+    if (!this.hurrying && this.stoppedBy(tMs)) {
       if (this.walking) {
         this.walking = false;
-        this.restUntil = tMs + cfg.interruptRest;
+        this.hold('rest', tMs + cfg.interruptRest);
       }
       return;
     }
 
     if (!this.walking) {
-      if (tMs < this.restUntil) return;
+      if (this.heldBy(tMs)) return;
       // NOBODY IN A HURRY WANDERS. A walk with a deadline always carries an
       // errand, so this is a guard rather than a case: if one ever arrived here
       // without one, a random stroll is the last thing it should become — that
@@ -1257,7 +1435,7 @@ export class Character {
       // in the build before the cave existed too.
       if (this.dir.angleTo(this.target) < 1e-3
         && !(this.errand && this._detour(this.errand))) {
-        this.restUntil = tMs + cfg.interruptRest;
+        this.hold('rest', tMs + cfg.interruptRest);
         return;
       }
       this.walking = true;
@@ -1284,7 +1462,7 @@ export class Character {
       // walk cycle itself is untouched, so they still walk rather than glide;
       // what is gone is the standing about.
       if (!this.hurrying) {
-        this.restUntil = tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin);
+        this.hold('rest', tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin));
       }
     } else {
       _axis.crossVectors(this.dir, this.target);
@@ -1293,7 +1471,10 @@ export class Character {
       this.dir.applyAxisAngle(_axis, step).normalize();
       this.walkPhase += dtMs;
     }
-    this._sync(R);
+    // `_sync` stood here, and has moved to the caller. It has to run on frames
+    // this method returns early from — a character who walked off a lip is
+    // FALLING, and every one of the half-dozen holds above is a reason not to
+    // walk rather than a reason to hang in the air. See update().
   }
 
   // ----------------------------------------------------------------- update
@@ -1350,7 +1531,11 @@ export class Character {
     if (this.posture !== 'sit') return;
     this._setPosture('stand');
     this.seatY = 0;
-    this._sync(CONFIG.globe.radius);
+    // Off the seat and onto whatever the floor is at their feet. Standing up is
+    // an arrival like any other: they are placed on it, not dropped from the
+    // height the cushion held them at.
+    this.ground.standOn(this.dir);
+    this._sync(CONFIG.globe.radius + this.ground.drawFeet);
     this.shadowHolder.visible = true;
   }
 
@@ -1371,6 +1556,16 @@ export class Character {
     // this frame — see standAt. Asleep, obviously none.
     if (this.posture !== 'sit' && !this.driven && !this.asleep) {
       this._wander(dtMs, tMs, watcher);
+      // The vertical, AFTER the walk, because it asks what is under where they
+      // now are: run it first and a step that carried somebody off a lip would
+      // be judged against the spot they left. The rig does the same two in the
+      // same order for the same reason.
+      //
+      // Unconditional, unlike the walk — see the note at the foot of _wander.
+      // The return is the surface's own movement, which only an eye measured
+      // from it has to care about; a body drawn straight off its feet does not.
+      this.ground.update(dtMs, this.dir);
+      this._sync(R + this.ground.drawFeet);
     }
 
     // Face the camera squarely, leaning away from whatever they are stood on.

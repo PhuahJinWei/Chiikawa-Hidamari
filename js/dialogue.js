@@ -15,9 +15,48 @@ function holdFor(text) {
   return d.holdBase + text.length * d.holdPerChar;
 }
 
-function weightedPick(list, avoidText) {
-  const pool = list.filter((l) => l.t !== avoidText);
-  const src = pool.length ? pool : list;
+// A line from the bucket, avoiding anything said RECENTLY rather than only the
+// line said last.
+//
+// One back was the whole memory, and measured against the rate this app talks
+// it was not nearly enough. The cast speak every twelve seconds or so, and
+// standing with somebody sends 72% of that to them — see focusBias — so one
+// character draws from an ambient pool of about nineteen lines every seventeen
+// seconds. Simulated over 500 runs of fifteen minutes: the FIRST repeat landed
+// at ninety seconds, and the most-said line came round between six and eight
+// times. That is a loop, not a character.
+//
+// Widening the memory is the cheaper half of the fix and the bigger one. Same
+// measurement with a ten-deep memory: first repeat at 195s. Doubling the bank
+// INSTEAD only reached 134s — so remembering more beats writing more, and the
+// two together reach 260s, which is where it stops sounding like a script.
+//
+// The window is per character and spans buckets, which is what makes it mean
+// "do not repeat yourself" rather than "do not repeat this bucket". A rainbow
+// that once said two of its four lines will reach for the others next time.
+//
+// THE WINDOW SHRINKS TO FIT THE BUCKET rather than falling off a cliff, and
+// that detail is worth more than it looks.
+//
+// The first version filtered by the whole window and, if that left nothing,
+// dropped straight back to avoiding only the last line. Buckets smaller than
+// the window therefore got almost no memory at all — and half of them are.
+// Measured over 300 draws each: Chiikawa fell through 6 times, Hachiware 29,
+// and Usagi 72 — a QUARTER of his lines — because his `ask` and `narrate` hold
+// three lines against a window of ten, so the pool emptied constantly.
+//
+// Giving up one remembered line at a time instead means every bucket gets the
+// deepest memory it can support: a three-line bank still refuses the last two,
+// which is the best that can be done with three lines, and a seven-line bank
+// keeps all ten. The loop always ends with something to choose from, since a
+// window of nothing cannot exclude anything.
+function weightedPick(list, recent) {
+  let src = list;
+  for (let keep = recent.length; keep >= 0; keep--) {
+    const window = keep ? recent.slice(recent.length - keep) : [];
+    const pool = list.filter((l) => !window.includes(l.t));
+    if (pool.length) { src = pool; break; }
+  }
   let total = 0;
   for (const l of src) total += l.w || 1;
   let r = Math.random() * total;
@@ -36,7 +75,13 @@ export class Dialogue {
     this.onExpression = onExpression || (() => {});
     this.state = 'hidden';
     this.line = null;
-    this.lastText = '';
+    // `lastText` STOOD HERE and the window replaced it: the newest entry in
+    // `_recent` is the line said last, so a second field saying the same
+    // thing could only ever disagree with it.
+    // The last few things this one said, newest at the end — see weightedPick,
+    // which is the only reader. Per character, because it is a fact about a
+    // character rather than about the conversation.
+    this._recent = [];
     this.startedAt = 0;
     this.holdUntil = 0;
     this.shown = 0;
@@ -72,9 +117,10 @@ export class Dialogue {
   say(bucketKey, now) {
     const bucket = this.bank[bucketKey];
     if (!bucket || !bucket.length) return;
-    const line = weightedPick(bucket, this.lastText);
+    const line = weightedPick(bucket, this._recent);
     this.line = line;
-    this.lastText = line.t;
+    this._recent.push(line.t);
+    while (this._recent.length > CONFIG.dialogue.recentKeep) this._recent.shift();
     this.state = 'typing';
     this.startedAt = now;
     this.shown = 0;

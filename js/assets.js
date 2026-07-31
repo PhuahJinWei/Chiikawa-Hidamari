@@ -194,6 +194,7 @@ const ICONS = {
   trashBagAlt: 'unique-trashbag',
   chiikawaWeapon: 'special-chiikawa-fork',
   hachiwareWeapon: 'special-hachiware-fork',
+  hachiwareGuitar: 'special-hachiware-guitar',
   chiikawaHouseKey: 'special-chiikawa-housekey',
 };
 
@@ -208,9 +209,6 @@ const ICONS = {
 export const ICON_CAT = {
   ...Object.fromEntries(Object.entries(ICONS).map(([id, file]) => [id, file.split('-')[0]])),
   ...Object.fromEntries(FISH_SPECIES.map((sp) => [sp.id, 'fish'])),
-  // No separate bitmap is needed: unique items are photographed from their
-  // hand model. This only supplies the matching category-coloured slot border.
-  hachiwareGuitar: 'unique',
 };
 
 // Deliberately the load event and not decode().

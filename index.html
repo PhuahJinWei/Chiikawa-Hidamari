@@ -12,8 +12,7 @@
 <title>ちいかわと ひだまり</title>
 
 <link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./icon.svg" type="image/svg+xml">
-<link rel="icon" href="./icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="icon" href="./asset/images/chiikawa-house-plate.png" type="image/png">
 <!-- iOS ignores SVG for the home screen, so this one has to be a PNG. -->
 <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -177,8 +176,28 @@
        forever, whatever the label says or what language it is in, which is the
        whole of what was ragged before. The caption stays because this app talks
        — every other control here is a word, and a bare glyph would be the only
-       thing on screen asking to be guessed at. -->
+       thing on screen asking to be guessed at.
+
+       THE ORDER IS BY REACH, and in this corner that means the bag goes at the
+       BOTTOM. A thumb comes up from the base of the phone, so of two buttons in a
+       right-hand column the lower one is the nearer — and かばん is the one you
+       reach for over and over, to hand somebody a flower or put a fish away,
+       while そらへ is how you get about. The stack used to be the other way round
+       and had the frequent one furthest from the hand. -->
   <div id="ctl-stack" class="ctl-stack">
+    <!-- The glyph turns over with the verb, so it says what pressing it DOES
+         rather than where you happen to be — the rule the action pills already
+         follow. See the swap in frame(). -->
+    <button id="view-toggle" class="ctl-icon" type="button">
+      <span class="ctl-disc">
+        <svg id="view-glyph" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3.6 16.2c3.4-2.6 5.7-3.9 8.4-3.9s5 1.3 8.4 3.9"/>
+          <path d="M12 10.6V3.4"/>
+          <path d="m8.6 6.4 3.4-3 3.4 3"/>
+        </svg>
+      </span>
+      <span id="view-cap" class="ctl-cap">そらへ</span>
+    </button>
     <div id="pouch" class="pouch">
       <button id="pouch-toggle" class="ctl-icon" type="button">
         <!-- A BACKPACK, and it was a tote — a trapezoid with a wide handle arched
@@ -204,19 +223,6 @@
       </button>
     </div>
 
-    <!-- The glyph turns over with the verb, so it says what pressing it DOES
-         rather than where you happen to be — the rule the action pills already
-         follow. See the swap in frame(). -->
-    <button id="view-toggle" class="ctl-icon" type="button">
-      <span class="ctl-disc">
-        <svg id="view-glyph" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3.6 16.2c3.4-2.6 5.7-3.9 8.4-3.9s5 1.3 8.4 3.9"/>
-          <path d="M12 10.6V3.4"/>
-          <path d="m8.6 6.4 3.4-3 3.4 3"/>
-        </svg>
-      </span>
-      <span id="view-cap" class="ctl-cap">そらへ</span>
-    </button>
   </div>
 </div>
 

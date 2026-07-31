@@ -1655,6 +1655,50 @@ export const CONFIG = {
     // long before they think about setting off again. Shorter than restMin on
     // purpose: they were interrupted rather than finished.
     interruptRest: 1200,
+
+    // ------------------------------------------------- BEING NOTICED, AND THEN
+    //
+    // HOW LONG SOMEBODY PAUSES because you have come near them.
+    //
+    // This is the whole of the change from a freeze to an acknowledgment, and
+    // the bug it fixes was never in a number — it was in the SHAPE. `closeArc`
+    // was asked every frame as a plain predicate: are you within 3.6 of them,
+    // yes, then hold. There is no clock in a question like that, so standing
+    // beside a friend for three minutes held them for three minutes. Nobody
+    // ever chose "indefinitely"; it is simply what a stateless test gives you,
+    // and what it looked like was the entire cast turning to face you and
+    // waiting for permission to carry on existing.
+    //
+    // The intent was always momentary — the original note says "a friend who
+    // wandered over should stop" — so this is that intent given a duration. On
+    // the frame you cross into their space they stop, look at you for about
+    // four seconds, and then get on with their afternoon. Walk with them and
+    // they walk; stand there and they potter about you.
+    //
+    // A RANGE rather than one number, because three of them noticing you at
+    // once on the same tick and unfreezing together on the same tick reads as a
+    // cutscene ending. A second of spread is enough to break the unison.
+    ackMin: 3200,
+    ackMax: 5200,
+    // How much further they must get before being able to notice you AGAIN, on
+    // top of `closeArc`. Pure hysteresis: without it somebody stood on the line
+    // re-triggers the pause every frame the arithmetic wobbles across it, which
+    // is the permanent freeze rebuilt out of momentary ones. A third of a body
+    // width is plenty — this is not meant to be a big journey, just a real one.
+    closeSlack: 1.2,
+    // ...and how long being THE ONE YOU CAME TO SEE holds somebody, refreshed by
+    // every real exchange — see Character.notice.
+    //
+    // It needs a clock for a sharper reason than the proximity pause does.
+    // `attentive` is `rig.focus === ch`, and focus is deliberately never
+    // cleared: tap somebody once and they are the one you came to see until you
+    // pick a different person. Standing anywhere in the front garden — the arc
+    // is `noticeArc`, 6.5 — therefore pinned them from that tap onward, for the
+    // session. Thirty-eight seconds is long enough that a conversation, a
+    // present and a look round their garden all pass inside one window, and
+    // short enough that a friend you tapped and then wandered off from goes
+    // back to their own day. Any exchange starts it over.
+    attnMs: 38000,
     // How wide a berth a walk gives a lake, in radians on top of its own radius.
     // Applies to the destination and to every step of the path there.
     waterKeep: 0.05,
@@ -1676,6 +1720,42 @@ export const CONFIG = {
     // it is the shape of the gesture, not a number worth turning.
     hopBackAmp: 0.26,
     hopBackMs: 660,
+
+    // THE CAST'S OWN GAIT, for the shared vertical model — see walker.js, which
+    // the rig and every character now run alike.
+    //
+    // They had none before this, and that is the asymmetry it removes rather
+    // than an omission being filled in: the player integrated a height under
+    // gravity and could come to rest on a stump, while a character was pinned to
+    // radius zero and would have walked through the same stump's cut face at
+    // ankle level. Nobody saw it, because nothing ever put one of them on top of
+    // anything — but "nobody has tried it yet" is not a rule, and the day
+    // somebody wants Hachiware sat on a stump is the day it becomes one.
+    //
+    // MATCHED TO THE PLAYER'S EXCEPT WHERE BEING SMALL MEANS SOMETHING. Gravity
+    // is not here at all — it is the world's, derived from the player's jump,
+    // because two bodies dropping off the same table at different rates reads as
+    // a bug long before anybody works out what they are seeing.
+    //
+    // `stepUp` is the one number that is genuinely theirs. The player's 0.32 was
+    // measured to separate the bedding (0.30) from the box (0.38) and the
+    // smallest stump (0.36); the cast are shorter than you and it would be odd
+    // for them to stride up something you have to look at twice, so 0.22 keeps
+    // the bedding walkable and leaves everything the player has to climb as a
+    // wall for them too.
+    //
+    // `mantle` is 0, and deliberately: a pull-up is a thing you do with arms and
+    // an intention, and the cast have neither here — their hop is a drawn bounce
+    // in _animate, not a body leaving the ground. Nought means they can step up
+    // and they can walk off, and they never haul themselves anywhere.
+    stepUp: 0.22,
+    mantle: 0,
+    // The ledge under their heels, and the catch-up on a step. Both the same as
+    // the player's: one is about how often a surface is sampled and the other
+    // about how fast a rise may be shown, and neither has anything to do with
+    // how tall the thing walking is.
+    ledge: 0.12,
+    pullMs: 120,
   },
 
   player: {
@@ -2549,6 +2629,34 @@ export const CONFIG = {
     stayMin: 45000,
     stayMax: 95000,
 
+    // ---------------------------------------------------- POTTERING ABOUT
+    //
+    // How long somebody stands still indoors before drifting a few steps to
+    // somewhere else in the room.
+    //
+    // There used to be no such number, because indoors nobody moved at all:
+    // both the visit and the shelter pinned `restUntil` a second and a half
+    // ahead on EVERY frame, which is a hold that can never expire. The note on
+    // it read "no strolling indoors", and the fear behind that was real — a
+    // free stroll from inside eventually threads the door by chance, and then
+    // somebody in phase `home` is standing in the garden. But the cure was
+    // total: a room with three friends in it was three friends standing to
+    // attention, for the whole visit, which is the single clearest place this
+    // world looked switched off rather than lived in.
+    //
+    // What replaces it is a stroll that CANNOT reach the door rather than one
+    // that is forbidden — see _roomSpot, which never picks past 0.7 of the walk
+    // radius. The fear is answered by construction, so the pinning is not
+    // needed to answer it.
+    //
+    // LONG, and much longer than the wander's own rest. A room is four and a
+    // half units across, so a few steps is most of it: somebody crossing it
+    // every couple of seconds is pacing, which reads as agitated rather than as
+    // at home. Standing a good while and then drifting to the window is what
+    // being indoors looks like.
+    potterMin: 6000,
+    potterMax: 15000,
+
     // Never the whole cast. Coming back to an empty planet because all three
     // happened to be indoors would read as them having left rather than as
     // them being home.
@@ -3244,6 +3352,27 @@ export const CONFIG = {
     gapMax: 11000,
     longIdleMs: 55000,
     focusBias: 0.72,     // chance the character you are visiting is the one who speaks
+
+    // HOW MANY OF THEIR OWN LAST LINES A CHARACTER WILL NOT REPEAT.
+    //
+    // It was effectively 1 — `weightedPick` avoided the line said immediately
+    // before and nothing else — and against the rate this app talks that is
+    // almost no memory at all. Simulated over 500 runs of standing with one
+    // character for fifteen minutes: the first repeat arrived at ninety
+    // seconds and the most-said line came round six to eight times.
+    //
+    // TEN, chosen by measurement rather than by feel. It pushes the first
+    // repeat to 195s on the same test, which beats DOUBLING every ambient
+    // bucket (134s) — the cheaper fix is also the larger one, because what
+    // makes chatter feel scripted is hearing a line again soon rather than
+    // hearing it often.
+    //
+    // Not much higher, and the reason is the small buckets rather than cost.
+    // Most of the event banks hold two to four lines, so a window wider than a
+    // bucket means every draw from it falls through to the fallback and the
+    // memory stops meaning anything there. Ten sits above the ambient buckets
+    // that need it and below the point where it would swallow the rest.
+    recentKeep: 10,
     // How far a talking character bounces. A drawn face cannot flap its mouth,
     // so this is the only thing marking out who is speaking from a distance —
     // but much past 0.05 and they look like they are jumping rather than

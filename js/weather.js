@@ -37,6 +37,9 @@
 
 import { CONFIG } from './config.js';
 import { nowHours, activePhase } from './daylight.js';
+// One way only — sphere.js has no dependency but three.js, which is what makes
+// it safe for this file to reach down into. See isWater at the foot of the file.
+import { inLake } from './sphere.js';
 
 // WHAT A FULL WASH MULTIPLIES THE WORLD BY. One colour for the whole system,
 // with each weather choosing only how much of it to apply.
@@ -757,6 +760,28 @@ export function iceLook() { return ice; }
 // character.js, camera-control.js and main.js, which are the whole list.
 export function pondsFrozen() {
   return ice > CONFIG.weather.bearsAt;
+}
+
+// ...and the question every one of those readers was actually asking: IS THIS
+// SPOT WATER RIGHT NOW — which a frozen pond is not.
+//
+// It existed three times before it existed once: `isWet` in camera-control.js,
+// `_inWater` in character.js, and an open-coded loop over CONFIG.lakes beside
+// the body-tow in main.js. All three were the same four lines — the freeze gate,
+// then a scan of the lakes — and all three agreed, by discipline rather than by
+// structure. That is exactly the arrangement the file header above warns about
+// for the hour: a rule kept in step by hand is one that comes apart the first
+// time somebody edits two of its copies and not the third.
+//
+// It lives HERE rather than in sphere.js on purpose. `inLake` is a geometric
+// fact and sphere.js is deliberately the layer with no dependency but three.js;
+// whether that geometry may be STOOD ON is a live question about the weather, so
+// it belongs on this side of the line. The edge runs one way — weather imports
+// sphere, never the reverse — so there is no cycle to arrange around.
+export function isWater(dir, margin = 0) {
+  if (pondsFrozen()) return false;
+  for (const lake of CONFIG.lakes) if (inLake(dir, lake, margin)) return true;
+  return false;
 }
 
 // Whether anybody sensible would be indoors. See the hysteresis above.

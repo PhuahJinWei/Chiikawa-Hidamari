@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v111';
+const CACHE = 'hidamari-v118';
 
 const ASSETS = [
   './',
@@ -23,6 +23,7 @@ const ASSETS = [
   './js/camera-control.js',
   './js/character.js',
   './js/dialogue.js',
+  './js/social.js',
   './js/lines.js',
   './js/config.js',
   './js/cast.js',
@@ -134,6 +135,7 @@ const ASSETS = [
   './asset/images/icon/icon-fish-pink-ripplefin.webp',
   './asset/images/icon/icon-fish-sky-teardrop-fish.webp',
   './asset/images/icon/icon-special-chiikawa-fork.webp',
+  './asset/images/icon/icon-special-hachiware-guitar.webp',
   './asset/images/icon/icon-special-hachiware-fork.webp',
   './asset/images/icon/icon-special-chiikawa-housekey.webp',
   './asset/images/icon/icon-unique-bear.webp',

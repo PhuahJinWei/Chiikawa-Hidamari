@@ -21,7 +21,7 @@ import {
 } from './art.js';
 import { Weatherfall } from './falling.js';
 import { Snowfield, BASE as FIELD_BASE } from './snowfield.js';
-import { WEATHERS, WEATHER_CAST } from './weather.js';
+import { WEATHERS, WEATHER_CAST, isWater } from './weather.js';
 import { BUILD } from './furniture.js';
 import {
   buildTree, buildStump, buildGrassBlades, inkMaterials,
@@ -37,7 +37,7 @@ import { RENDER_SPAN } from './character.js';
 import {
   UP, orientBillboard, dirFromLatLon, inLake, setBuildings, inBuilding, setScenery,
   setSolids, addSolids, groundCap, SHADOW_LIFT, localFrame, biomesAt, growWeight,
-  lakeReach, perchAlongRay, inSolid, underRoof,
+  lakeReach, perchAlongRay, inSolid, underRoof, keepOffSolids,
 } from './sphere.js';
 import { buildLake, driftWater, waterHour } from './water.js';
 import { FishSchool } from './fish.js';
@@ -918,6 +918,8 @@ const _q = new THREE.Quaternion();
 const _looseOut = new THREE.Vector3();
 const _looseE = new THREE.Vector3();
 const _looseN = new THREE.Vector3();
+// The lake's own centre, for the outdoor half of the clamp.
+const _looseC = new THREE.Vector3();
 const _looseGo = new THREE.Vector3();
 const _looseAxis = new THREE.Vector3();
 const _looseQ = new THREE.Quaternion();
@@ -8172,6 +8174,53 @@ ${shader.fragmentShader}`
               .addScaledVector(_looseOut, Math.sin(arc)).normalize();
             const into = n.vel.dot(_looseOut);
             if (into > 0) n.vel.addScaledVector(_looseOut, -into);
+          }
+        }
+      } else {
+        // ...AND THE FENCE FOR A PIECE OUT ON THE GRASS, which had none because
+        // until the shove was let out of doors it could never need one. The
+        // clamp above is the room's wall, and a bear in a meadow has no wall —
+        // but it does have two edges, and both of them are places a TAP is
+        // already forbidden to put it:
+        //
+        //   A POND. Setting a piece down on water is ぽちゃん — the pond keeps it
+        //   a moment and it finds its way home (see putDownUnique) — and on ice
+        //   the set-down is refused outright, because a lantern left on a frozen
+        //   pond is floating in open water twenty minutes later. A shin that
+        //   could shove one out there would be a way round both rules.
+        //
+        //   A TRUNK. Somewhere the shover cannot follow it, so a piece knocked
+        //   inside one can only be got back by waiting for it to go home.
+        //
+        // Same move as the room's clamp: put it back on the legal side and drop
+        // the part of its travel that was heading in, because a toy shoved at
+        // something fetches up against it rather than bouncing off. Only ever
+        // reached by a piece already in motion — a resting one is skipped well
+        // above — so nothing standing legitimately still is ever pushed about.
+        keepOffSolids(n.dir, 0);
+        // The ice is ground, and a bear scooting across a frozen pond is a
+        // better joke than a fence. `isWater` is the one place that is decided.
+        if (isWater(n.dir, CONFIG.player.shoreKeep)) {
+          for (const lake of CONFIG.lakes) {
+            if (!inLake(n.dir, lake, CONFIG.player.shoreKeep)) continue;
+            dirFromLatLon(lake.lat, lake.lon, _looseC);
+            _looseOut.copy(n.dir).addScaledVector(_looseC, -n.dir.dot(_looseC));
+            if (_looseOut.lengthSq() < 1e-12) {
+              // Dead in the middle, so no bearing to leave along; any will do.
+              localFrame(_looseC, _looseE, _looseN);
+              _looseOut.copy(_looseN);
+            }
+            _looseOut.normalize();
+            // How far the shore is ALONG THIS BEARING — a lake is an ellipse
+            // with a wobbled rim, so "out" is a different distance every way.
+            const edge = lakeReach(lake, _looseOut, CONFIG.player.shoreKeep);
+            n.dir.copy(_looseC).multiplyScalar(Math.cos(edge))
+              .addScaledVector(_looseOut, Math.sin(edge)).normalize();
+            // `_looseOut` points OUT of the water here, where the room's points
+            // out toward its wall — so it is the inward half that is dropped,
+            // and the sign flips with it.
+            const into = n.vel.dot(_looseOut);
+            if (into < 0) n.vel.addScaledVector(_looseOut, -into);
           }
         }
       }

@@ -32,7 +32,7 @@
 // nothing waited out, because rain is not a suggestion either. What separates
 // them is only what they do at the far end — one lies down, the other stands in
 // a room and waits — and WHOSE DOOR they aim at, which is the only interesting
-// difference of the two. See _toShelter.
+// difference of the two. See the shelter mode.
 //
 // BEDTIME WINS over rain, and there is nothing to arbitrate: it is checked
 // first and returns. Rain in the small hours is real and it is QUIET — everyone
@@ -98,6 +98,86 @@ const _cross = new THREE.Vector3();
 
 function between(a, b) { return a + Math.random() * (b - a); }
 
+// ---------------------------------------------------------------- THE MODES
+//
+// The four things anybody in this world can be doing, most urgent first, as
+// objects rather than as a ladder of `if`s.
+//
+// WHAT THIS REPLACED, because the shape of the old version is the whole reason
+// for the new one. Every mode used to be a branch in one long chain, and every
+// branch had to handle its own arrival AND its own departure AND undo whatever
+// the mode before it had left lying about. Bedtime cleared the shelter's
+// borrowed door; leaving the shelter repointed the visit's home; six different
+// places each had to remember the cushion, the `hurrying` flag and the rest
+// clock. Adding a fifth mode meant touching all four of the others, which is
+// O(modes²) work and exactly where every behaviour bug of the last week lived:
+// a shelter that pinned somebody the visiting machine had parked, a `phase`
+// string that two machines both spelled `inside`.
+//
+// So: a mode ANSWERS FOR ITSELF.
+//
+//   wants   may I run, given the world this frame
+//   enter   set up, assuming nothing about what came before
+//   tick    do the thing
+//   exit    put back everything I touched, and NOTHING ELSE
+//
+// The dispatcher picks the first mode that wants to run, and if that is not the
+// one already running it exits the old and enters the new. Cleanup happens once,
+// in the mode that owns it, whoever is taking over — so a mode never has to know
+// another exists. A fifth is a row in this table.
+//
+// PREEMPTION FALLS OUT FOR FREE, and that is what makes this worth doing rather
+// than merely tidier. Rain arriving during a snowball fight is not a case
+// anybody writes: `shelter.wants` is true, it outranks `gather`, so the
+// gathering is exited and the run for the door begins. The same is true of every
+// pair, including the ones nobody has thought of yet.
+//
+// `visit` is last and always wants to run, which makes it the idle tier — what
+// anybody does when nothing more pressing is going on. Pastimes belong beside it
+// there, each with its own clock, which is why the tier is a list rather than a
+// single fallback.
+const MODES = [
+  {
+    // Everybody, every night, whoever is watching — see MIDNIGHT_SLEEP.md.
+    key: 'bed',
+    wants: (hh, bot, s, w) => w.bedtime && s.sleeps,
+    enter: (hh, bot, s, t) => hh._bedEnter(bot, s, t),
+    tick: (hh, bot, s, t) => hh._bedTick(bot, s, t),
+    exit: (hh, bot, s, t) => hh._bedExit(bot, s, t),
+  },
+  {
+    // Getting out of the rain. Under bedtime deliberately: at that hour they are
+    // already in and asleep, and rain is no reason to get anybody up.
+    key: 'shelter',
+    wants: (hh, bot, s, w) => w.wet,
+    enter: (hh, bot, s, t) => hh._shelterEnter(bot, s, t),
+    tick: (hh, bot, s, t) => hh._shelterTick(bot, s, t),
+    exit: (hh, bot, s, t) => hh._shelterExit(bot, s, t),
+  },
+  {
+    // Out into the snow, or out to look at a rainbow. `snowDone` is how one
+    // character bows out of an occasion without ending it for the others.
+    key: 'gather',
+    wants: (hh, bot, s, w) => w.playing && !s.snowDone,
+    enter: (hh, bot, s, t) => hh._gatherEnter(bot, s, t),
+    tick: (hh, bot, s, t) => hh._gatherTick(bot, s, t),
+    exit: (hh, bot, s, t) => hh._gatherExit(bot, s, t),
+  },
+  {
+    // Ordinary life: the clock toward the next visit, the walk, the stay, the
+    // walk back. Always willing, so it is where anybody lands when nothing else
+    // is asking for them.
+    key: 'visit',
+    wants: () => true,
+    enter: (hh, bot, s, t) => hh._visitEnter(bot, s, t),
+    tick: (hh, bot, s, t, w) => hh._visitTick(bot, s, t, w),
+    exit: (hh, bot, s, t) => hh._visitExit(bot, s, t),
+  },
+];
+
+const MODE_BY_KEY = {};
+for (const m of MODES) MODE_BY_KEY[m.key] = m;
+
 export class Household {
   constructor({ globe, bots }) {
     this.globe = globe;
@@ -140,7 +220,19 @@ export class Household {
     this.state = new Map();
     for (const b of bots) {
       this.state.set(b, {
-        phase: 'away',
+        // WHICH MODE THEY ARE IN, and WHERE THEY ARE IN IT — two fields where
+        // there used to be one string, and the split is the whole of what makes
+        // the four machines stop treading on each other.
+        //
+        // `phase` stood here and was shared by all of them, so its values had to
+        // be globally unique guesses at what somebody was doing: `inside` meant
+        // both "waiting out a shower" and "round for tea", and a flag called
+        // `sheltered` had to be invented to tell them apart. It is gone, because
+        // a step now only ever means something INSIDE its own mode — shelter's
+        // `settled` cannot be confused with a visit's `home` no matter what
+        // either of them is called.
+        mode: 'visit',
+        step: 'away',
         route: null,     // waypoints still to walk, first is current errand
         legs: 0,         // how many were left when progress was last seen
         litUp: null,     // the lights they switched off on their way to bed
@@ -181,10 +273,17 @@ export class Household {
         // cannot change his mind about which house he is running to halfway
         // across the planet.
         hide: null,
-        // Whether this shower has already put them somewhere in a room. See
-        // _toShelter — `phase === 'inside'` cannot answer it, because the
-        // visiting machine says that too.
-        sheltered: false,
+        // `sheltered` STOOD HERE and the modes retired it. It existed only to
+        // say whether a character whose `phase` read `inside` had got there by
+        // sheltering or by visiting, because both machines spelled that state
+        // the same way. Shelter has its own `settled` step now and nothing can
+        // confuse the two, so there is nothing for a second flag to answer.
+        //
+        // When they next drift to another spot in the room — see _potter. Zero
+        // means "as soon as they are settled", which is right: the first drift
+        // should not wait out a full interval after a walk that already ended
+        // in standing still.
+        potterAt: 0,
         // ...and whether there is a drawing of them asleep at all. Asked of the
         // scene, which built the cards and is therefore the only thing that
         // knows: a character whose sleep sheet has not been drawn has no entry,
@@ -203,7 +302,7 @@ export class Household {
     for (const pl of this.places) this._lit.set(pl, h.emptyLamps);
 
     // THE GATHERING, which belongs to the group rather than to anybody in it —
-    // see _toGather. `_spot` is where they are meeting and doubles as "a
+    // see the gather mode. `_spot` is where they are meeting and doubles as "a
     // gathering is happening"; `_played` says this snowfall has already had
     // one, and is let go only when the cover goes.
     this._spot = null;
@@ -214,18 +313,26 @@ export class Household {
     // and the rainbow that closed before it opened.
     this._gathered = false;
     // WHAT THEY CAME OUT FOR — 'snow' or 'bow'. The only thing that differs
-    // between the two gatherings; see the note above _toGather.
+    // between the two gatherings; see the note above the gathering.
     this._why = null;
   }
 
   get anyoneHome() {
-    for (const s of this.state.values()) if (s.phase === 'home') return true;
+    for (const s of this.state.values()) {
+      if (s.mode === 'visit' && s.step === 'home') return true;
+    }
     return false;
   }
 
   homeCount() {
     let n = 0;
-    for (const s of this.state.values()) if (s.phase !== 'away') n++;
+    // ANYBODY NOT IDLE, which is what `phase !== 'away'` used to mean and is
+    // now said in the terms the modes actually have: heading home, at home,
+    // leaving — and equally anybody the weather or the hour has taken, since
+    // all of those count against `atOnce` too.
+    for (const s of this.state.values()) {
+      if (!(s.mode === 'visit' && s.step === 'away')) n++;
+    }
     return n;
   }
 
@@ -387,7 +494,7 @@ export class Household {
       // ...and not even a beat for somebody turning in. A visit is a thing you
       // do at your own pace and going to bed is not, so the pause on the
       // threshold is one more delay between the hour turning and the sleeping.
-      ch.restUntil = ch.hurrying ? 0 : Math.min(ch.restUntil, tMs + 600);
+      if (ch.hurrying) ch.release('rest'); else ch.capHold('rest', tMs + 600);
       return false;
     }
     ch.errand = null;
@@ -525,60 +632,38 @@ export class Household {
   // works out ONCE for all three — this runs per character, and three
   // characters each averaging the group's position would each get a slightly
   // different answer and walk to three different places.
-  _toGather(bot, s, tMs, spot) {
+  _gatherTick(bot, s, tMs) {
     const ch = bot.ch;
-    if (s.phase === 'playing') {
+    if (s.step === 'playing') {
+      // HAD THEIR FILL, which is a `wants` answer rather than a transition.
+      //
+      // This used to be checked in the dispatch above the gathering, and had to
+      // be, because the gathering returned early for anybody already playing — so
+      // a timer checked after it would never be reached. Setting the flag here
+      // says the same thing in the one place that knows it: on the next frame
+      // `gather.wants` is false, the dispatcher exits this mode and enters the
+      // next, and no branch anywhere had to be ordered around a return.
+      if (tMs > s.until) { s.snowDone = true; return; }
       // Milling about where they stopped. Held with the same pinned rest the
       // shelter uses, so a chat or you walking up never leaves a stale clock
       // that frees somebody to wander off mid-snowman.
-      ch.restUntil = Math.max(ch.restUntil, tMs + 1200);
+      ch.hold('rest', tMs + 1200);
       return;
     }
 
-    if (s.phase !== 'gather') {
-      s.phase = 'gather';
-      this._releaseSeat(bot, s);
-      // `hurrying` FOR THE WALK ONLY, and cleared the moment they arrive.
-      //
-      // The first version left it off, on the reasoning that going out to play
-      // is not an errand with a deadline: if you have walked over to say hello
-      // on the way, the snowman can wait, and somebody who would not stop to
-      // talk to you on the way to build one is not somebody having a nice time.
-      // That reasoning is still right about the GATHERING and was wrong about
-      // the walk, in the exact way this file has already recorded once — see
-      // the same measurement in _toBed.
-      //
-      // Measured on the first snowfall: you arrive on a doorstep 3.6 units from
-      // two of them, which is `closeArc` to a hundredth, so the politeness
-      // freeze held both of them exactly where they stood. Chiikawa never moved
-      // from 8.68 units away and Hachiware never covered his last 1.00, for the
-      // entire snowfall, while Usagi — the only one far enough away not to have
-      // noticed you — walked in and stood by himself. Standing and watching is
-      // the ordinary way anybody would use this feature, and it was the one
-      // case that could never work.
-      //
-      // Clearing it on arrival is what keeps the original point: they push past
-      // you to GET there, and once they are there they are ordinary again and
-      // will stop to talk to you like anybody else.
-      ch.hurrying = true;
-      ch.restUntil = 0;
-      this._aimAtGather(bot, s, tMs, spot);
-    }
-
+    // Re-aimed on a stall, and given up on outright if it goes on too long —
+    // see the note below on why THIS errand is allowed to be abandoned when
+    // bedtime's and the shelter's are not.
     if (!s.route || !s.route.length || tMs > s.giveUpAt) {
-      // ...and giving up is allowed here, which is the other half of the same
-      // point. A shelter walk is re-planned forever because the alternative is
-      // somebody standing in the rain; if this one cannot be walked, they
-      // simply do not join in, and the others get on with it.
-      if (tMs > s.giveUpAt) { this._backToLife(bot, s, tMs); return; }
-      this._aimAtGather(bot, s, tMs, spot);
+      if (tMs > s.giveUpAt) { s.snowDone = true; return; }
+      this._aimAtGather(bot, s, tMs, this._spot);
       return;
     }
     if (this._walkRoute(s, ch, tMs)) {
-      // Arrived, so they are ordinary again — see the note above. From here on
-      // you can walk up to them and they will stop for you.
+      // Arrived, so they are ordinary again — see the note in _gatherEnter.
+      // From here on you can walk up to them and they will stop for you.
       ch.hurrying = false;
-      s.phase = 'playing';
+      s.step = 'playing';
       // How long they stay, and the one line where the two occasions part.
       //
       // Snow is a rolled stay: the snowman goes up part way through, and the
@@ -595,6 +680,57 @@ export class Household {
       s.legs = s.route.length;
       s.giveUpAt = tMs + CONFIG.sleep.retryMs;
     }
+  }
+
+  // Out into it, aimed at the spot the caller works out ONCE for all three —
+  // three characters each averaging the group's position would each get a
+  // slightly different answer and walk to three different places.
+  _gatherEnter(bot, s, tMs) {
+    const ch = bot.ch;
+    s.step = 'walking';
+    {
+      // `hurrying` FOR THE WALK ONLY, and cleared the moment they arrive.
+      //
+      // The first version left it off, on the reasoning that going out to play
+      // is not an errand with a deadline: if you have walked over to say hello
+      // on the way, the snowman can wait, and somebody who would not stop to
+      // talk to you on the way to build one is not somebody having a nice time.
+      // That reasoning is still right about the GATHERING and was wrong about
+      // the walk, in the exact way this file has already recorded once — see
+      // the same measurement in _bedEnter.
+      //
+      // Measured on the first snowfall: you arrive on a doorstep 3.6 units from
+      // two of them, which is `closeArc` to a hundredth, so the politeness
+      // freeze held both of them exactly where they stood. Chiikawa never moved
+      // from 8.68 units away and Hachiware never covered his last 1.00, for the
+      // entire snowfall, while Usagi — the only one far enough away not to have
+      // noticed you — walked in and stood by himself. Standing and watching is
+      // the ordinary way anybody would use this feature, and it was the one
+      // case that could never work.
+      //
+      // Clearing it on arrival is what keeps the original point: they push past
+      // you to GET there, and once they are there they are ordinary again and
+      // will stop to talk to you like anybody else.
+      ch.hurrying = true;
+      ch.release('rest');
+      this._aimAtGather(bot, s, tMs, this._spot);
+    }
+  }
+
+  // ...and giving up is allowed on THIS errand, which is the other half of the
+  // same point. A shelter walk is re-planned forever because the alternative is
+  // somebody standing in the rain; if this one cannot be walked, they simply do
+  // not join in, and the others get on with it. See the `snowDone` set in the
+  // tick, which is how one character bows out without ending the occasion.
+  _gatherExit(bot, s) {
+    const ch = bot.ch;
+    ch.errand = null;
+    ch.walking = false;
+    // ...and off the walk's right of way, whichever end of it this was reached
+    // from. Left set, somebody who gave up on an unwalkable gathering would go
+    // on pushing past you for the rest of the session.
+    ch.hurrying = false;
+    s.route = null;
   }
 
   // Point them at the meeting spot. Each takes a place a little way round it
@@ -617,35 +753,28 @@ export class Household {
     ch.errand = null;
   }
 
-  // Back to ordinary life, from any of the three ends of the snow — they had
-  // their fill of it, the walk turned out to be unwalkable, or the cover melted
-  // while they were still out there.
-  //
-  // `snowDone` IS THE WHOLE OF WHY THIS IS AN EVENT AND NOT A LOOP, and it was
-  // missing from the first version with a result worth recording. Without it,
-  // somebody who finished playing went back to `away` — and `away` is exactly
-  // what the dispatch reads as "not yet gathered", so on the very next frame
-  // they were sent out to gather again. Measured: two of them ping-ponged
-  // between playing and walking back to the same spot for the entire twenty
-  // minutes a cover takes to melt, and the latch that ends the gathering never
-  // closed because somebody was always busy.
-  //
-  // One flag per character rather than one for the group, because they finish
-  // at different times and a group flag would end everybody's afternoon the
-  // moment the first of them wandered off.
-  _backToLife(bot, s, tMs) {
-    const h = CONFIG.household;
-    bot.ch.errand = null;
-    bot.ch.walking = false;
-    // ...and off the walk's right of way, whichever end of it this was reached
-    // from. Left set, somebody who gave up on an unwalkable gathering would go
-    // on pushing past you for the rest of the session.
-    bot.ch.hurrying = false;
-    s.route = null;
-    s.snowDone = true;
-    s.phase = 'away';
-    s.due = tMs + between(h.gapMin, h.gapMax);
+  // WHERE SOMEBODY LIVES, which is not always where they are. Falls back to the
+  // first home so a character without one still has somewhere to be a guest.
+  _ownPlace(bot) {
+    return this.places.find((pl) => pl.home.owner === bot.spec.key)
+      || this.places[0] || null;
   }
+
+  // `_backToLife` STOOD HERE and is gone, because what it did was three modes'
+  // work in one function: it cleaned up the gathering, it decided that ordinary
+  // life came next, and it set that life's opening state. Those are now
+  // `_gatherExit`, the dispatcher, and `_visitEnter` — and the split is what
+  // lets a gathering interrupted by RAIN do the right thing without anybody
+  // writing that case down.
+  //
+  // `snowDone` survives it and is still the reason this is an event rather than
+  // a loop. Without it somebody who finished playing went back to `away`, which
+  // is exactly what the dispatch reads as "not yet gathered", so on the very
+  // next frame they were sent out again. Measured: two of them ping-ponged
+  // between playing and walking to the same spot for the entire twenty minutes
+  // a cover takes to melt, and the latch that ends the gathering never closed
+  // because somebody was always busy. It is one flag per character rather than
+  // one for the group, because they finish at different times.
 
   // ----------------------------------------------------------------- the rain
   //
@@ -667,7 +796,7 @@ export class Household {
     // nothing for him to do about the weather.
     //
     // It also settles what the walk means for somebody who was indoors all
-    // along — see the `sheltered` flag in _toShelter. They still have a spot to
+    // along — see the `settled` step in _shelterTick. They still have a spot to
     // walk to, they just do not have to go outside to reach it.
     const here = this.places.find((pl) => bot.ch.dir.dot(pl.dir) > Math.cos(pl.building.r));
     if (here) return here;
@@ -686,60 +815,57 @@ export class Household {
   // Get them under a roof and keep them there. The bedtime walk with the bed
   // taken off the end of it: same route, same urgency, same suspension of every
   // rule a visit obeys.
-  _toShelter(bot, s, tMs) {
+  // Everything that would otherwise delay setting off, cleared on this frame
+  // rather than waited out — the rest, the conversation, and you standing
+  // there. See the same list in _bedEnter; the only thing that differs is what
+  // they are late for. The cushion is not on it: whichever mode was holding one
+  // gave it back on the way out.
+  _shelterEnter(bot, s, tMs) {
     const ch = bot.ch;
-    // ONLY ONCE THEY HAVE ACTUALLY SETTLED SOMEWHERE, which `inside` alone does
-    // not say.
-    //
-    // `s.phase` is shared with the visiting machine, so `inside` is equally the
-    // answer for somebody who walked here to wait out a shower and for somebody
-    // who was round for tea when it started. Pinning on the phase alone froze
-    // the second kind wherever they happened to be standing — usually near the
-    // door they came in by, and if two of them were in, near each other — for
-    // the whole storm, with a perfectly good spot across the room unused.
-    //
-    // The flag says "this one has been given a place in this room and reached
-    // it". Anybody else falls through to the walk below, which for somebody
-    // already indoors is a single leg across the floor rather than a trip
-    // outside — see the roof test at the top of _shelterPlace.
-    if (s.phase === 'inside' && s.sheltered) {
-      // Stood where they are, and pinned ahead rather than set once, so a chat
-      // or you walking in never leaves a stale clock that frees them to stroll
-      // through a wall. Exactly what `home` does; the difference is that this
-      // one has no `until` to run out, because the weather is the clock.
-      ch.restUntil = Math.max(ch.restUntil, tMs + 1500);
-      return;
-    }
+    s.step = 'walking';
+    ch.hurrying = true;
+    ch.release('rest');
+    ch.release('talk');
+    this._aimAtShelter(bot, s, tMs);
+  }
 
-    if (s.phase !== 'running') {
-      s.phase = 'running';
-      // Everything that would otherwise delay setting off, cleared on this
-      // frame rather than waited out — the cushion, the rest, the conversation,
-      // and you standing there. See the same four in _toBed, which is where the
-      // list was learned; the only thing that differs is what they are late for.
-      this._releaseSeat(bot, s);
-      ch.hurrying = true;
-      ch.restUntil = 0;
-      ch.busyUntil = 0;
-      this._aimAtShelter(bot, s, tMs);
+  // `settled` MEANS SETTLED, and it is a step of this mode's own — which is the
+  // small structural thing that retired a flag.
+  //
+  // `phase` used to be shared with the visiting machine, so `inside` was equally
+  // the answer for somebody who had walked here to wait out a shower and for
+  // somebody who was round for tea when it started. Telling them apart needed a
+  // second field, `sheltered`, whose entire job was to disambiguate a string.
+  // A step that only means anything inside its own mode cannot be ambiguous, so
+  // there is nothing left to disambiguate.
+  _shelterTick(bot, s, tMs) {
+    const ch = bot.ch;
+    if (s.step === 'settled') {
+      // Waiting it out, and moving about the room while they do — see _potter,
+      // which holds them still between drifts exactly as the flat pin used to.
+      // Somebody stood rigid for the length of a downpour was the plainest case
+      // of the room looking switched off, because a shower is long.
+      this._potter(bot, s, tMs, s.place);
+      return;
     }
 
     // Re-planned rather than abandoned, for the reason bedtime is: there is no
     // later. An errand you can give up on is fine when another is along in five
     // minutes, and this one has to end with somebody indoors or it has not
     // happened. The deadline measures STALLING and resets on progress — see the
-    // long note in _toBed, which this is the same mechanism as.
+    // long note in _bedTick, which this is the same mechanism as.
     if (!s.route || !s.route.length || tMs > s.giveUpAt) {
       this._aimAtShelter(bot, s, tMs);
       return;
     }
     if (this._walkRoute(s, ch, tMs)) {
       ch.hurrying = false;
-      s.phase = 'inside';
+      s.step = 'settled';
       s.route = null;
-      // They have a place in this room and are standing in it. See the flag's
-      // note above; `_comeOut` lets it go when the weather does.
-      s.sheltered = true;
+      // Drift to somewhere else in the room as soon as they have stood a moment,
+      // rather than waiting out a full interval after a walk that already ended
+      // in standing still.
+      s.potterAt = 0;
       // Sit down in the one they walked to. Somebody waiting out a shower
       // sitting down is the whole of what makes the room read as shelter rather
       // than as three people standing in a box — and it is the same cushion the
@@ -770,7 +896,7 @@ export class Household {
   // Point them at a door and start the clock. One place, because the walk is
   // planned twice — on the way in, and again whenever it stalls.
   //
-  // THE ONLY WAY INTO `inside` IS ARRIVING, which is the same rule _toBed
+  // THE ONLY WAY INTO `settled` IS ARRIVING, which is the same rule _bedTick
   // arrived at and for a sharper reason than symmetry. The first version of
   // this took a shortcut: somebody already within the building's own radius was
   // declared sheltered on the spot, with no walk. It looked obviously right and
@@ -818,7 +944,7 @@ export class Household {
     //
     // Claimed here instead, so the seat IS the destination and two people
     // cannot be given the same one. Guarded on not already holding it: this
-    // runs again on every stall (see _toShelter), and re-claiming would hand
+    // runs again on every stall (see _shelterTick), and re-claiming would hand
     // out a second cushion each time somebody was slow through the door.
     if (!s.seat) {
       const seat = this._freeSeat(pl);
@@ -865,95 +991,168 @@ export class Household {
     return this._insideSpot(pl, spot.at, spot.out, out);
   }
 
+  // ------------------------------------------------------------- pottering
+  //
+  // A FEW STEPS TO SOMEWHERE ELSE IN THE ROOM, every so often.
+  //
+  // This is what stands where a permanent pin used to. Both the visit and the
+  // shelter held `restUntil` ahead on every frame — "no strolling indoors" —
+  // and the result was a room full of people who had stopped being alive: you
+  // walked in on three friends standing exactly where the arithmetic had left
+  // them, facing you, until a timer somewhere else let them out.
+  //
+  // The pin was answering a real question. A random stroll planned from inside
+  // is a great circle that can perfectly well end in the garden, and somebody
+  // in phase `home` walking out through their own front door leaves the state
+  // machine describing a room they are not in.
+  //
+  // So the answer is a shorter question rather than a ban: pick a spot that is
+  // INSIDE by construction — see _roomSpot — and hand it over as an ordinary
+  // one-leg route. Everything else follows for free. The route walks through
+  // `_walkRoute`, so it gets the tight indoor arrival tolerance; the walk
+  // itself goes through the cast's own path fencing, so it keeps out of the
+  // wall band and off the furniture; and being a route rather than a stroll
+  // means the visit's own leaving code overwrites it without having to know
+  // this exists.
+  //
+  // NOBODY GETS UP OFF A CUSHION TO DO IT. A seat is the one place indoors that
+  // is already somewhere to be, and standing up to pace would undo the whole
+  // reason a guest takes one.
+  _potter(bot, s, tMs, pl) {
+    const ch = bot.ch;
+    if (!pl) return;
+    if (s.seat) {
+      ch.hold('rest', tMs + 1500);
+      return;
+    }
+
+    // Mid-drift: walk it, and on arrival start the clock for the next one.
+    if (s.route && s.route.length) {
+      // A drift that cannot be walked is not worth re-planning — there is no
+      // errand riding on it. Drop it and stand about until the next one is due,
+      // which is also what somebody who thought better of it does.
+      if (tMs > s.giveUpAt) {
+        s.route = null;
+        ch.errand = null;
+        s.potterAt = tMs + between(CONFIG.household.potterMin, CONFIG.household.potterMax);
+        return;
+      }
+      if (this._walkRoute(s, ch, tMs)) {
+        s.route = null;
+        s.potterAt = tMs + between(CONFIG.household.potterMin, CONFIG.household.potterMax);
+      }
+      return;
+    }
+
+    // Standing about. Pinned exactly as before between drifts, so nothing can
+    // wander off in the gaps — the pin was never wrong, it was only unending.
+    if (tMs < (s.potterAt || 0)) {
+      ch.hold('rest', tMs + 1500);
+      return;
+    }
+
+    s.route = [this._roomSpot(pl, new THREE.Vector3())];
+    s.legs = 1;
+    s.giveUpAt = tMs + CONFIG.sleep.retryMs;
+    // Let go of the pin the branch above has been holding, or they would stand
+    // there for another second and a half with somewhere to be.
+    ch.release('rest');
+  }
+
+  // Somewhere else in this room to stand — a bearing anywhere round the middle
+  // and a distance out that CANNOT reach the door.
+  //
+  // 0.7 of the walk radius is the whole safety argument. The door is a gap in a
+  // wall that sits at the radius itself, so a target kept comfortably inside it
+  // has no way to become an accidental exit however the bearing rolls — which
+  // is what lets the pottering be an ordinary stroll rather than a supervised
+  // one. The near limit keeps them off the dead middle of the floor, where
+  // three people would converge on the same spot.
+  //
+  // Pushed off the furniture like any other destination. A cushion is solid, so
+  // without this a drift could pick the inside of one and stall against a berth
+  // it is not allowed to enter.
+  _roomSpot(pl, out) {
+    const bearing = (Math.random() * 2 - 1) * Math.PI;
+    const frac = 0.2 + Math.random() * 0.5;
+    return keepOffSolids(
+      this._insideSpot(pl, bearing, frac, out),
+      CONFIG.wander.wallKeep,
+    );
+  }
+
   // It stopped. Out they come, by the ordinary leaving route — which is the
   // whole point of having reused the visit's states: there is nothing special
   // about the end of a shower except that it ends.
-  _comeOut(bot, s, tMs) {
-    const h = CONFIG.household;
+  _shelterExit(bot, s, tMs) {
     const ch = bot.ch;
     const pl = s.place;
     ch.hurrying = false;
     s.hide = null;
-    // Whatever spot they were holding for this shower is given up with it — the
-    // next one has to place them again, from wherever they are by then.
-    s.sheltered = false;
-    // Back to where they LIVE. `place` was repointed to whichever door they ran
-    // to, and leaving it repointed would have Usagi treating a house he sheltered
-    // in once as his local for the rest of the session.
-    s.place = this.places.find((p) => p.home.owner === bot.spec.key)
-      || this.places[0] || null;
     this._releaseSeat(bot, s);
     ch.errand = null;
     ch.walking = false;
     s.route = null;
+    // A moment in the doorway looking at the sky before stepping out into it,
+    // which is what anybody does when the rain stops.
+    ch.hold('rest', tMs + 1400);
 
+    // WHOSE HOUSE THEY ARE STANDING IN decides whether `place` is put back.
+    //
+    // Still under the borrowed roof: leave it pointing there, because the walk
+    // out has to be planned from the door they are actually behind — and
+    // `_visitEnter`, which runs next, reads exactly this field to plan it.
+    // Out on the grass: put it back to where they live, or Usagi would treat
+    // whichever house he sheltered in as his local from then on.
+    //
+    // The old version did both, in that order, and the override won — so the
+    // borrowed door survived the walk out and stayed as `place` for the rest of
+    // the session, which is the bug the comment was warning about. Deciding once
+    // is what fixes it; the walk out puts it back when it finishes.
     const inside = pl && ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
-    if (inside) {
-      s.place = pl;
-      s.route = this._routeOut(pl);
-      s.phase = 'leaving';
-      s.giveUpAt = tMs + h.headingMax;
-      // A moment in the doorway looking at the sky before stepping out into it,
-      // which is what anybody does when the rain stops.
-      ch.restUntil = tMs + 1400;
-      return;
-    }
-    s.phase = 'away';
-    s.due = tMs + between(h.gapMin, h.gapMax);
+    if (!inside) s.place = this._ownPlace(bot);
   }
 
   // ------------------------------------------------------------------ bedtime
 
   // Get them to bed and keep them there. Called every frame of the small hours
   // for everybody who has a drawing to lie down in.
-  _toBed(bot, s, tMs) {
-    const h = CONFIG.household;
+  // THEY SET OFF ON THIS FRAME, whatever they were in the middle of. The hour
+  // turning is not a suggestion, and there are three things that would
+  // otherwise each delay it by seconds — so all three are cleared here rather
+  // than waited out.
+  //
+  //   A REST. The wander rests up to six seconds between strolls, and being
+  //   part way through one at midnight is the common case rather than the
+  //   unlucky one.
+  //
+  //   A CONVERSATION. `busyUntil` holds two of them still for the length of an
+  //   exchange plus `meetHoldMs`, seven seconds on its own.
+  //
+  //   YOU, standing nearby — which is the freeze `hurrying` lifts, and the one
+  //   that did not merely delay them but stopped them for good. It is set here
+  //   and stays set for the whole walk, so none of the above can creep back in
+  //   halfway home.
+  //
+  // THE CUSHION IS NOT ON THAT LIST ANY MORE, and neither is the shelter's
+  // borrowed door. Both used to be undone here — a seat held by somebody who
+  // had gone to bed is one nobody can sit on tomorrow, and a door borrowed in a
+  // shower would outlive the rain that sent them through it — and both are now
+  // put back by the mode that took them, in its own `exit`. That is the whole
+  // trade this restructure makes: bedtime no longer knows that visiting or
+  // sheltering exist.
+  _bedEnter(bot, s, tMs) {
     const ch = bot.ch;
-    if (s.phase === 'asleep') return;
+    s.step = 'walking';
+    ch.hurrying = true;
+    ch.release('rest');
+    ch.release('talk');
+    this._aimAtBed(bot, s, tMs);
+  }
 
-    if (s.phase !== 'toBed') {
-      // Whatever they were doing, they are going to bed instead. The seat goes
-      // back first: a cushion held by somebody who has gone to bed is one
-      // nobody else can sit on tomorrow.
-      s.phase = 'toBed';
-
-      // ...and if what they were doing was waiting out a shower, that is over
-      // too. `_comeOut` is the ordinary way off a shelter and it puts both of
-      // these back; going to bed is the other way off it, and left alone the
-      // borrowed door would outlive the rain that sent them through it. Usagi
-      // would treat whichever house he sheltered in last night as his local for
-      // the rest of the session, and reach for it again in the next shower
-      // instead of the nearest one.
-      s.hide = null;
-      s.place = this.places.find((pl) => pl.home.owner === bot.spec.key)
-        || this.places[0] || null;
-
-      // THEY SET OFF ON THIS FRAME, whatever they were in the middle of. The
-      // hour turning is not a suggestion, and there are four separate things
-      // that would otherwise each delay it by seconds — so all four are cleared
-      // here rather than waited out.
-      //
-      //   A CUSHION. `update` skips the wander entirely for a seated body, so
-      //   somebody who was sat down when the hour turned would never walk at
-      //   all — not late, never. _releaseSeat stands them up.
-      //
-      //   A REST. The wander rests up to six seconds between strolls, and being
-      //   part way through one at midnight is the common case rather than the
-      //   unlucky one.
-      //
-      //   A CONVERSATION. `busyUntil` holds two of them still for the length of
-      //   an exchange plus `meetHoldMs`, seven seconds on its own.
-      //
-      //   YOU, standing nearby — which is the freeze `hurrying` lifts, and the
-      //   one that did not merely delay them but stopped them for good. It is
-      //   set here and stays set for the whole walk, so none of the above can
-      //   creep back in halfway home.
-      this._releaseSeat(bot, s);
-      ch.hurrying = true;
-      ch.restUntil = 0;
-      ch.busyUntil = 0;
-      this._aimAtBed(bot, s, tMs);
-    }
+  _bedTick(bot, s, tMs) {
+    const ch = bot.ch;
+    if (s.step === 'asleep') return;
 
     // A STALLED WALK IS RE-PLANNED, NEVER ABANDONED, and bedtime is the one
     // errand in this file that works that way. Everywhere else giving up means
@@ -1092,7 +1291,7 @@ export class Household {
     ch.walking = false;
     // They have arrived, so there is nothing left to push past you for.
     ch.hurrying = false;
-    s.phase = 'asleep';
+    s.step = 'asleep';
     s.route = null;
     // Laid down WHERE THEY ARE, which is the whole of how the card and the
     // character are kept from disagreeing. Somebody with a bed is beside it and
@@ -1122,17 +1321,23 @@ export class Household {
     // is exactly that.
     //
     // Remembered as a LIST OF LIGHTS rather than a count, so that waking puts
-    // back what this put out and nothing else — see _getUp.
+    // back what this put out and nothing else — see _bedExit.
     s.litUp = s.own ? this.globe.lampsBurningIn(s.own.home) : [];
     for (const L of s.litUp) this.globe.toggleLight(L);
   }
 
   // Morning. Also any moment the hour stops being midnight, which the scrubber
   // can make happen at any point in the night including halfway to bed.
-  _getUp(bot, s, tMs) {
-    const h = CONFIG.household;
+  //
+  // AN EXIT RATHER THAN A TRANSITION, which is the shape every mode's departure
+  // takes now. This used to decide what came next as well — whether they walked
+  // out of their own front door or simply started their day where they stood —
+  // and that decision was the same one `_comeOut` was making, separately, for
+  // the rain. Both are gone: this puts back only what bedtime took, and where
+  // somebody resumes from is `_visitEnter`'s single answer for everybody.
+  _bedExit(bot, s, tMs) {
     const ch = bot.ch;
-    const wasAsleep = s.phase === 'asleep';
+    const wasAsleep = s.step === 'asleep';
     if (wasAsleep) {
       this.globe.layDown(bot.spec.key, false);
       ch.sleep(false);
@@ -1160,30 +1365,18 @@ export class Household {
     // or scrubbed out of midnight halfway to bed. Walking OUT is an ordinary
     // errand again and yields to you like any other.
     ch.hurrying = false;
-
-    // Somebody who woke up indoors WALKS OUT, by the same route and the same
-    // state every guest leaves by. Left in `away` they would potter about the
-    // room until a random stroll happened to thread the door, which reads as
-    // being shut in rather than as getting up.
-    const inside = s.own
-      && ch.dir.dot(s.own.dir) > Math.cos(s.own.building.r);
-    if (inside) {
-      s.route = this._routeOut(s.own);
-      s.phase = 'leaving';
-      s.giveUpAt = tMs + h.headingMax;
-      // A moment on their feet before setting off, so waking is a beat rather
-      // than a body already walking.
-      ch.restUntil = tMs + 1200;
-      return;
-    }
-    s.phase = 'away';
-    s.due = tMs + between(h.gapMin, h.gapMax);
+    // A moment on their feet before setting off, so waking is a beat rather
+    // than a body already walking.
+    ch.hold('rest', tMs + 1200);
   }
 
-  update(dtMs, tMs, indoors, playerDir) {
+  // `playerDir` was the fourth argument and is gone with `crowded`, the one
+  // thing that read it — see the note there. Where you are standing is not a
+  // question this file has to ask any more: the cast decide for themselves how
+  // much of their attention you are owed, and they do it in one place.
+  update(dtMs, tMs, indoors) {
     if (!this.places.length) return;
     const h = CONFIG.household;
-    const R = CONFIG.globe.radius;
     const bedtime = activePhase() === BEDTIME;
     // ...and whether anybody sensible would be indoors. Asked once for the
     // frame rather than per character, because it is a fact about the sky.
@@ -1224,113 +1417,131 @@ export class Household {
     }
     const playing = !!why && !!this._spot;
 
+    // ONE DISPATCH FOR EVERYBODY, and the ladder of `if`s it replaced is worth
+    // remembering. Every mode used to need two branches — one to run it, one to
+    // catch the states it left behind when its turn was over — and each of those
+    // second branches had to name the other modes' states to do it. That is
+    // where the `phase` string had to be globally unique, where `_backToLife`
+    // and `_comeOut` and `_getUp` each grew their own copy of "and then ordinary
+    // life resumes", and where every bug of the last week lived.
+    //
+    // Both directions are still handled every frame, which is what makes a
+    // finger thrashing the time scrubber or the weather picker harmless: nothing
+    // is staged, there is no transition state, and the answer to "what should
+    // this character be doing" is recomputed from the world each frame.
+    const world = { bedtime, wet, playing, indoors };
     for (const bot of this.bots) {
       const s = this.state.get(bot);
-      const ch = bot.ch;
-      const pl = s.place;
-      if (!pl) continue;
+      if (!s.place) continue;
+      const want = MODES.find((m) => m.wants(this, bot, s, world));
+      if (want.key !== s.mode) {
+        const had = MODE_BY_KEY[s.mode];
+        if (had) had.exit(this, bot, s, tMs);
+        s.mode = want.key;
+        want.enter(this, bot, s, tMs);
+      }
+      want.tick(this, bot, s, tMs, world);
+    }
 
-      // BEDTIME FIRST, and it overrides whatever else was going on — an errand
-      // half walked, a stay half sat out, a clock half run down. Nothing below
-      // this runs during it.
-      //
-      // Both directions are handled here, and both have to be, because the hour
-      // can turn either way at any moment: the clock brings it round once a day
-      // and the scrubber under your thumb brings it round as fast as you can
-      // drag. There is no staging and no transition state — every frame simply
-      // asks whether it is the hour and whether they are in the right state for
-      // it, which is what makes a finger thrashing the boundary harmless.
-      if (bedtime && s.sleeps) {
-        this._toBed(bot, s, tMs);
-        continue;
-      }
-      if (s.phase === 'toBed' || s.phase === 'asleep') {
-        this._getUp(bot, s, tMs);
-        continue;
-      }
+    this._snowman(tMs, playing);
+    this._windows(dtMs);
+  }
 
-      // THEN THE RAIN, on the same terms and for the same reason: it overrides
-      // whatever else was going on, and both directions are handled here so a
-      // front rolling in and out — or a finger on a debug switch — is harmless
-      // at any speed. Nothing below this runs while it is coming down.
-      //
-      // Under bedtime, deliberately. See the note at the top of the file: at
-      // that hour everybody is already in and asleep, and getting them up to
-      // shelter from rain they are not standing in would undo the one thing
-      // midnight is for.
-      if (wet) {
-        this._toShelter(bot, s, tMs);
-        continue;
-      }
-      if (s.phase === 'running' || s.phase === 'inside') {
-        this._comeOut(bot, s, tMs);
-        continue;
-      }
+  // WHERE SOMEBODY RESUMES FROM when a mode lets go of them — the one answer,
+  // for all three of the modes that can hand somebody back.
+  //
+  // Bedtime and the shelter each used to work this out for themselves, in
+  // `_getUp` and `_comeOut`, with the same test and the same two outcomes
+  // written twice. It belongs to whoever is TAKING OVER rather than to whoever
+  // is finishing, because it is a question about ordinary life: am I indoors,
+  // and if so I should walk out before I do anything else.
+  //
+  // Somebody who woke up — or dried off — indoors WALKS OUT, by the same route
+  // and the same step every guest leaves by. Left in `away` they would potter
+  // about the room until a random stroll happened to thread the door, which
+  // reads as being shut in rather than as getting up.
+  _visitEnter(bot, s, tMs) {
+    const h = CONFIG.household;
+    const ch = bot.ch;
+    const pl = s.place;
+    const inside = pl && ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
+    if (inside) {
+      s.route = this._routeOut(pl);
+      s.step = 'leaving';
+      s.giveUpAt = tMs + h.headingMax;
+      return;
+    }
+    s.step = 'away';
+    s.route = null;
+    s.due = tMs + between(h.gapMin, h.gapMax);
+  }
 
-      // THEN THE SNOW, and it is checked after the rain rather than beside it
-      // because the two can both be true and only one of them can win. A
-      // blizzard is snow AND shelter — `snowPlayable` already refuses while
-      // anybody is sheltering, so this is belt and braces, and the belt is the
-      // one that reads: whatever else is going on, being out in it is the thing
-      // you stop doing first.
-      //
-      // Had their fill of it FIRST, so that the dispatch below cannot catch
-      // somebody whose time is up and hold them out there — `_toGather` returns
-      // early for anybody already `playing`, so a timer checked after it would
-      // never be reached.
-      if (s.phase === 'playing' && tMs > s.until) {
-        this._backToLife(bot, s, tMs);
-        continue;
-      }
-      if (playing && !s.snowDone) {
-        this._toGather(bot, s, tMs, this._spot);
-        continue;
-      }
-      if (s.phase === 'gather' || s.phase === 'playing') {
-        // The reason to be out there has gone — the cover melted while they
-        // were still walking to it, or the hour turned. There is nothing to
-        // come back from, which is the whole point of this being an event
-        // rather than a mode: they just carry on.
-        this._backToLife(bot, s, tMs);
-        continue;
-      }
+  // Ordinary life letting go: the cushion goes back and the errand is dropped.
+  //
+  // This is the one that used to be copied into every other mode's opening —
+  // bedtime released the seat, the shelter released the seat, the gathering
+  // released the seat — because each of them had to undo a visit it had
+  // interrupted. None of them do now.
+  _visitExit(bot, s) {
+    const ch = bot.ch;
+    this._releaseSeat(bot, s);
+    ch.errand = null;
+    ch.walking = false;
+    s.route = null;
+  }
 
-      if (s.phase === 'away') {
-        if (tMs < s.due) continue;
+  _visitTick(bot, s, tMs, world) {
+    const h = CONFIG.household;
+    const ch = bot.ch;
+    const pl = s.place;
+
+    if (s.step === 'away') {
+      if (tMs < s.due) return;
         // Never while somebody else is in, nor mid-conversation, nor while you
         // are stood right there — walking off the moment you arrive is the one
         // version of this that reads as rude rather than as having somewhere
         // to be.
         //
-        // The proximity check is not politeness alone, it is the difference
-        // between an errand and a character stuck forever. Standing within
-        // `closeArc` freezes them where they are, by the same rule that has
-        // them wait while you visit — so an errand handed out at that range is
-        // one they can never take a single step of, and they would hold it
-        // until you happened to wander off.
-        const crowded = playerDir
-          && ch.dir.angleTo(playerDir) * R < CONFIG.wander.closeArc + 1.5;
-        if (this.homeCount() >= h.atOnce || ch.attentive || crowded || tMs < ch.busyUntil) {
-          s.due = tMs + 12000;
-          continue;
-        }
-        // Sit if a seat is free, stand at a spot if not — decided now, and the
-        // seat held from now, so nobody crosses the planet for a cushion that
-        // was taken while they walked.
-        s.seat = this._freeSeat(pl);
-        if (s.seat) {
-          s.seat.taken = ch;
-          s.route = this._routeIn(pl, s.seat.dir, ch.dir);
-        } else {
-          // Their own corner, not everybody's — see _standSpot.
-          s.route = this._routeIn(pl, this._standSpot(bot, pl, _spot), ch.dir);
-        }
-        s.phase = 'going';
-        s.giveUpAt = tMs + h.headingMax;
-        continue;
+        // `crowded` STOOD HERE and is gone with the freeze that made it
+        // necessary. It refused to hand anybody an errand while you were within
+        // `closeArc + 1.5`, and its own note explains why: at that range the
+        // proximity freeze was permanent, so an errand issued there was one they
+        // could never take a single step of and would hold until you wandered
+        // off. That is a workaround for a hold that no longer exists — being
+        // near somebody now buys a few seconds of being looked at and nothing
+        // more (see wander.ackMin) — and keeping it would quietly preserve the
+        // symptom it was written for: nobody ever setting off anywhere while you
+        // were stood among them.
+        //
+        // What it costs to remove is that an errand can now be handed out
+        // during those few seconds, so they pause, look at you, and then walk
+        // off home. That is a better reading of the same moment than never
+        // going at all, and it is the one people actually do.
+        //
+        // `attentive` stays, and is the honest half of what `crowded` was
+        // approximating: somebody you came to see should not turn round and
+        // leave. It has a clock on it now too, so it lets go by itself.
+      if (this.homeCount() >= h.atOnce || ch.attentive || ch.holding('talk', tMs)) {
+        s.due = tMs + 12000;
+        return;
       }
+      // Sit if a seat is free, stand at a spot if not — decided now, and the
+      // seat held from now, so nobody crosses the planet for a cushion that
+      // was taken while they walked.
+      s.seat = this._freeSeat(pl);
+      if (s.seat) {
+        s.seat.taken = ch;
+        s.route = this._routeIn(pl, s.seat.dir, ch.dir);
+      } else {
+        // Their own corner, not everybody's — see _standSpot.
+        s.route = this._routeIn(pl, this._standSpot(bot, pl, _spot), ch.dir);
+      }
+      s.step = 'going';
+      s.giveUpAt = tMs + h.headingMax;
+      return;
+    }
 
-      if (s.phase === 'going') {
+    if (s.step === 'going') {
         // Give up if it is taking implausibly long — the only thing that can
         // hold a walk forever is you standing next to them, which freezes them
         // by the same rule that has them wait while you visit. Without this
@@ -1339,85 +1550,99 @@ export class Household {
         // made it indoors, though, the way to give up is to leave — abandoning
         // the errand mid-room would strand them pacing a floor whose only way
         // out is a gap their random strolls rarely thread.
-        if (tMs > s.giveUpAt) {
-          const inside = ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
-          this._releaseSeat(bot, s);
-          if (inside) {
-            s.route = this._routeOut(pl);
-            s.phase = 'leaving';
-            s.giveUpAt = tMs + h.headingMax;
-          } else {
-            ch.errand = null;
-            s.route = null;
-            s.phase = 'away';
-            s.due = tMs + between(h.gapMin, h.gapMax);
-          }
-          continue;
-        }
-        if (!this._walkRoute(s, ch, tMs)) continue;
-        // Arrived. Down onto the cushion, or settled at the spot.
-        if (s.seat) ch.sitAt(s.seat.dir, s.seat.y);
-        s.phase = 'home';
-        s.until = tMs + between(h.stayMin, h.stayMax);
-        continue;
-      }
-
-      if (s.phase === 'home') {
-        // Stood or sat where they are: no strolling indoors. The rest is
-        // pinned ahead rather than set once, so an interruption — a chat, you
-        // walking in — never leaves a stale clock that frees them to wander
-        // through a wall.
-        ch.restUntil = Math.max(ch.restUntil, tMs + 1500);
-        // They stay as long as they meant to — unless you are in there with
-        // them, in which case leaving the moment you arrived would be the
-        // unfriendliest thing in the app.
-        if (tMs < s.until || indoors) continue;
+      if (tMs > s.giveUpAt) {
+        const inside = ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
         this._releaseSeat(bot, s);
-        s.route = this._routeOut(pl);
-        s.phase = 'leaving';
-        s.giveUpAt = tMs + h.headingMax;
-        continue;
-      }
-
-      if (s.phase === 'leaving') {
-        if (tMs > s.giveUpAt) {
-          // Wherever they are stood, the errand is over; the wander machinery
-          // takes it from here. From indoors its own path-trimming still holds
-          // every stroll clear of the walls, so the worst case is somebody
-          // pottering about the room until a pick threads the door — which is
-          // somebody being at home.
+        if (inside) {
+          s.route = this._routeOut(pl);
+          s.step = 'leaving';
+          s.giveUpAt = tMs + h.headingMax;
+        } else {
           ch.errand = null;
           s.route = null;
-          s.phase = 'away';
+          s.step = 'away';
           s.due = tMs + between(h.gapMin, h.gapMax);
-          continue;
         }
-        if (!this._walkRoute(s, ch, tMs)) continue;
-        s.phase = 'away';
-        s.due = tMs + between(h.gapMin, h.gapMax);
-        // A moment on the doorstep before setting off again.
-        ch.restUntil = tMs + 1400;
+        return;
       }
+      if (!this._walkRoute(s, ch, tMs)) return;
+      // Arrived. Down onto the cushion, or settled at the spot.
+      if (s.seat) ch.sitAt(s.seat.dir, s.seat.y);
+      s.step = 'home';
+      s.potterAt = 0;
+      s.until = tMs + between(h.stayMin, h.stayMax);
+      return;
     }
 
-    // ...AND THE SNOWMAN, which is the only thing in this world anybody makes.
-    //
-    // Put up by the HOUSEHOLD rather than by the snow, and that is the whole
-    // difference between a thing the cast did and a thing the weather did. The
-    // cover could raise one on its own the moment it crossed a threshold, and
-    // it would appear on an empty hillside with nobody near it — scenery that
-    // snowed into being. This one goes up in the middle of a ring of friends,
-    // a little while after they have got there, because they are what built it.
+    if (s.step === 'home') {
+      // At home, and behaving like it — see _potter. This was a flat pin
+      // ahead on every frame, which held them rigid for the whole visit.
+      this._potter(bot, s, tMs, pl);
+      // They stay as long as they meant to — unless you are in there with
+      // them, in which case leaving the moment you arrived would be the
+      // unfriendliest thing in the app.
+      if (tMs < s.until || world.indoors) return;
+      // ...and whatever drift was half walked is dropped for the way out.
+      // `_routeOut` overwrites the route anyway; clearing the errand is what
+      // stops the old waypoint riding along into the walk home.
+      ch.errand = null;
+      this._releaseSeat(bot, s);
+      s.route = this._routeOut(pl);
+      s.step = 'leaving';
+      s.giveUpAt = tMs + h.headingMax;
+      return;
+    }
+
+    if (s.step === 'leaving') {
+      if (tMs > s.giveUpAt) {
+        // Wherever they are stood, the errand is over; the wander machinery
+        // takes it from here. From indoors its own path-trimming still holds
+        // every stroll clear of the walls, so the worst case is somebody
+        // pottering about the room until a pick threads the door — which is
+        // somebody being at home.
+        ch.errand = null;
+        s.route = null;
+        s.step = 'away';
+        s.place = this._ownPlace(bot);
+        s.due = tMs + between(h.gapMin, h.gapMax);
+        return;
+      }
+      if (!this._walkRoute(s, ch, tMs)) return;
+      s.step = 'away';
+      // HOME IS HOME AGAIN once they are out of the door.
+      //
+      // `place` can be pointing at somebody else's house — the shelter repoints
+      // it to whichever door they ran to, and leaves it there when they are
+      // still inside so that the walk out can be planned from it. This is the
+      // end of that walk, and the one moment it is safe to put back. Without
+      // it, Hachiware caught in Chiikawa's front room by a shower would have
+      // treated Chiikawa's as his own for every visit after.
+      s.place = this._ownPlace(bot);
+      s.due = tMs + between(h.gapMin, h.gapMax);
+      // A moment on the doorstep before setting off again.
+      ch.hold('rest', tMs + 1400);
+    }
+  }
+
+  // ...AND THE SNOWMAN, which is the only thing in this world anybody makes.
+  //
+  // Put up by the HOUSEHOLD rather than by the snow, and that is the whole
+  // difference between a thing the cast did and a thing the weather did. The
+  // cover could raise one on its own the moment it crossed a threshold, and
+  // it would appear on an empty hillside with nobody near it — scenery that
+  // snowed into being. This one goes up in the middle of a ring of friends,
+  // a little while after they have got there, because they are what built it.
+  _snowman(tMs, playing) {
     if (playing) {
       let here = 0;
       let busy = false;
       for (const st of this.state.values()) {
-        if (st.phase === 'playing') { here++; this._gathered = true; }
+        if (st.mode === 'gather' && st.step === 'playing') { here++; this._gathered = true; }
         // Somebody who has finished is not busy however they wandered off to —
-        // `away` is also what somebody who has not started looks like, and
-        // without `snowDone` to tell the two apart the latch below could never
-        // close while anybody was between errands.
-        if (!st.snowDone && (st.phase === 'playing' || st.phase === 'gather')) busy = true;
+        // being back in the visit mode is also what somebody who has not
+        // started looks like, and without `snowDone` to tell the two apart the
+        // latch below could never close while anybody was between errands.
+        if (!st.snowDone && st.mode === 'gather') busy = true;
       }
       // Two of them, not three. Usagi may be halfway across the planet, or
       // frozen by you standing next to him, or have given up on the walk
@@ -1461,8 +1686,9 @@ export class Household {
         this._buildAt = 0;
       }
     }
+  }
 
-    // The windows, one house at a time. Eased against the clock rather than a
+  // The windows, one house at a time. Eased against the clock rather than a
     // fraction per frame, the way everything else here is.
     //
     // Sent as a map keyed by style rather than as one number, which is the
@@ -1475,19 +1701,27 @@ export class Household {
     // than brighter. Asleep WINS over home: the two can only coincide while a
     // guest is still up in a house whose owner has turned in, and what the
     // windows should say then is that the household has gone to bed.
+  _windows(dtMs) {
+    const h = CONFIG.household;
     const by = {};
     for (const place of this.places) {
       let here = false;
       let sleeping = false;
       for (const st of this.state.values()) {
-        // `inside` counts exactly as `home` does, and this one line is the
+        // A SHELTERER COUNTS EXACTLY AS A GUEST DOES, and this one line is the
         // other half of the houses lighting up when it rains. The weather
         // raises the hour's lamp value — see _applyBlend in scene.js — and this
         // says WHICH buildings have anybody in them to light. The two together
         // are why the empty house stays dark through a downpour while the one
         // Usagi barged into does not.
-        if ((st.phase === 'home' || st.phase === 'inside') && st.place === place) here = true;
-        if (st.phase === 'asleep' && st.own === place) sleeping = true;
+        //
+        // Two modes asked rather than two spellings of one string, which is the
+        // small readability win of the split: it used to read `home || inside`
+        // and you had to know which machine each belonged to.
+        const inHouse = (st.mode === 'visit' && st.step === 'home')
+          || (st.mode === 'shelter' && st.step === 'settled');
+        if (inHouse && st.place === place) here = true;
+        if (st.mode === 'bed' && st.step === 'asleep' && st.own === place) sleeping = true;
       }
       const want = sleeping ? h.asleepLamps : here ? 1 : h.emptyLamps;
       const was = this._lit.get(place);

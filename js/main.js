@@ -16,7 +16,7 @@ import {
 } from './daylight.js';
 import {
   tickWeather, activeWeather, wetness, snowCover, setSnowCover, lightningStruck,
-  rainbowOut, rainbow, iceLook, pondsFrozen,
+  rainbowOut, rainbow, iceLook, pondsFrozen, isWater,
   setWeatherOverride, isAutoWeather, forecast,
   WEATHERS, WEATHER_LABEL,
 } from './weather.js';

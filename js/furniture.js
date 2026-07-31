@@ -2770,10 +2770,13 @@ export function buildGuitar(h) {
   soundboard.position.z = front;
   g.add(soundboard);
 
-  // A real neck and headstock rather than one flat extension of the body.
-  const neckStart = -0.010 * s;
+  // A real neck and headstock rather than one flat extension of the body. The
+  // neck slips just beneath the soundboard at the joint: leaving both front
+  // faces coplanar made their overlap flicker as a pale vertical seam.
+  const neckStart = 0.008 * s;
   const neckEnd = 0.420 * s;
   const neckLength = neckEnd - neckStart;
+  const neckRecess = h * 0.005;
   part(
     g,
     (pad) => new THREE.BoxGeometry(
@@ -2786,7 +2789,7 @@ export function buildGuitar(h) {
       m.position.set(
         (neckStart + neckEnd) / 2,
         cy,
-        front - depth * 0.31,
+        front - depth * 0.31 - neckRecess,
       );
     },
     INK_SMALL,
