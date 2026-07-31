@@ -575,7 +575,11 @@ const moves = new MoveInput({
   knob: document.getElementById('stick-knob'),
   jumpBtn: document.getElementById('jump-btn'),
   sprintBtn: document.getElementById('sprint-btn'),
+  sitBtn: document.getElementById('sit-btn'),
   onTouched: touched,
+  // Sitting down lets go of whoever you are leading. The household owns the
+  // hand, so the movement surface asks rather than reaching for it.
+  onSit: () => household.letGo(),
   // A hop is a wave, and whoever is near enough waves back — see hopSeen, which
   // is a function declaration and so is already here to be named.
   onHop: () => hopSeen(),
@@ -895,6 +899,27 @@ const CARRY = {
     ...GRIP, x: 0.27, y: 0.41, size: 0.32,
     spin: -0.10, tilt: 0.04, roll: -0.04,
   },
+  // Stackables are flat drawings rather than built props. Their inner edge
+  // overlaps the outer paw so the stem/root reads as gripped, while the rest of
+  // the drawing faces the viewer like the character cards themselves.
+  kusa: {
+    ...GRIP, x: 0.27, y: 0.37, size: 0.45,
+    spin: -0.10, tilt: 0.03, roll: 0.07,
+  },
+  kinoko1: {
+    ...GRIP, x: 0.27, y: 0.35, size: 0.35,
+    spin: -0.10, tilt: 0.03, roll: -0.06,
+  },
+  kinoko2: {
+    ...GRIP, x: 0.27, y: 0.35, size: 0.35,
+    spin: -0.10, tilt: 0.03, roll: 0.06,
+  },
+  // Fish hang upright by the tail beside the paw, with their transparent
+  // catch-card margin removed by paintFishCard.
+  fish: {
+    ...GRIP, x: 0.30, y: 0.36, size: 0.40,
+    spin: -0.08, tilt: 0.02, roll: -0.04,
+  },
 };
 
 // The copy that rides on a BODY, which is never the copy in your hand: the two
@@ -910,6 +935,48 @@ function carriedPiece(id) {
   const art = ITEMS[id].art;
   if (!carryMeshes[id]) carryMeshes[id] = HAND_BUILDERS[art]();
   return carryMeshes[id];
+}
+
+// Stackables have no furniture build, but grass, mushrooms and fish do have a
+// real transparent drawing. Put that SAME itemIcon on a small plane for the
+// avatar, one cached plane per item so syncPouch never reparents the
+// first-person card.
+const carriedCards = {};
+const AVATAR_CARDS = new Set([
+  'kusa', 'kinoko1', 'kinoko2',
+  ...Object.keys(ITEMS).filter((id) => ITEMS[id].fish),
+]);
+
+function avatarCardGrip(id) {
+  return ITEMS[id].fish ? CARRY.fish : CARRY[id];
+}
+
+function carriedCard(id) {
+  if (carriedCards[id]) return carriedCards[id];
+  const canvas = itemIcon(id);
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 4;
+  map.needsUpdate = true;
+  const material = new THREE.MeshBasicMaterial({
+    map,
+    transparent: true,
+    alphaTest: 0.01,
+    depthTest: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  // heldMaterials uses this as the mark of something that should wear the
+  // world's current hour; black ink stays ink while the coloured art dims.
+  material.userData.baseColor = new THREE.Color(0xffffff);
+  const card = new THREE.Mesh(
+    new THREE.PlaneGeometry(canvas.width / canvas.height, 1),
+    material,
+  );
+  card.userData.avatarCard = true;
+  card.frustumCulled = false;
+  carriedCards[id] = card;
+  return card;
 }
 
 // Which loose pieces are carryable at all — the table's uniques, by art.
@@ -1427,7 +1494,20 @@ function onDown(e) {
   capture(stage, e.pointerId);
 
   setNdc(e);
-  const hit = pickCharacter();
+  // NOTHING IN THE WORLD ANSWERS A TOUCH WHILE THE LENS IS ROUND ON YOU.
+  //
+  // A viewfinder is a picture, not a place: what a finger does on it is frame
+  // the shot, and every other meaning a touch has here is one this view has no
+  // use for. The tap on a friend is the loudest of them — it calls
+  // `rig.teleportTo`, so a stray press while composing would fling you across
+  // the planet mid-shot — but a tap that pockets the lantern at your feet is no
+  // better, since it changes the picture you were setting up.
+  //
+  // Blocked at the PICK rather than pill by pill, which takes the focus marks
+  // with it (see updateMark) and leaves the camera fingers untouched: with
+  // nothing found under the touch it falls through to the look-and-pinch path
+  // below, which is the whole of what a selfie wants a finger for.
+  const hit = rig.selfieOn ? null : pickCharacter();
 
   // A character under the finger takes the touch away from the pad, so you can
   // always reach someone standing in the pad's corner. Dragging from them
@@ -1445,7 +1525,7 @@ function onDown(e) {
   // A reachable loose piece under the finger. The pad owns the whole lower-left
   // quadrant, which is precisely where something on the floor at your feet
   // projects — so the two want the same touch and one of them has to give.
-  const grabbable = (!hit && rig.isFirstPerson && !inventory.heldUnique)
+  const grabbable = (!hit && !rig.selfieOn && rig.isFirstPerson && !inventory.heldUnique)
     ? globe.pickLoose(raycaster, rig.anchor, UNIQUE_ARTS) : null;
 
   // The movement pad: one at a time, on foot, in its corner, on empty ground.
@@ -1677,7 +1757,12 @@ function onUp(e) {
   if (e.pointerId !== look.id) return;
 
   // A tap rather than a look: go and see them, or stroll to the spot.
-  if (look.travel < CONFIG.player.tapSlop) {
+  //
+  // ...unless the lens is round, where a tap means nothing at all. `look.ch` can
+  // never be set in that view — see the pick — but the branch below it can still
+  // poke a sleeper, pocket a loose piece or set one down off the raycast alone,
+  // and all three are the same intrusion by a different route.
+  if (look.travel < CONFIG.player.tapSlop && !rig.selfieOn) {
     // The rod is worked from the action button now — 「あげる!」 on a bite,
     // 「やめる」 otherwise — so a tap no longer strikes or reels. That is the
     // point of the button: the strike is the one moment in this game with a
@@ -2595,11 +2680,14 @@ function syncPouch() {
     you.holdPiece(carriedPiece(inventory.heldUnique), CARRY[art]);
   } else if (inventory.holding) {
     globe.holdItem(itemIcon(inventory.holding));
-    // A stackable is a CARD, and there is no built copy of a fish to give the
-    // body. Rather than photograph one onto a sprite for a figure that is a
-    // centimetre tall on screen, your avatar simply carries nothing — which is
-    // also what the cast do with the fish you give them.
-    you.dropPiece();
+    // These stackables already have transparent item art, so the avatar carries
+    // the same drawing as the first-person hand. paintFishCard has already
+    // removed the catch card's empty square, leaving only the fish itself.
+    if (AVATAR_CARDS.has(inventory.holding)) {
+      you.holdPiece(carriedCard(inventory.holding), avatarCardGrip(inventory.holding));
+    } else {
+      you.dropPiece();
+    }
   } else {
     globe.clearHand();
     you.dropPiece();
@@ -2894,6 +2982,7 @@ onPress(viewToggle, () => {
 // move-input.js, beside the keys that do the same two things.
 const jumpBtn = document.getElementById('jump-btn');
 const sprintBtn = document.getElementById('sprint-btn');
+const sitBtn = document.getElementById('sit-btn');
 
 // --- the focus: what you are looking at
 //
@@ -3380,7 +3469,14 @@ const ixEl = document.getElementById('interact');
 // keeps it — and the whole point of the gaps below is that kin stand together.
 // Splitting them to seat one of them would be spending the grouping to buy the
 // anchor, when both fit.
-const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'sit', 'grab', 'fish', 'light', 'talk', 'hold', 'play', 'give', 'swap', 'giveBack'];
+// `sit` was briefly a pill here, seated between the hand verbs and the world
+// ones. It is a circle in the action cluster now, beside jump and sprint — see
+// the note in index.html for why that is a correction rather than a preference,
+// and what its being here cost: a family of one in IX_GROUP, a private exemption
+// from the arrival bounce, and a stack that reshuffled every time you stopped
+// walking. What is left in this table is world verbs only, which is what it was
+// always for.
+const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'use', 'grab', 'fish', 'light', 'talk', 'hold', 'play', 'give', 'swap', 'giveBack'];
 
 // WHAT EACH VERB IS ABOUT, which is what the gaps in the column are drawn from.
 //
@@ -3410,12 +3506,10 @@ const IX_GROUP = {
   // What is in your hand, anchored at the bottom — see IX_ORDER.
   stow: 'hand',
   put: 'hand',
-  // YOURSELF, which is a family of one and is not a stretch. Every other verb
-  // here is about a thing out there — something in your hand, something you are
-  // facing, somebody in front of you. Sitting is about the only thing on this
-  // screen that is none of those, so it stands apart with a gap either side
-  // rather than being filed under the nearest neighbour.
-  sit: 'self',
+  // A `self` family stood here, holding `sit` alone. A family of one was the
+  // tell that it did not belong in this table at all — every other verb here is
+  // about something out in the world, and sitting is about your own body. It is
+  // a circle now, with the other two body verbs.
   // What you are facing out in the world.
   grab: 'world',
   fish: 'world',
@@ -3448,11 +3542,6 @@ const IX_GLYPH = {
   // A four-point sparkle: the thing you are sending them to is a delight, and
   // this is the plainest drawing of one.
   play: '<path d="M12 4.5l1.7 5.8L19.5 12l-5.8 1.7L12 19.5l-1.7-5.8L4.5 12l5.8-1.7Z"/>',
-  // A seat in profile: a back, a cushion line, and the ground under it. Drawn
-  // side-on because that is the one angle at which "sitting" is a silhouette
-  // rather than a posture you have to read — the same reason a speech bubble is
-  // drawn from the side.
-  sit: '<path d="M8 4.8v7.4h7.6"/><path d="M5.6 12.2h11.2"/><path d="M7.4 15v4.2"/><path d="M15 15v4.2"/>',
   // The same arrow the other way about — away from you, toward them. The pair
   // are deliberately mirror images: 「わたす」 and 「かえして」 are one object
   // making one journey, and which way it is going is the whole of the
@@ -3475,6 +3564,10 @@ const IX_GLYPH = {
   fish: '<path d="M3.2 12c2.4-3 5.3-4.6 7.9-4.6s5.6 1.6 7.2 4.6c-1.6 3-4.6 4.6-7.2 4.6S5.6 15 3.2 12Z"/>'
       + '<path d="m18.3 12 2.5-2.4v4.8Z"/><path d="M7.6 11.2h.01"/>',
   put: '<path d="M12 3.6v9"/><path d="m8.5 9.1 3.5 3.5 3.5-3.5"/><path d="M5 18.4h14"/>',
+  // The same camera the corner button wears, because they are the same verb
+  // reached two ways and a second drawing would imply a second thing.
+  use: '<path d="M2.9 8.4h3.4l1.4-2.2h8.6l1.4 2.2h3.4v9.9a1 1 0 0 1-1 1H3.9a1 1 0 0 1-1-1Z"/>'
+     + '<circle cx="12" cy="13.3" r="3.3"/><path d="M18.4 11h1.1"/>',
   stow: '<path d="M4.5 8.6h15v10.9h-15z"/><path d="M8.6 8.6v-2a3.4 3.4 0 0 1 6.8 0v2"/>',
   light: '<path d="M9.4 16.5h5.2"/><path d="M10 19.2h4"/>'
        + '<path d="M12 3.6a5.6 5.6 0 0 0-3.3 10.1c.4.3.7.8.7 1.3h5.2c0-.5.3-1 .7-1.3A5.6 5.6 0 0 0 12 3.6Z"/>',
@@ -3520,6 +3613,28 @@ const ACTIONS = {
   play: {
     word: () => 'いっておいで',
     run: () => { if (household.sendToPlay(performance.now())) touched(); },
+  },
+  // 「つかう」 — the camera in your hand, put to its use.
+  //
+  // A SECOND WAY TO THE SAME VIEW, and it earns its place by being the one that
+  // matches what you just did. Picking the camera up is a deliberate act, and
+  // the answer to "now what" should be in the corner your thumb is already in
+  // rather than diagonally across the screen — the stack is where this game
+  // says what the thing in your hand is FOR.
+  //
+  // One way only: the stack goes with the walking controls the moment the lens
+  // turns round, so this can open the view and never close it. That is not a
+  // gap — 「もどる」 is the same button you pressed to get here, on the flip
+  // disc, and a second exit competing with it would be the ambiguity the pill
+  // stack exists to avoid.
+  use: {
+    word: () => 'つかう',
+    run: () => {
+      if (!rig.isFirstPerson) return;
+      rig.setSelfie(true);
+      touched();
+      syncInteract();
+    },
   },
   give: {
     word: () => (inventory.heldUnique ? 'かす' : 'わたす'),
@@ -3577,22 +3692,11 @@ const ACTIONS = {
   // this mostly stops the one case where it did: tidying your hand with nobody
   // and nothing else around.
   stow: { word: () => 'しまう', run: () => inventory.putAway() },
-  // SIT WHERE YOU STAND. There is no seat to find and nothing to claim: the rig
-  // has already guaranteed that wherever your feet are is somewhere legal — out
-  // of the water, off the walls, clear of the trunks — so anywhere you can stand
-  // is somewhere you can sit, and that is the entire placement rule.
-  //
-  // It inherits every interesting surface for free, because the rig can already
-  // STAND on the standable tops: sitting on the stump is sitting while you
-  // happen to be standing on the stump, and the ice on a frozen pond is the
-  // same. No seat objects, no spot table, no claiming.
-  //
-  // ONE SLOT, TWO WORDS, the way 「つける／けす」 works: it reads what pressing it
-  // DOES rather than what you currently are.
-  sit: {
-    word: () => (rig.seated ? 'たつ' : 'すわる'),
-    run: () => { if (!rig.standUp()) rig.sit(); },
-  },
+  // A `sit` entry stood here. The verb lives on a circle now — see toggleSit in
+  // move-input.js, which is where jump and sprint already were. SIT WHERE YOU
+  // STAND is still the whole placement rule: the rig has already guaranteed that
+  // wherever your feet are is somewhere legal, so anywhere you can stand is
+  // somewhere you can sit, and the standable tops come along for free.
   // THE WORD CARRIES THE STATE, so this needs no lit styling of its own. As a
   // lone round button it was filled when the light was on and outlined when it
   // was off, because a glyph cannot say which way it is about to go. A pill can:
@@ -3653,20 +3757,14 @@ function actionsNow() {
   // reading a pill for.
   if (inventory.holding || inventory.heldUnique) list.push('stow');
   if (inventory.heldUnique) list.push('put');
-  // SITTING, WHEN YOU HAVE STOPPED. Offered to somebody standing still and to
-  // somebody already sat down; withheld while you are walking, which is the one
-  // state where it could never be what you meant.
+  // ...and what the thing in your hand is FOR, when it is for something. The
+  // camera is the only unique with a use of its own; everything else is carried,
+  // set down or handed over, which the three verbs around this already cover.
   //
-  // That gate is what keeps it from being a permanently parked button — the
-  // thing this stack exists to be rid of. Sitting is genuinely always AVAILABLE
-  // on the ground, so by the usual rule it would sit there forever; stopping is
-  // what turns it from a fact about your body into an offer. It also reads
-  // rather well: come to a halt somewhere nice and the world asks.
-  //
-  // Not offered while a hand is held, either. Getting up to walk hand in hand
-  // and sitting down are two answers to the same moment, and the one that
-  // involves another person wins.
-  if ((rig.seated || !rig.isWalking) && !household.handHeld) list.push('sit');
+  // IN HAND rather than merely owned, unlike the corner button: that one is the
+  // ability existing at all, and this is the tool being held. Pushed here to
+  // keep the list in IX_ORDER's own sequence — see the note above.
+  if (inventory.heldUnique === 'hachiwareCamera') list.push('use');
   // WORLD VERBS DO NEED IT, because a verb about an object is unusable without
   // knowing which object, and proximity cannot say. One hand: nothing may be
   // taken up while a unique is already in it.
@@ -3683,7 +3781,17 @@ function actionsNow() {
   // ...and the hand. Offered beside a friend, and ALSO while one is already
   // held whoever you happen to be facing — otherwise letting go would mean
   // turning back to face somebody you are already walking with.
-  if (mate || household.handHeld) list.push('hold');
+  //
+  // ...BUT NOT WHILE THE WORLD HAS THEM. Somebody walking home to bed or running
+  // out of the rain is in a mode that outranks the hand, so the tap could never
+  // have been honoured — see canLead, which is where the whole reasoning is. A
+  // control that flips its own label and changes nothing is worse than an absent
+  // one: this world's rule is that a control appears when it has something to
+  // say and is otherwise not there, and that is what this line now obeys.
+  //
+  // Asked only of the OFFER. Releasing is always available, because a hand
+  // genuinely held has to be lettable-go of whatever the sky is doing.
+  if (household.handHeld || (mate && household.canLead(mate.bot))) list.push('hold');
   // ...and the send-off, only while you are leading somebody, their own thing
   // is close by, AND YOU ARE LOOKING AT IT. See playSite.
   if (playSite()) list.push('play');
@@ -4139,8 +4247,33 @@ function refuse(key) {
 // here" and the bubble IS the words landing — so showing both would be saying
 // it twice, in the same spot, at two sizes.
 function updateMark() {
+  // NOT IN THE VIEWFINDER. `isFirstPerson` stays true through a selfie — the
+  // view is a render transform and deliberately moves nothing — so every one of
+  // these would go on floating over the cast in the middle of the shot,
+  // annotating verbs that view does not offer and that a touch can no longer
+  // reach anyway. A mark is a promise about what a press would do; with the
+  // presses gone the promise is the only thing left, and it ends up in the
+  // photograph.
+  if (rig.selfieOn) {
+    globe.setGrabMark(null);
+    globe.setMateMark(null);
+    globe.setSpotMark(null);
+    return;
+  }
+  // WHAT THE HAND VERBS ARE ABOUT — a loose piece you could take up, or the bulb
+  // you could switch. One mark for both, because a focus is one thing at a time
+  // and `loose` and `fixture` are the two halves of that one field.
+  //
+  // The bulb went unmarked for a while and it was the odd one out: every other
+  // thing 「ひろう」 or 「つける」 could act on wore an arrow, and the fitting —
+  // the one target that is never in your hand, so the one where you most want to
+  // be told WHICH — wore nothing. The naming slot on the pill was carrying that
+  // alone. See setFixtureMark for why its arrow hangs underneath.
   const grabOn = rig.isFirstPerson && focus && focus.loose && !inventory.heldUnique;
-  globe.setGrabMark(grabOn ? focus.loose : null);
+  const lightOn = rig.isFirstPerson && focus && focus.fixture && !!lightNow();
+  if (grabOn) globe.setGrabMark(focus.loose);
+  else if (lightOn) globe.setFixtureMark(focus.fixture);
+  else globe.setGrabMark(null);
   const mateOn = rig.isFirstPerson && mate && !mate.bot.dlg.isVisible;
   globe.setMateMark(mateOn ? mate.bot.ch : null);
   // ...and the stump or the pudding, while the send-off is on offer. Read from
@@ -4293,12 +4426,12 @@ function syncInteract() {
     const key = want[i];
     let rec = ixNodes.get(key);
     if (!rec) {
-      // ...but never for 「すわる」, which would otherwise bounce every single
-      // time you came to a halt in an empty meadow. The announce is for the
-      // world OFFERING you something — a friend arriving in reach, a thing
-      // coming into view — and sitting is not an offer, it is a fact about your
-      // own body that stopped being hidden. See .ix-fresh.
-      rec = buildIx(key, wasEmpty && key !== 'sit');
+      // No exemptions any more. 「すわる」 needed one — it would have bounced
+      // every time you came to a halt in an empty meadow — and that exemption
+      // was the clearest sign it did not belong in this stack. Every verb left
+      // here is genuinely the world offering you something, which is what the
+      // announce is for.
+      rec = buildIx(key, wasEmpty);
       ixNodes.set(key, rec);
       ixEl.appendChild(rec.el);
     }
@@ -4837,6 +4970,7 @@ document.addEventListener('pointerdown', (e) => {
 }, { capture: true, passive: true });
 
 applyPhase(activePhase(), { instant: true });
+household.settleInitialBedtime();
 paintTime();
 paintScrubber();
 paintSky();
@@ -4869,7 +5003,7 @@ startEl.addEventListener('click', () => {
   const now = performance.now();
   social.lastTouchAt = now;
   rig.markTouched(now);
-  speak(bots[0], 'greet', now);
+  if (!bots[0].ch.asleep) speak(bots[0], 'greet', now);
 }, { once: true });
 
 // Everything the three of them notice: you arriving, each other, and the water.
@@ -5212,7 +5346,11 @@ function frame(now) {
     // person, so the rig stays ignorant of the household — see pairAim.
     rig.pairAim = household.handHeld ? household.handHeld.ch.dir : null;
     sprintBtn.classList.toggle('is-off', !onFoot || !!household.handHeld);
-    viewToggle.classList.toggle('is-off', !!household.handHeld);
+    // Sit fades with the cluster and NOT with the hand. Sprint goes while you
+    // are leading somebody because a run would drag them; sitting down is a
+    // perfectly good thing to do mid-walk with a friend, and the press lets go
+    // for you — see toggleSit. Off the ground it goes, like its neighbours.
+    sitBtn.classList.toggle('is-off', !onFoot);
     // NO CAMERA, NO CAMERA BUTTON. The ability lives in Hachiware's compact
     // camera — the loose piece resting in the cave — and exists exactly while
     // that piece is in your pack or your hand. `slotOf` covers both, because
@@ -5329,6 +5467,16 @@ function frame(now) {
     if (sprintBtn.classList.contains('is-on') !== rig.sprintOn) {
       sprintBtn.classList.toggle('is-on', rig.sprintOn);
       sprintBtn.setAttribute('aria-pressed', rig.sprintOn ? 'true' : 'false');
+    }
+
+    // ...and the sit button the same way, for the same reason: the rig can put
+    // you back on your feet without the button being pressed — a push on the
+    // stick, a hop, a pinch, a teleport — and the glyph has to follow the body
+    // rather than remember the last press. Guarded on an actual change so the
+    // crossfade is not restarted sixty times a second.
+    if (sitBtn.classList.contains('is-on') !== rig.seated) {
+      sitBtn.classList.toggle('is-on', rig.seated);
+      sitBtn.setAttribute('aria-pressed', rig.seated ? 'true' : 'false');
     }
 
     // Leaving the ground mid-push should not leave a pad hanging there — nor a
@@ -5613,14 +5761,5 @@ if (IS_LOCAL) {
       };
     },
   };
-
-
-
-
-
-
-
-
-
 
 }

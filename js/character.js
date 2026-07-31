@@ -414,17 +414,38 @@ export class Character {
     //
     // So each posture is measured into its own entry here: a plane cut to that
     // drawing's proportions, and the foot offset and drawn height read off that
-    // drawing's own pixels. `px2world` is shared, so the two are at one scale
-    // and a wider or taller canvas simply buys a wider or taller card rather
-    // than a bigger character.
-    const measure = (canvas) => {
+    // drawing's own pixels.
+    //
+    // AT ITS OWN RESOLUTION, and that argument is the one this got wrong. The
+    // scale used to be `this.px2world` for every posture — one number, taken
+    // from the RESTING sheet — on the reasoning that sharing it keeps the
+    // postures at one scale. It does the opposite the moment a posture is drawn
+    // at a different pixel width, because then the same world-units-per-pixel
+    // buys a bigger character rather than a bigger canvas.
+    //
+    // Measured across the cast: every sheet matches its own resting width
+    // except two, and both are sit sheets. Usagi's is 1143px against his
+    // 1000px idle, so he rendered at 1.14× — his seated drawing came out 20%
+    // WIDER than his standing one where everybody else's is 4% narrower, which
+    // is exactly the "Usagi looks especially big" this was reported as.
+    // Momonga's is 1000 against a 1041 idle and was quietly 4% small.
+    //
+    // Per-sheet is also what config.js already claims the rule is: "the source
+    // resolution does not come into it at all — redraw a character at twice the
+    // pixels and it renders sharper at the same size rather than twice as big."
+    // That was true of the resting sheet and had never been true of a posture.
+    //
+    // `srcW` is the SOURCE width rather than the canvas's, because paintSheet
+    // pads for the mipmap margin and that padding must not count as character.
+    const measure = (canvas, srcW) => {
+      const px2world = (CONFIG.bodyPlane * spec.scale) / srcW;
       const b = sheetBounds(canvas);
       const footPx = b.maxY + 1;
       return {
-        geo: new THREE.PlaneGeometry(canvas.width * this.px2world, canvas.height * this.px2world),
+        geo: new THREE.PlaneGeometry(canvas.width * px2world, canvas.height * px2world),
         // Lift the sheet so the feet land on the ground rather than its texture
         // centre. The feet are the bottom of the drawn pixels.
-        footOffset: (footPx - canvas.height / 2) * this.px2world,
+        footOffset: (footPx - canvas.height / 2) * px2world,
         // Highest drawn pixel, measured up from the feet — so the bubble sits
         // above the ears rather than above an arbitrary texture edge, and a
         // taller drawing gets a taller anchor without anyone here saying so.
@@ -435,12 +456,12 @@ export class Character {
         // anchor a whole footOffset clear of the ears. Chiikawa's is 1.01
         // against a 2.02-unit body, so the bubble hung half a character above
         // the head.
-        headTop: (footPx - b.minY) * this.px2world,
-        standoff: (canvas.height * this.px2world) / 2,
+        headTop: (footPx - b.minY) * px2world,
+        standoff: (canvas.height * px2world) / 2,
       };
     };
 
-    this.pose = { stand: measure(bodyCanvas) };
+    this.pose = { stand: measure(bodyCanvas, sheets.normal.naturalWidth) };
     // SITTING IS A DIFFERENT BODY, so it is measured like one — see POSTURES in
     // cast.js. The sit sheets are drawn shorter and rather wider than the
     // standing ones, which is what sitting down looks like, and hanging one on
@@ -452,11 +473,17 @@ export class Character {
     // one: the sink exists to fake a seated pose by burying a standing card, and
     // _animate applies it only while `sitTex` is missing.
     if (sheets.sit) {
-      this.pose.sit = measure(cachedCanvas(`sheet|${sheets.sit.src}`, () => paintSheet(sheets.sit)));
+      this.pose.sit = measure(
+        cachedCanvas(`sheet|${sheets.sit.src}`, () => paintSheet(sheets.sit)),
+        sheets.sit.naturalWidth,
+      );
     }
     if (sheets.fly) {
       this.flyTex = sheetTex(sheets.fly);
-      this.pose.fly = measure(cachedCanvas(`sheet|${sheets.fly.src}`, () => paintSheet(sheets.fly)));
+      this.pose.fly = measure(
+        cachedCanvas(`sheet|${sheets.fly.src}`, () => paintSheet(sheets.fly)),
+        sheets.fly.naturalWidth,
+      );
     } else {
       this.flyTex = null;
     }
@@ -486,6 +513,7 @@ export class Character {
       this.pastimeTex = sheetTex(past);
       this.pose['pastime-1'] = measure(
         cachedCanvas(`sheet|${past.src}`, () => paintSheet(past)),
+        past.naturalWidth,
       );
     } else {
       this.pastimeTex = null;
@@ -790,6 +818,12 @@ export class Character {
   // The scene hands out a fresh base every frame from a back-to-front sort.
   setRenderBase(base) {
     this.bodyMesh.renderOrder = base;
+    // A held stackable is itself a transparent drawing. Draw it immediately
+    // after its carrier's card or the carrier paints over the item even though
+    // it is correctly attached in front. Built held props stay on depth alone.
+    if (this._heldObj && this._heldObj.userData.avatarCard) {
+      this._heldObj.renderOrder = base + 0.1;
+    }
   }
 
   // Where the speech bubble's tail points.
@@ -965,6 +999,10 @@ export class Character {
   holdPiece(obj, grip) {
     this._holdWant = 1;
     if (this._heldObj === obj && this._grip === grip) return;
+    // A direct hand-to-hand swap has no empty frame between its two inventory
+    // changes. Remove the previous copy here or it remains as a second child
+    // behind the new one, making grass and mushrooms pile up on the same paw.
+    if (this._heldObj && this._heldObj !== obj) this.holdGroup.remove(this._heldObj);
     this._heldObj = obj;
     this._grip = grip;
     this._placeHold();
@@ -1016,6 +1054,7 @@ export class Character {
     // so it goes back on afterwards rather than before.
     fitHeld(obj, g.size * this.headTop);
     this.holdGroup.add(obj);
+    if (obj.userData.avatarCard) obj.renderOrder = this.bodyMesh.renderOrder + 0.1;
     // The grip's height is measured from the FEET, because that is the only
     // landmark on a body that means the same thing in every pose. The card's own
     // origin sits `footOffset` above them, so that is the change of frame.

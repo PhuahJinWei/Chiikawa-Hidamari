@@ -41,7 +41,7 @@
 // right for as long as that fish has stripes.
 
 import { FISH_SPECIES } from './config.js';
-import { paintFishCard, paintKusa, paintSheet } from './art.js';
+import { paintFishCard, paintSheet } from './art.js';
 import { IMG } from './assets.js';
 
 // ONE LINE ABOUT EACH THING, for the panel that opens when you tap a slot.
@@ -205,8 +205,9 @@ export function itemIcon(id) {
   // the app already goes through. Note that it PADS rather than crops, unlike
   // the fish above: the mushrooms are drawn tight to their pixels already, so
   // there is nothing to take off and only the mipmap margin to add.
+  if (id === 'kusa') return paintSheet(IMG.grass1);
   if (it.cover) return paintSheet(IMG[it.cover]);
-  return paintKusa();
+  return paintSheet(IMG.grass1);
 }
 
 // --------------------------------------------------------------------- saving

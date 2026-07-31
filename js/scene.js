@@ -1157,6 +1157,28 @@ function skyDirFromTexel(px, py, texW, texH, out) {
   );
 }
 
+// HOW WIDE A SHORE THE SNOW THINS ACROSS at each of the shell's own cut edges.
+//
+// Both are distances on the ground, measured OUTWARD from the hole's rim, over
+// which the depth map ramps from zero back to the open field. What matters is
+// where inside that ramp the shell breaks the turf, and that is not the band's
+// end: the crossing is at `shellTuck / depth` of full field — 0.257 of 0.86,
+// so 30% of the way along — after which the sheet climbs to its full 0.22.
+//
+//   shore 1.6   the pond's edge, so the snow surfaces about half a unit out
+//               from the widest the rim wobbles to and is at field depth by a
+//               pace and a half. Generous on purpose: this is the rim you can
+//               stand next to, since a frozen pond is walkable.
+//   eaves 0.9   the foot of a wall. Tighter, because nobody stands inside a
+//               building's hole except on its floor, and a wide bare apron
+//               round each house would read as a lawn somebody had cleared.
+//
+// Neither is in CONFIG.weather with `depth` and `shellTuck`, and that is a
+// judgement rather than an oversight: those two are the SNOW's own shape and get
+// tuned by eye against the reference art. These are a repair to a seam in the
+// geometry, and they only mean anything next to the cut in snowShellGeo.
+const SHELL_HOLE = { shore: 1.6, eaves: 0.9 };
+
 // THE SNOW ITSELF, as a second surface over the planet.
 //
 // Everything up to now made the world WHITE; this is what makes it DEEP. It is
@@ -3179,7 +3201,15 @@ ${shader.fragmentShader}`
       this.tintables.push(mesh.material);
       // `clock` staggered so two marks on screen never bob in step — moving
       // as one drilled unit is the tell that they are widgets.
-      return { mesh, target: null, lift: 0, on: 0, clock: Math.random() * 1400 };
+      // `dir` is the mark's own up, stored rather than read off the target each
+      // frame: a perch site has no `dir` of that kind and a ceiling fitting's is
+      // not a field on it either, and both are fixed for as long as they are
+      // focused — which is exactly as long as the box measured beside it is.
+      // `flip` turns the arrow over. The drawing's point is at the BOTTOM (see
+      // paintFocusMark), which is what an arrow floating above a thing wants;
+      // one hung underneath has to be turned or it points at the floor.
+      return { mesh, target: null, lift: 0, on: 0, flip: false,
+               dir: new THREE.Vector3(), clock: Math.random() * 1400 };
     };
     this._markPerson = mkFocusMark();
     this._markThing = mkFocusMark();
@@ -5785,6 +5815,12 @@ ${shader.fragmentShader}`
   _litGround(material, snowMix = true) {
     const N = this.lampUniforms ? this.lampUniforms.uLampK.value.length : 0;
     if (!N) return;
+    // The mark this leaves behind is for auditLighting, which otherwise has no
+    // way to tell a genuinely lit surface from one that was forgotten: both are
+    // materials with no `hourDark` on them. Set before the patcher rather than
+    // inside it, because `onBeforeCompile` does not run until the thing is
+    // first drawn and the snow shell may never be.
+    material.userData.litGround = true;
     // Outdoors for good — the globe is the outdoors — so the mask is the plain
     // constant one. A lamp taken inside stops lighting the turf on the frame it
     // crosses the threshold, which is what `uLampIn` is for.
@@ -5895,6 +5931,114 @@ ${shader.fragmentShader}`
         diffuseColor.rgb = mix( uTrodden, diffuseColor.rgb, packed );`);
       }
     };
+  }
+
+  // WHAT IN THIS WORLD IS NOT WEARING THE HOUR, and why.
+  //
+  // The rework left one patcher and one model, but it did NOT leave one place
+  // where a new surface has to register — a mesh joins the lighting by being
+  // pushed onto a list at the site that builds it, and a piece of art added
+  // later can simply miss. That is a silent failure: the thing renders, it
+  // renders at its own flat colour, and it looks merely a bit off rather than
+  // broken. It stays dark in a bright room and bright in a dark one.
+  //
+  // So this walks the whole scene and sorts every material into "accounted
+  // for" or not. It is a REPORT and changes nothing; the rig calls it after a
+  // build and prints anything unaccounted, and it is on `Globe` rather than in
+  // the rig so it can be run from a console against the live app.
+  //
+  // The exemptions are rules rather than a list of names, because a list of
+  // names is the same bookkeeping that lets a new prop slip through:
+  //
+  //   patched     it went through _wearHour and carries the mark.
+  //   emitter     additive blending. A halo, a bloom, a glint: these ADD light
+  //               rather than wear it, which is the other half of the model.
+  //   stars       a PointsMaterial, driven by _setStarAlpha.
+  //   ink         BackSide with no map — every pen line in this codebase is an
+  //               inverted hull, and a line that brightened near a lamp would
+  //               be a drawing whose outline fades where the light is.
+  //   lit ground  a real Lambert surface that went through _litGround and says
+  //               so — the planet and the snow shell over it.
+  //   own model   the handful that answer to something better than a flat
+  //               multiply: the sky and its disc, the far haze, the water, a
+  //               lamp's glass, a window's glow, a night sheet, and the
+  //               weather. These are named, because there is no evidence on the
+  //               material itself to read; if this list ever grows past a
+  //               dozen, that is the signal to give them a mark of their own.
+  //
+  // Anything left is either a real gap or a rule this list has not learned yet,
+  // and both are worth a look.
+  auditLighting() {
+    const own = new Map();
+    const claim = (m, why) => { if (m && !own.has(m)) own.set(m, why); };
+    const claimTree = (root, why) => {
+      if (!root || !root.traverse) return;
+      root.traverse((o) => {
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of ms) claim(m, why);
+      });
+    };
+    // The weather first, so the rainbow is called weather rather than sky — it
+    // hangs off the sky rig, and the sweep below would otherwise adopt it.
+    claimTree(this.bow, 'weather');
+    // ...then everything else on that rig. Claimed as a TREE and not as the two
+    // domes and two discs by name: the sky has grown a layer before now (the
+    // overcast dome) and will again, and a sky that has to be re-listed here
+    // every time is the bookkeeping this whole audit exists to catch.
+    claimTree(this.skyRig, 'sky');
+    claim(this._hazeMat, 'haze');
+    for (const p of (this.ponds || [])) for (const mm of p.meshes) claim(mm.material, 'water');
+    for (const m of (this._hourGlass || [])) claim(m, 'lamp glass');
+    for (const L of (this.looseLit || [])) claim(L.glass, 'lamp glass');
+    for (const h of this.homes) for (const m of (h.glow || [])) claim(m, 'window glow');
+    for (const s of (this.litProps || [])) {
+      if (!s.lit) continue;
+      claim(s.lit.night.material, 'night sheet');
+      claim(s.lit.bloom.material, 'bloom');
+    }
+    for (const o of ((this.rain && this.rain.objects) || [])) claimTree(o, 'weather');
+
+    const counts = {};
+    const unaccounted = [];
+    const hidden = [];
+    const seen = new Set();
+    this.scene.traverse((o) => {
+      if (!o.isMesh && !o.isPoints && !o.isSprite) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) {
+        if (!m || seen.has(m.uuid)) continue;
+        seen.add(m.uuid);
+        let why = null;
+        if (m.userData && m.userData.hourDark) why = 'patched';
+        else if (m.userData && m.userData.litGround) why = 'lit ground';
+        else if (m.blending === THREE.AdditiveBlending) why = 'emitter';
+        else if (m.isPointsMaterial) why = 'stars';
+        else if (m.side === THREE.BackSide && !m.map) why = 'ink';
+        else if (own.has(m)) why = own.get(m);
+        counts[why || 'UNACCOUNTED'] = (counts[why || 'UNACCOUNTED'] || 0) + 1;
+        if (why) continue;
+        let path = [];
+        for (let n = o; n && path.length < 5; n = n.parent) path.unshift(n.name || n.type);
+        // SEEN AND UNSEEN ARE DIFFERENT NEWS, and splitting them is what keeps
+        // this worth reading. A material nobody has drawn cannot look wrong; a
+        // scene is full of things parked invisible — a retired card, a sheet
+        // for another hour, a layer waiting on weather — and reporting those
+        // beside a real gap would train whoever runs this to ignore the number.
+        //
+        // So `unaccounted` is the alarm and `hidden` is the footnote. A hidden
+        // one that later gets shown will simply move lists.
+        const row = {
+          type: m.type,
+          geometry: o.geometry ? o.geometry.type : '-',
+          colour: m.color ? `#${m.color.getHexString()}` : null,
+          textured: !!m.map,
+          opacity: m.opacity,
+          path: path.join('/'),
+        };
+        (o.visible && m.opacity > 0 ? unaccounted : hidden).push(row);
+      }
+    });
+    return { total: seen.size, counts, unaccounted, hidden };
   }
 
   // ONE SURFACE, WEARING THE HOUR AND WHATEVER LAMPS CAN SEE IT.
@@ -6165,6 +6309,55 @@ ${shader.fragmentShader}`
     _fmBox.setFromObject(loose.body || loose.anchor);
     _fmBox.getBoundingSphere(_fmSphere);
     M.lift = _fmSphere.radius + FOCUS_MARK.gap;
+    M.dir.copy(loose.dir);
+    M.flip = false;
+  }
+
+  // ...AND OVER A CEILING FITTING, which shares the same mark because a focus is
+  // one thing at a time: `loose` and `fixture` are the two halves of the same
+  // field and can never both be it.
+  //
+  // A BULB'S MARK HANGS BELOW IT. Every other mark in this game floats above the
+  // thing it means, and a bulb is the one target where that space does not
+  // exist — Chiikawa's has no `hang` at all, so it sits flush against the apex
+  // of the dome and an arrow over it would be inside the plaster. Under it is
+  // the only free side, and it still reads as "this one" because there is
+  // nothing else down there.
+  //
+  // The drop clears the whole fitting rather than a guessed height: from the
+  // anchor to the far side of the fitting's own bounding sphere, so a flex and
+  // a shade come with it and a redrawn bulb needs no number changed here.
+  setFixtureMark(fit) {
+    const M = this._markThing;
+    if (M.target === fit) return;
+    M.target = fit;
+    if (!fit) return;
+    _fmBox.setFromObject(fit.anchor);
+    M.dir.copy(fit.anchor.position).normalize();
+    // JUST UNDER THE GLASS, not under the whole fitting.
+    //
+    // A bounding SPHERE was the obvious measure and it sat the mark a third of a
+    // unit too low: the sphere has to enclose the flex as well, which runs all
+    // the way up to the plaster, so its radius describes the drop from the
+    // CEILING rather than the depth of the bulb. Measured, that hung the arrow
+    // 1.37 below a fitting only 1.03 long — adrift in the middle of the room and
+    // plainly not attached to anything.
+    //
+    // The box's lowest corner along the fitting's own up is the honest number:
+    // the bottom of the thing, whatever shape it is, plus the same air every
+    // other mark keeps.
+    let low = 0;
+    for (let i = 0; i < 8; i++) {
+      _fmPos.set(i & 1 ? _fmBox.max.x : _fmBox.min.x,
+                 i & 2 ? _fmBox.max.y : _fmBox.min.y,
+                 i & 4 ? _fmBox.max.z : _fmBox.min.z)
+        .sub(fit.anchor.position);
+      low = Math.min(low, _fmPos.dot(M.dir));
+    }
+    M.lift = low - FOCUS_MARK.gap;
+    // Turned over, because the point of the arrow is at the bottom of the
+    // drawing and this one is looking up at what it means.
+    M.flip = true;
   }
 
   // ...and over a PLACE — a perch site, `{dir, y}`, which is what 「いっておいで」
@@ -6221,15 +6414,23 @@ ${shader.fragmentShader}`
           M.mesh.position.copy(sp.dir)
             .multiplyScalar(CONFIG.globe.radius + sp.y + M.lift + bob);
         } else {
-          const l = M.target;
-          M.mesh.position.copy(l.anchor.position)
-            .addScaledVector(l.dir, M.lift + bob);
+          // A piece on the ground or a fitting on the ceiling, and the only
+          // difference between them is the SIGN of the lift — see
+          // setFixtureMark, which hangs its mark under the bulb because there is
+          // nothing above one but plaster.
+          M.mesh.position.copy(M.target.anchor.position)
+            .addScaledVector(M.dir, M.lift + bob);
         }
       }
       // Screen-aligned, not aimed: copying the camera's quaternion keeps the
       // mark square to the view wherever it stands, with none of lookAt's
       // shear at the frame's edge.
       M.mesh.quaternion.copy(this.camera.quaternion);
+      // ...and turned over when it hangs beneath what it means. COMPOSED onto
+      // the billboard with rotateZ rather than written as `rotation.z`, which
+      // would decompose the camera's quaternion and replace its z — the bug the
+      // singing notes were tilted by, and the same one waiting here.
+      if (M.flip) M.mesh.rotateZ(Math.PI);
       M.mesh.scale.setScalar(M.on);
     }
   }
@@ -7223,9 +7424,47 @@ ${shader.fragmentShader}`
       const wall = h.building.r * R;
       out.push({
         dir: h.sprite.normal,
-        r: wall + 1.9,
-        inner: wall + 0.15,
+        r: wall + SHELL_HOLE.eaves + 2.1,
+        // ...AND THE BANK NOW STARTS OUTSIDE THE SWEPT BASE rather than hard
+        // against the masonry, which is a deliberate reversal of what the note
+        // in snowShellGeo argued for ("the snow outside comes right up to the
+        // wall the drifts are banked against"). That was written when the wall
+        // was assumed to hide the shell's cut edge, and it does — from OUTSIDE.
+        // From inside a room looking out of the door it plainly does not, and
+        // the hole below is what fixes that. A bank left at the wall would sit
+        // on top of the hole and lift the rim straight back out of the ground.
+        //
+        // What it costs is nothing the picture misses: the base of a wall under
+        // an overhanging dome is exactly where snow does NOT reach, so a swept
+        // strip at the foot and the drift a pace further out is what a building
+        // in snow actually looks like.
+        inner: wall + SHELL_HOLE.eaves,
         level: 0.30,
+      });
+      // THE SHELL'S HOLE UNDER THIS BUILDING, buried. See _hole in snowfield.js
+      // and the cut in snowShellGeo, which this is the other half of.
+      out.push({
+        dir: h.sprite.normal, hole: true,
+        rx: wall, ry: wall, band: SHELL_HOLE.eaves,
+      });
+    }
+
+    // ...and the same for every lake, which is the one the player can stand
+    // INSIDE of — a frozen pond is walkable, so the shell's biggest hole is
+    // somewhere you go, below the rim, at exactly the grazing angle a sheet with
+    // no underside cannot survive.
+    //
+    // Sized off the widest the rim can wobble to (`rimHi`), not the mean, so the
+    // zeroed core covers the whole cut whatever the harmonics are doing at that
+    // bearing — the faces are removed against the exact wobbled rim and this is
+    // a smooth ellipse, so it has to be the generous one of the two.
+    for (const l of CONFIG.lakes) {
+      out.push({
+        dir: dirFromLatLon(l.lat, l.lon, new THREE.Vector3()),
+        hole: true,
+        rx: l.rx * l.rimHi * R,
+        ry: l.ry * l.rimHi * R,
+        band: SHELL_HOLE.shore,
       });
     }
     return out;

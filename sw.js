@@ -1,5 +1,5 @@
 // Bump CACHE whenever you ship a change, otherwise phones keep the old build.
-const CACHE = 'hidamari-v157';
+const CACHE = 'hidamari-v192';
 
 const ASSETS = [
   './',
@@ -81,6 +81,7 @@ const ASSETS = [
   // See the note in assets.js.
   './asset/images/mushroom-1.png',
   './asset/images/mushroom-2.png',
+  './asset/images/grass-1.png',
   // The notes over a singer — see TUNE_VARIANTS in assets.js.
   './asset/images/effects/tune-1.webp',
   './asset/images/effects/tune-2.webp',

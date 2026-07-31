@@ -374,6 +374,18 @@ const MODES = [
 const MODE_BY_KEY = {};
 for (const m of MODES) MODE_BY_KEY[m.key] = m;
 
+// WHERE EACH MODE SITS IN THE ORDER, so the priority the list already encodes
+// can be ASKED rather than restated. The list is the only place the ranking
+// lives; this is a lookup into it, and reordering the table above reorders this
+// with it — which is what stops the offer and the outcome ever disagreeing.
+const MODE_RANK = {};
+MODES.forEach((m, i) => { MODE_RANK[m.key] = i; });
+// ...and the one rank anything outside this file cares about. Everything ABOVE
+// `held` is something the world is doing to somebody, and it wins: they are
+// asleep, on their way to bed, or running out of the rain. Everything below is
+// something they chose, and your hand outranks their plans.
+const HELD_RANK = MODE_RANK.held;
+
 export class Household {
   constructor({ globe, bots }) {
     this.globe = globe;
@@ -527,6 +539,48 @@ export class Household {
     // WHAT THEY CAME OUT FOR — 'snow' or 'bow'. The only thing that differs
     // between the two gatherings; see the note above the gathering.
     this._why = null;
+  }
+
+  // A visit that begins during the small hours joins the night already in
+  // progress. The ordinary bedtime mode deliberately shows everybody walking
+  // home when midnight arrives while the game is open; replaying that walk on
+  // a fresh load makes them begin the night outdoors instead.
+  //
+  // Called after the scene has received its initial daylight, so
+  // lampsBurningIn() can see the midnight lamp levels before _fallAsleep turns
+  // those switches off. Each body is parked where it would have finished its
+  // bedtime route, which also gives it the right place to wake from at dawn.
+  settleInitialBedtime() {
+    if (activePhase() !== BEDTIME) return false;
+
+    for (const bot of this.bots) {
+      const s = this.state.get(bot);
+      if (!s || !s.sleeps) continue;
+      const sleeper = this.globe.sleepers.get(bot.spec.key);
+      const at = s.own
+        ? sleeper && sleeper.walkTo
+        : this.globe.sleepSpotFor(bot.spec.key);
+      if (!at) continue;
+
+      bot.ch.standAt(at, 0);
+      s.mode = 'bed';
+      this._fallAsleep(bot, s);
+    }
+
+    // Do not spend the opening frames easing the windows down from the empty-
+    // house level. The night was already settled before the page was opened.
+    const by = {};
+    for (const place of this.places) {
+      const sleeping = this.bots.some((bot) => {
+        const s = this.state.get(bot);
+        return s.mode === 'bed' && s.step === 'asleep' && s.own === place;
+      });
+      const level = sleeping ? CONFIG.household.asleepLamps : CONFIG.household.emptyLamps;
+      this._lit.set(place, level);
+      by[place.style] = level;
+    }
+    this.globe.setOccupancy(by);
+    return true;
   }
 
   get anyoneHome() {
@@ -1098,8 +1152,9 @@ export class Household {
       //
       // No seat to find and none to claim — see _standThemUp. Their walk ended at
       // their own standing spot, one each, so sitting there puts them exactly
-      // where the room already spaced them.
-      ch.sitHere();
+      // where the room already spaced them. ...and if the room they ran into
+      // holds their own table, they take that instead — see _takeSeat.
+      this._takeSeat(bot, s.place);
       return;
     }
     if (s.route.length !== s.legs) {
@@ -1186,10 +1241,79 @@ export class Household {
   // left ordinary guests doing it — and since `globe.seats` is empty, the
   // fallback is not a fallback, it is what always happens. Two ways into the
   // same room must not disagree about where there is space in it.
+  // THEIR OWN PLACE FIRST, if this room holds the piece of furniture that makes
+  // it theirs — Chiikawa's table, Hachiware's box. See `household.seats`, which
+  // carries the reasoning and the measurements.
+  //
+  // Looked up by ART IN THIS ROOM rather than by whose house it is, and that is
+  // what keeps the awkward cases honest without a single test for them: the
+  // piece is either here or it is not. Chiikawa sheltering in the cave finds no
+  // table and takes her ring spot; a table added to the cave one day would seat
+  // her at it, which is the right answer arrived at for free.
+  //
+  // `past` is measured from the piece's own `out`, both in world units from the
+  // middle of the room — the same frame the furniture is placed in, so the two
+  // cannot drift apart. Clamped to the walk ring so a wide piece near a wall
+  // cannot seat somebody inside it.
+  // Their own piece of furniture in THIS room, or null. Split out from
+  // _standSpot because two callers need the answer to different questions: that
+  // one wants the place, and the walk wants to know whether to arrive precisely.
+  _furnitureSeat(bot, pl) {
+    const seat = CONFIG.household.seats && CONFIG.household.seats[bot.spec.key];
+    if (!seat || !seat.beside) return null;
+    const list = pl.home.spec.furniture;
+    const piece = list && list.find((f) => f.art === seat.beside);
+    return piece ? { piece, past: seat.past, side: seat.side || 0 } : null;
+  }
+
+  // SIT DOWN, and if this is their own table, sit down AT it rather than
+  // wherever the walk happened to stop.
+  //
+  // The walk cannot be trusted with the last half metre, and the two attempts to
+  // make it do so are both recorded here because both look reasonable until they
+  // are measured. Arriving is `homeArrive`, 0.60 — wider than Chiikawa's table
+  // is deep, so she was landing anywhere in a metre-wide circle and sitting
+  // there: measured at bearing 0.93 out 1.61 against a seat at 1.20 / 1.95, off
+  // to one side of her own table. Tightening the last waypoint to 0.20 for
+  // seats only was worse: both pieces are registered solids, and Hachiware
+  // walked up to his box, stopped 0.41 short with the target on the far side of
+  // a thing he will not walk through, and stood there until the errand timed
+  // out. A tolerance cannot fix this, because the floor genuinely does not let
+  // them stand where the drawing wants them.
+  //
+  // So the walk gets them to the furniture and SITTING DOWN takes the place —
+  // which is the honest description of what a character does anyway. It cannot
+  // fail, needs nothing of the pathing, and is bounded by `homeArrive`: the
+  // adjustment is never more than 0.6 units, comes at the end of a walk, and
+  // lands under a sit that has its own settling motion to cover it.
+  //
+  // Only for a named seat. Somebody taking an ordinary spot on the ring sits
+  // exactly where they stopped, as they always have — a spot is a place to be,
+  // not a place to be precisely.
+  _takeSeat(bot, pl) {
+    const ch = bot.ch;
+    if (pl && this._furnitureSeat(bot, pl)) {
+      this._standSpot(bot, pl, ch.dir);
+      ch._sync(CONFIG.globe.radius);
+    }
+    ch.sitHere();
+  }
+
   _standSpot(bot, pl, out) {
-    const spots = CONFIG.household.spots;
+    const h = CONFIG.household;
+    const seat = h.seats && h.seats[bot.spec.key];
+    const mine = this._furnitureSeat(bot, pl);
+    if (mine) {
+      const units = Math.min(mine.piece.out + mine.past, pl.walk);
+      return this._onRing(pl, mine.piece.at + mine.side, units, out);
+    }
+    const spots = h.spots;
     if (!spots || !spots.length) return this._insideSpot(pl, Math.PI, 0.5, out);
-    const i = Math.max(0, this.bots.indexOf(bot));
+    // Their own index if they have been given one, cast order if not — see the
+    // note in `seats` on why the three of them are named rather than counted.
+    const i = seat && seat.spot != null
+      ? seat.spot
+      : Math.max(0, this.bots.indexOf(bot));
     const spot = spots[i % spots.length];
     return this._insideSpot(pl, spot.at, spot.out, out);
   }
@@ -1677,8 +1801,48 @@ export class Household {
   // The mode does the rest, so nothing outside has to know what being led
   // involves — and letting go is one call from anywhere, which the glide and
   // the doorway both use.
+  // WHETHER A HAND CAN BE TAKEN AT ALL, which is a different question from
+  // whether somebody is standing in front of you.
+  //
+  // `held` is a mode like any other and it can LOSE. Above it sit the two things
+  // the world does to people — going to bed and getting out of the rain — and
+  // while either is in force, taking a hand plants a claim that the dispatcher
+  // refuses every frame: the mode never runs, nobody follows you, and the claim
+  // simply sits there. Measured, that is exactly what shipped: tapping
+  // 「てをつなぐ」 at somebody walking home at midnight flipped the pill to
+  // 「てをはなす」 and lied all night, capped your own walk to a leading pace with
+  // nobody beside you, and then — because the stale claim was the highest-ranked
+  // mode left once the hour turned — marched them twelve units across the meadow
+  // to your side at dawn. The hand had not survived the night; it had been
+  // created during it.
+  //
+  // ASKED OF THE RANKING rather than of a list of mode names, so this cannot
+  // drift from the table it is about. A mode added above `held` is refused by
+  // this the day it is added, and one added below is allowed, both without
+  // anybody remembering to come back here.
+  //
+  // `atPlay` is the third refusal and the oldest: it is enforced at the FOCUS
+  // already — a performer is not somebody you can point at — so this is a
+  // backstop rather than the rule. It is here because the focus and the pill are
+  // two doors into the same room, and a rule kept at one of them is a rule with
+  // a way round it.
+  canLead(bot) {
+    if (!bot) return false;
+    // Already leading them is not a question about whether you may begin.
+    if (this.hand === bot) return true;
+    const s = this.state.get(bot);
+    if (!s || !s.place) return false;
+    const rank = MODE_RANK[s.mode];
+    if (rank !== undefined && rank < HELD_RANK) return false;
+    return !this.atPlay(bot);
+  }
+
+  // Refused rather than merely unoffered when the answer is no. The pill asks
+  // `canLead` too and will not show — this is the backstop that makes the offer
+  // and the outcome the same answer however the call arrives.
   takeHand(bot) {
     if (!bot || this.hand === bot) return false;
+    if (!this.canLead(bot)) return false;
     this.hand = bot;
     return true;
   }
@@ -2465,10 +2629,10 @@ export class Household {
         return;
       }
       if (!this._walkRoute(s, ch, tMs)) return;
-      // Arrived. Down where they stopped — see sitHere. Somebody home and
-      // sitting is the difference between a room they own and a room they are
-      // standing in.
-      ch.sitHere();
+      // Arrived. Down where they stopped, or at their own table if this room
+      // holds one — see _takeSeat. Somebody home and sitting is the difference
+      // between a room they own and a room they are standing in.
+      this._takeSeat(bot, pl);
       s.step = 'home';
       s.potterAt = 0;
       s.until = tMs + between(h.stayMin, h.stayMax);

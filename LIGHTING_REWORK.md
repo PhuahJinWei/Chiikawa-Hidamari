@@ -677,3 +677,53 @@ rather than transmitted light.
   discs are in.
 - Verify the character cheat against the frame: a cast member at the circle's
   edge reads near-white with their art's hues intact.
+
+## Follow-up 5 - the lighting audit (user-reported)
+
+Reported: held items look dark in bright rooms, and new props may be missing the
+model. The second half is the one that had teeth, so the answer is a sweep
+rather than a patch.
+
+**The audit found no gap.** Of 286 materials: 235 patched, and every remaining
+one is exempt for a stated reason - emitters (19), sky (5), water (6), ink (4),
+lamp glass (4), window glow (3), night sheets (2), stars (2), lit ground (2),
+weather (1). **Visible materials wearing no hour: zero.** Three are unaccounted
+but hidden at opacity 0 and never drawn.
+
+The camera - the newest prop, and the one in the report - is fully covered: 31
+materials, 19 patched, and all 12 unpatched are the shared ink singleton, which
+is deliberately exempt everywhere. An earlier probe of mine claimed it had
+"three textured faces outside the lighting model"; that probe did not handle
+multi-material meshes and misread `.color`/`.map`, and the claim was wrong.
+
+**What was built instead is `Globe.auditLighting()`** - a read-only sweep that
+sorts every material in the scene into accounted-for or not, and the rig prints
+its verdict on every capture. The exemptions are RULES, not a list of names,
+because a list of names is the same bookkeeping that lets a prop slip through:
+
+  patched / lit ground   carries the mark `_wearHour` or `_litGround` left
+  emitter                additive blending: it adds light rather than wears it
+  stars                  a PointsMaterial
+  ink                    BackSide with no map - every pen line here is an
+                         inverted hull, and a line that brightened near a lamp
+                         would be a drawing whose outline fades in the light
+  own model              sky rig, water, glass, glow, night sheet, weather
+
+Two design points worth keeping:
+
+1. **`_litGround` now marks what it patches.** Without it a genuinely lit
+   Lambert surface and a forgotten one look identical to the sweep - neither
+   has an `hourDark`. The mark is set before the patcher, because
+   `onBeforeCompile` does not run until a thing is first drawn and the snow
+   shell may never be.
+2. **Seen and unseen are reported separately.** A material nobody draws cannot
+   look wrong, and a scene is full of parked meshes - a retired card, a sheet
+   for another hour, a layer waiting on weather. Reporting those beside a real
+   gap would train whoever runs it to ignore the number, so `unaccounted` is the
+   alarm and `hidden` is the footnote.
+
+**Verified by planting a bug**: a rogue mesh added to the world without
+registering it was caught (1 visible gap, correctly described), and went quiet
+the moment `_wearHour` was called on it. Determinism holds; app clean. The sky
+is claimed as a TREE rather than by naming its domes - it has grown a layer
+before now (the overcast dome) and would otherwise need re-listing each time.

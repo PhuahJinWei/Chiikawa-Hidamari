@@ -57,6 +57,9 @@ const WORLD = {
   // The supplied portrait is used directly by the small plate beside
   // Chiikawa's door. art.js only crops it into the existing mounting frame.
   housePlate: 'chiikawa-house-plate.png',
+  // The pulled-grass item is supplied art too. Keep the transparent PNG intact:
+  // the pouch, first-person hand, and avatar all read this one image.
+  grass1: 'grass-1.png',
 };
 
 // THE WORLD'S OWN WINTER WARDROBE — the same scenery, drawn with snow on it.
@@ -268,10 +271,12 @@ export async function loadArt(onProgress) {
   // File names keep their hyphens; IMG keys camel-case them (`flat-flower-1.png`
   // arrives as IMG.flatFlower1) so nothing downstream needs bracket gymnastics.
   //
-  // GRASS STOOD IN THIS TABLE, and how it left is the cautionary tale for the
-  // next thing retired from it. `grass-1.png` upward were moved to
+  // THE OLD GRASS-FIELD SHEETS stood in this table, and how they left is the
+  // cautionary tale for the next thing retired from it. They were moved to
   // `asset/images/legacy/` when grass became built blades, which need no
-  // texture at all — but this table went on asking for them at their old path,
+  // texture of their own. The current `grass-1.png` is different held-item art
+  // and is deliberately loaded through WORLD above. But this table went on
+  // asking for the retired field sheets at their old path,
   // and every job below is awaited. Five files that were no longer there became
   // a start screen that never turned into an invitation. A missing asset does
   // not degrade here; it is terminal. So: retiring art means deleting its row

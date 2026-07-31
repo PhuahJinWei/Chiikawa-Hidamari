@@ -330,6 +330,9 @@ export class PlanetCamera {
     // frame's own clock and a deadline set on `performance.now()` would never
     // arrive under the stepped harness.
     this._rising = 0;
+    // ...and whether a push still on the stick is the one that was already
+    // happening when you sat down. See `sit`.
+    this._stickLatch = false;
 
     // THE SELFIE VIEW — see CONFIG.player.selfie*.
     //
@@ -489,6 +492,19 @@ export class PlanetCamera {
   sit() {
     if (this.seated || !this.isFirstPerson) return false;
     this.seated = true;
+    // A STICK STILL HELD DOES NOT COUNT until it has been let go of.
+    //
+    // Sitting down mid-stride is the whole point of the button being pressable
+    // while you walk — stopping is part of sitting, not a precondition — and
+    // without this latch the push you were already making stood you straight
+    // back up on the very next frame. Measured: pressed at a drive of 0.95, sat
+    // for one frame, and carried on walking for another 2.6 units.
+    //
+    // Cleared by the stick returning to centre (see _walk), so the deal is
+    // "let go, then push again to leave" — which is what a thumb does anyway.
+    // It also covers the real-device case a keyboard cannot show: a thumb
+    // resting on the pad while you reach for the button with the other hand.
+    this._stickLatch = true;
     // Read AFTER the flag, because `eyeAlt` is what the flag changes.
     this.altT = this.eyeAlt;
     this.lookPitchT = CONFIG.camera.sitLookPitch;
@@ -609,7 +625,7 @@ export class PlanetCamera {
       // walking gaze where you left it rather than wherever the camera wandered.
       if (this.selfieOn) {
         this.selfieTilt = clamp(
-          this.selfieTilt + dy * c.lookPitchSens,
+          this.selfieTilt + dy * CONFIG.player.selfieTiltSens,
           CONFIG.player.selfieTiltMin, CONFIG.player.selfieTiltMax,
         );
         return;
@@ -1026,7 +1042,10 @@ export class PlanetCamera {
     // `goto` is cleared with it: a walk-to that arrived while you were seated
     // has been overtaken by you standing up on purpose.
     if (this.seated) {
-      if (mag > 0.001) { this.standUp(); this.goto = null; }
+      // A push gets you up — unless it is the push you were already making when
+      // you sat down, which the latch is holding. See `sit`.
+      if (mag <= 0.001) this._stickLatch = false;
+      else if (!this._stickLatch) { this.standUp(); this.goto = null; }
       this.drive += (0 - this.drive) * (1 - Math.exp(-dtMs / p.accelMs));
       return;
     }

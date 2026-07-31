@@ -51,12 +51,25 @@
 </div>
 
 <!-- The action cluster, on foot only: jump (the same hop a double tap on the
-     ground makes) and sprint, which arms a run and stands down on its own when
-     you stop. Drawn the way game controls are drawn — translucent circles with
-     a glyph, sized and offset for where a right thumb actually arcs — and NOT
-     in the pill stack, because they are a different kind of thing: a verb
-     under the thumb rather than a reading of the world. Both fade out with
-     the ground, since neither means anything in the sky. -->
+     ground makes), sprint, which arms a run and stands down on its own when
+     you stop, and sit. Drawn the way game controls are drawn — translucent
+     circles with a glyph, sized and offset for where a right thumb actually
+     arcs — and NOT in the pill stack, because they are a different kind of
+     thing: a verb under the thumb rather than a reading of the world. All
+     three fade out with the ground, since none of them means anything in the
+     sky.
+
+     SIT MOVED HERE from the stack, and the move is a correction rather than a
+     preference. Every pill is about something out in the world — a thing you
+     face, a thing you hold, somebody in front of you — and sitting has no
+     target at all: it is about your own body, exactly as jump and sprint are.
+     It needed a family of one to live among them, and a taxonomy with a family
+     of one in it is telling you something does not belong. It was also the
+     most volatile pill in the app, appearing every time you stopped and going
+     every time you walked, which shuffled every pill above it; it had already
+     been given a private exemption from the stack's own arrival bounce for
+     exactly that reason. Here it is simply always there on foot, like its two
+     neighbours. -->
 <div id="actions" class="actions">
   <button id="jump-btn" class="act act-jump" type="button">
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -72,6 +85,25 @@
       <path d="m13 5.5 6.5 6.5-6.5 6.5"/>
     </svg>
     <span class="sr-only">はしる</span>
+  </button>
+  <!-- Sit, and stand back up. TWO GLYPHS IN ONE CIRCLE, swapped by the `is-on`
+       class main.js writes from the rig — the circle-cluster edition of the rule
+       the light pill already follows: a control says what pressing it DOES
+       rather than what you currently are. Both are drawn here rather than one
+       being built in JS, so the shapes live with the other glyphs and neither
+       has to be assembled from a string. -->
+  <button id="sit-btn" class="act act-sit" type="button" aria-pressed="false">
+    <svg class="act-sit-down" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 4.6v7.6h7.8"/>
+      <path d="M5.4 12.2h11.4"/>
+      <path d="M7.2 15.1v4.3"/>
+      <path d="M15 15.1v4.3"/>
+    </svg>
+    <svg class="act-sit-up" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 19.4V6.2"/>
+      <path d="m7.4 10.8 4.6-4.6 4.6 4.6"/>
+    </svg>
+    <span class="sr-only">すわる／たつ</span>
   </button>
 
   <!-- THE INTERACTION STACK. Every verb the world is offering right now, one
@@ -560,28 +592,37 @@
      The faces are yours to pick and stay picked until you turn the view off,
      which is what makes it posing rather than a mood: you decide how you want
      to look in the picture, then take it. See POSES in main.js. -->
-<!-- THE SHUTTER. A ring with a red disc inside it, low and centred, and big —
-     which is not decoration but the one arrangement every camera app on every
-     phone has converged on, so a player already knows what it is and where to
-     put their thumb before being told anything.
+<!-- THE SHUTTER. A cream ring with a pink disc inside it, low and centred, and
+     big — which is not decoration but the one arrangement every camera app on
+     every phone has converged on, so a player already knows what it is and where
+     to put their thumb before being told anything.
 
-     RED, alone on the screen. Nothing else in this app is red: the palette is
-     cream and pink and ink, so the one saturated thing in view is unmistakably
-     THE button. That is also why it carries no caption where every other
-     control here does — a shutter is the one control that has never needed a
-     word, and 「とる」 under it would only say what the shape already says.
+     PINK NOW, WHERE IT WAS RED, and the geometry is untouched. #E8555F was a
+     recording light: it was the one colour in the app that came from outside
+     this world, and it was doing its job by being alien to everything around it.
+     The disc is from the same family as --accent and --pink now, so it belongs
+     to the palette and is still the only saturated thing on a screen that is
+     otherwise meadow and sky. What it does NOT give up is the shape — perfect
+     circles, crisp edges, no outline — because the shape is what says shutter.
+     See .shot-ring in the stylesheet for the drawn version that was tried
+     instead and reverted.
+
+     It carries no caption where every other control here does: a shutter is the
+     one control that has never needed a word, and 「とる」 under it would only
+     say what the shape already says.
 
      It only exists while the lens is turned round. A shutter in a view with no
      camera in it would be a promise about a picture nobody could compose.
 
-     AND IT IS DRAWN RATHER THAN MANUFACTURED. It used to be a phone camera's
-     shutter copied straight — thin cream ring, translucent fill, a hard
-     saturated disc, every edge perfectly round — which was defensible on the
-     grounds that everybody knows what it is, and made it the one object in this
-     app that looked like it came from a settings screen. It wears the same ink
-     the pack's slots and the sheet's card do now, its circles are a fraction out
-     of true, and it has the small off-centre shine every glossy thing in this
-     world has. See .shot-ring in the stylesheet.
+     THREE RINGS RATHER THAN TWO, and the outermost is the one that was missing.
+     A cream ring on its own is the right drawing over a meadow and nearly
+     invisible over a bright noon sky or a snowfield — which is to say it went
+     quiet in exactly the conditions somebody is most likely to be taking a
+     picture in. The app's usual answer is a white rim, and that cannot help here
+     because white is what it has to survive; so this one is an ink hairline
+     outside the cream, which separates it from a pale sky and a dark one alike.
+     It matters more now than it did: a pale pink disc leans on that edge in a
+     way a red one never had to.
 
      The ring is a child rather than the button's own border because the press
      moves the two halves by different amounts, and one element cannot do two

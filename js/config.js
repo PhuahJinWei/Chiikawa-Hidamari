@@ -129,7 +129,33 @@ function lake(lat, lon, r, shape = 0) {
 //
 // Turn it and everything with an opinion about the distance moves together. The
 // numbers derived from it below keep their gaps rather than their values.
-const MEET_ARC = 4.0;
+//
+// 4.0 → 2.9, AND EVERY MEASUREMENT ABOVE STILL HOLDS — because this did not move
+// on taste, it moved to STAY STILL. Every number in the table above is a
+// fraction of the SCREEN, and `bodyPlane` came down 2.1 → 1.52 to make the cast
+// sit properly in the world. That shrank the shot without touching a camera
+// number: re-measured at 4.0 afterwards, Hachiware had fallen from 87% of the
+// width to 63.5%, Chiikawa to 58%, Usagi to 62%. The framing was not retuned,
+// it was collateral.
+//
+// So this is the correction that gives it back, and it was swept in the renderer
+// rather than reasoned. Hachiware across the width, at bodyPlane 1.52:
+//
+//   3.6   71%      3.2   79%      2.9   86%   <-- the tuned shot, recovered
+//   3.4   73%      3.0   81%      2.8   87%
+//
+// 2.9 puts him at 86.2% against the 86% this was tuned to, and 2.9/4.0 = 0.725
+// is `bodyPlane`'s own ratio 1.52/2.1 = 0.724 to three digits. That agreement is
+// the point: it is the SAME SHOT from proportionally nearer, not a new one.
+//
+// Which is also why everything measured off the cast's drawn width had to come
+// with it, by the same factor — `wander.closeArc`, `social.meetArc`, and the
+// hysteresis gaps derived here. Each of those has its own note saying it is a
+// body-width judgement, and a body-width judgement left at its old value after
+// the bodies changed is simply stale. `closeArc` was not even optional: it is
+// closeIn's too-close floor, and a floor of 3.6 under a standoff of 2.9 means
+// every framing press decides you are too close and teleports you again.
+const MEET_ARC = 2.9;
 
 export const PAL = {
   line: '#5B4C44',
@@ -488,6 +514,9 @@ export const PAL = {
   furniturePink: '#F3B9C0',
   furnitureGreen: '#A8CC96',
   furnitureBlue: '#C9D8E0',
+  // Hachiware's kettle has its own muted ochre glaze. Keeping this separate
+  // from `furnitureBlue` changes the kettle without recolouring the stool.
+  kettleGlaze: '#D7C073',
   // The house from outside: a warm off-white shell under a heavy line. The ink
   // is nearly black and darker than the furniture's, because this is read from
   // across a field rather than from two paces, and a softer line simply
@@ -820,7 +849,43 @@ export const CONFIG = {
   // own proportions, and the source resolution does not come into it at all —
   // redraw a character at twice the pixels and it renders sharper at the same
   // size rather than twice as big.
-  bodyPlane: 2.1,
+  //
+  // THE ONE DIAL FOR HOW BIG EVERYBODY IS. It multiplies straight into
+  // `px2world` in character.js and nothing else reads it, so turning it scales
+  // the whole cast — every posture, every wardrobe — while leaving the planet,
+  // the houses and the furniture exactly where they are. The `scale` in cast.js
+  // is a fraction of THIS, so their sizes relative to each other are preserved
+  // by construction.
+  //
+  // Walked down 2.1 → 1.8 → 1.65 → 1.52 by eye, because they read as looming
+  // against the world rather than living in it. At 2.1 Usagi stood 2.79 tall
+  // against a doorway 2.2 wide, Hachiware 2.33, Chiikawa 2.01 — every one of
+  // them taller than the door they walk through. 1.8 fixed that for all but
+  // Usagi; 1.65 got everyone under the door but still sat a shade heavy.
+  // At 1.52: Usagi 2.02, Hachiware 1.69, Chiikawa 1.45, Momonga 1.39. That is
+  // the read we were after — small friends on a big hillside, with clear air
+  // between the tallest of them and the doorway, not figures pasted in front
+  // of the buildings.
+  //
+  // If it ever goes lower, watch the DOORWAY rather than the characters: the
+  // point of the walk-down was the door, and past roughly 1.3 they stop
+  // filling it and start looking like they are wandering through a barn.
+  //
+  // WHAT IT DELIBERATELY DOES NOT MOVE, and this is the reason it is a single
+  // number rather than a sweep:
+  //
+  //   The SLEEPING cards. Those are sized off the bed they lie in, or off
+  //   `sleep.<key>.wide` for the one with no bed, and never off this — see
+  //   _sleepCard and _layOnGround in scene.js. Their proportions were judged
+  //   correct as they are and stay untouched.
+  //
+  //   `camera.eyeHeight`. It is momonga's own measured eye line, so by rights
+  //   it would come down with him — but scene.js pins the horizon band to it
+  //   with a hand-derived constant (see HORIZON_FROM, and the note there
+  //   spelling out the formula to re-derive). Moving the eye is a change to how
+  //   big the WORLD feels, which is a different decision from how big the cast
+  //   are, and it drags the treeline with it. Left alone on purpose.
+  bodyPlane: 1.52,
 
   // Trees built as geometry rather than hung as cards. Set it either way and
   // reload; nothing else in the app has to change, because the card is still
@@ -1610,7 +1675,14 @@ export const CONFIG = {
     // the two is hysteresis: with one radius doing both jobs, standing on the
     // boundary would greet you over and over. It is the gap that matters rather
     // than the value, so it follows greetArc.
-    greetClearArc: MEET_ARC + 2.6,
+    //
+    // The gap itself was 2.6 and is 1.9, scaled with the bodies by MEET_ARC's
+    // 0.725. "The gap is what matters" was written about retuning the FRAMING,
+    // where the walk-away needed to stay a real walk whatever the standoff did.
+    // A body-size change is the other case: hold 2.6 while everything around it
+    // shrinks by a quarter and the step back out of greeting range quietly grows
+    // to a third longer in body-widths than it was ever meant to be.
+    greetClearArc: MEET_ARC + 1.9,
     greetCooldown: 22000,
     // THE BEAT AFTER A POKE, before the same friend will answer another one.
     //
@@ -1638,7 +1710,12 @@ export const CONFIG = {
     // wandered off and done something else in between; not so long that a
     // gift-shaped day only has one good moment in it.
     giftCooldown: 10 * 60 * 1000,
-    meetArc: 3.6,        // two of them this close stop and talk to each other
+    // Two of them this close stop and talk to each other. 3.6 → 2.6 with the
+    // bodies (see MEET_ARC): a conversation is two friends within about a body
+    // and a half of each other, and when the bodies shrank by a quarter this
+    // stopped reading as a pair talking and started reading as two characters
+    // who happened to halt in the same field.
+    meetArc: 2.6,
     meetCooldown: 30000,
     // The beat between one of them finishing a line and the other answering it.
     // It was 2600 counted from the START of the opening line, which is less
@@ -1717,7 +1794,9 @@ export const CONFIG = {
     // on strolling until the exact moment you arrived, so being noticed landed
     // after the arriving rather than before it. A couple of paces of margin
     // reads as them seeing you coming.
-    noticeArc: MEET_ARC + 2.5,
+    // Gap 2.5 → 1.8, scaled with the bodies by MEET_ARC's 0.725, so "comfortably
+    // outside" stays the same comfortable distance in body-widths.
+    noticeArc: MEET_ARC + 1.8,
     // ...or anyone who ends up near you. Also their personal space: they stop
     // the moment they cross it.
     //
@@ -1730,7 +1809,21 @@ export const CONFIG = {
     // SHOULD be overwhelming, and it is their move rather than a place you got
     // stuck in. It was briefly 4.8 to keep them politely framed and that read as
     // them holding back.
-    closeArc: 3.6,
+    //
+    // 3.6 → 2.6 with the bodies, and note WHAT is being preserved: not the
+    // distance, the overwhelm. "Wider than the screen" is a statement about the
+    // drawing, and `bodyPlane` 2.1 → 1.52 made the drawing smaller — at 3.6 the
+    // widest of them now covers 71% of the width, which is not somebody in your
+    // face, it is somebody standing a polite way off. 2.6 restores the original
+    // reading (they overflow the frame again) at the new size. Same factor as
+    // MEET_ARC, 0.725, for the same reason.
+    //
+    // AND IT IS LOAD-BEARING FOR FRAMING, which it was not when written: closeIn
+    // uses it as the floor under `camera.standoff`. The two must stay ordered —
+    // floor below standoff — or every press of a friend verb reads "too close"
+    // and teleports you. 2.6 under 2.9 keeps the 0.4-unit gap the old pair had,
+    // scaled: 0.3.
+    closeArc: 2.6,
     noticeAlt: 4.0,      // only counts if you are actually down on the ground
     // Cut a trip short — stopped for you, or stopped to talk — and this is how
     // long before they think about setting off again. Shorter than restMin on
@@ -1766,7 +1859,9 @@ export const CONFIG = {
     // re-triggers the pause every frame the arithmetic wobbles across it, which
     // is the permanent freeze rebuilt out of momentary ones. A third of a body
     // width is plenty — this is not meant to be a big journey, just a real one.
-    closeSlack: 1.2,
+    // 1.2 → 0.87 with the bodies (MEET_ARC's 0.725), because "a third of a body
+    // width" is the whole justification and the body width is what moved.
+    closeSlack: 0.87,
     // ...and how long being THE ONE YOU CAME TO SEE holds somebody, refreshed by
     // every real exchange — see Character.notice.
     //
@@ -1916,13 +2011,19 @@ export const CONFIG = {
     // multiplied by. Chosen so that the whole of `selfieLow`..`selfieTop` can
     // actually be reached and neither end is a number the control cannot get to:
     //   (0.85 - 1.9) / 1.5 = -0.70   the low shot, looking up at you
-    //   (3.6  - 1.9) / 1.5 = +1.13   the high shot, looking down
-    // A little past each so the ends are comfortable rather than exact. This is
+    //   (5.2  - 1.9) / 1.5 = +2.20   the high shot, looking down
+    // A little past the low end so it is comfortable rather than exact. This is
     // deliberately NOT `camera.minLookPitch`/`maxLookPitch`: that pair is the
     // walking gaze and is asymmetric because on this planet up is only sky —
     // see the note in applyDrag for what borrowing it cost.
     selfieTiltMin: -0.75,
-    selfieTiltMax: 1.18,
+    selfieTiltMax: 2.2,
+    // The tilt's own rate, per pixel of drag. It was the walking gaze's
+    // `lookPitchSens` (0.0032), which was tuned for a range half this size —
+    // reaching the raised ceiling at that rate took over two full screen-heights
+    // of swiping, and a top you have to saw at to reach may as well not exist.
+    // At this rate the whole range is about a swipe and a half.
+    selfieTiltSens: 0.0048,
     // The zoom's own key rate stood here too. WASD frames the picture now and
     // the wheel is the desktop zoom, which it already was — a keyboard duplicate
     // of a control every desktop pointer has was the cheapest of the four keys
@@ -1941,11 +2042,16 @@ export const CONFIG = {
     selfieHigh: 1.9,
     selfieAim: 1.25,
     // How far the lens may be pushed up or down by a swipe, from `selfieHigh`.
-    // Enough for a low hero angle or a look down at the two of you; not enough
-    // to reach either pole of the shot, where the framing stops being a selfie.
+    //
+    // The top was 3.6 for a while — 1.6 over the head of a 2.02-unit Momonga,
+    // which at the default distance is 29 degrees of look-down: "slightly above
+    // eye level", reported twice as not an upper angle at all, because it is
+    // not one. 5.2 buys the shot phones mean by a high angle — measured 47
+    // degrees — and it costs nothing indoors, where the dome has always had the
+    // last word regardless of what this asks for.
     selfieSwing: 1.5,
     selfieLow: 0.85,
-    selfieTop: 3.6,
+    selfieTop: 5.2,
     // How near the lens may ever come when the world pushes it in — see the
     // march in _selfieReach. Below about this it is inside your own card.
     selfieNear: 1.5,
@@ -2382,10 +2488,10 @@ export const CONFIG = {
       // shares the kitchen's wall depth, with a little extra lateral breathing
       // room between the two appliances.
       { art: 'fridge', at: 2.68, out: 2.35, h: 1.12 },
-      // The house key lies near the doorway, off the centre walking line and
-      // clear of the table. Chiikawa is 2.01 units tall, so 0.804 makes the
+      // The house key lies in the open strip beside the yellow cabinet, clear
+      // of the futon and bear. Chiikawa is 2.01 units tall, so 0.804 makes the
       // key's longest dimension exactly 40% of that drawn height.
-      { art: 'housekey', at: 0.35, out: 0.80, h: 0.804, spin: 0.35,
+      { art: 'housekey', at: -2.07, out: 2.28, h: 0.804, spin: 0.35,
         item: 'chiikawaHouseKey' },
       // The futon, across the room from all of that, and the reason is the
       // gathering rather than the light. Everything above is on the window's
@@ -2579,7 +2685,8 @@ export const CONFIG = {
       // household's standing spots were counted as obstacles too — somebody
       // standing in the lamp is the same picture as the lamp standing in
       // somebody.
-      { art: 'lantern', at: -2.93, out: 1.75, h: 0.34, item: 'lamp', lit: false },
+      // Entrance-side floor patch beside the futon, as shown in the reference.
+      { art: 'lantern', at: -0.55, out: 1.55, h: 0.34, item: 'lamp', lit: false },
       // A second bare bulb for Chiikawa's house, cloned from the cave fixture
       // but hung for this room's lower ceiling. The cave keeps its own bulb;
       // these are two independent wired lights in two different homes.
@@ -2745,7 +2852,9 @@ export const CONFIG = {
       { art: 'nightstand', at: 1.75, out: 3.05, h: 0.62 },
       { art: 'trashbag', at: -2.15, out: 3.08, h: 0.78, item: 'trashBag' },
       { art: 'trashbag2', at: -1.78, out: 3.10, h: 0.72, item: 'trashBagAlt' },
-      // Hachiware's kettle sits on clear floor near the cave entrance.
+      // Hachiware's kettle sits on the floor immediately to the left of the
+      // cardboard box, with enough air between their outlines to pick up
+      // either belonging cleanly.
       { art: 'teapot', at: 0.05, out: 1.05, h: 0.26, spin: 0.62,
         item: 'kettle' },
       // Hachiware's worn mat lies across the middle of the cave, with its long
@@ -2881,7 +2990,17 @@ export const CONFIG = {
     //
     // 2.6 leaves the nearest possible landing at 1.7 and the furthest at 2.6,
     // which reads as sitting together at every point in that range.
-    joinBesideArc: 2.6,
+    //
+    // 2.6 → 2.0 with the bodies (MEET_ARC's 0.725, rounded up). "Sitting
+    // together" is a judgement in body-widths, and after `bodyPlane` 2.1 → 1.52
+    // a 1.7–2.6 spread around friends only 1.3–1.5 tall is a row of people
+    // sitting NEAR each other. Rounded UP off the strict 1.9 because the
+    // arrival tolerance baked into this number — `arriveArc` 0.9 — did NOT
+    // shrink: it is a pathfinding slop, not a body measurement, so it eats a
+    // larger share of a smaller radius. 2.0 keeps the nearest landing at 1.1,
+    // which is a shoulder away at the new size rather than the lap-sitting that
+    // the note above records fixing.
+    joinBesideArc: 2.0,
     joinBearings: [1.25, -1.25, 2.35],
     // Once somebody has sat with you and got up again, this long before they
     // will do it a second time. Long enough that it stays an event.
@@ -3035,6 +3154,99 @@ export const CONFIG = {
       { at: -2.09, out: 0.66 },
     ],
 
+    // ------------------------------------------------------ WHOSE PLACE IS WHOSE
+    //
+    // ...and now BY NAME, because two of them have a place in the anime and a
+    // spot on a ring is not it. `spots` above shares a room out fairly; this
+    // says where a particular character belongs in it, which is a different
+    // question and beats fairness wherever it has an answer.
+    //
+    //   Chiikawa sits at her own low table, under the window. The frame this is
+    //   taken from is the one everybody knows — her at the little pink table
+    //   with the study book open on it and the window square behind her head.
+    //
+    //   Hachiware sits at the cardboard box, which is his table. Same reading:
+    //   the box between him and the room, kettle and lantern on it, stone
+    //   behind him.
+    //
+    //   Usagi has no house and therefore no furniture of his own, so he takes
+    //   the plain spot Chiikawa has just vacated — `spots[0]`, bearing pi,
+    //   straight across from whichever door he came in by. Which is the best
+    //   thing that could have happened to that spot: the note above it says it
+    //   is the one place always in frame as you walk in, and Usagi barging into
+    //   somebody else's house is exactly what should be waiting there.
+    //
+    // `beside` NAMES A PIECE OF FURNITURE rather than repeating its position,
+    // and that is the whole point of the field. The table is at bearing 1.20
+    // because the window is at 1.20 (see `windowsAt`), and the day somebody
+    // rearranges the room, a hard-coded seat would leave her sitting at a
+    // bearing where the table used to be. Looked up per room, so it also
+    // answers the awkward case for free: Chiikawa in the cave finds no table,
+    // Hachiware in the house finds no box, and both fall through to the ring.
+    //
+    // `past` is how far BEYOND the piece they sit, in world units out from the
+    // middle of the room — so the furniture ends up between them and everybody
+    // else, which is what makes it read as a table they are sitting AT rather
+    // than one they are standing next to. Measured off the built pieces rather
+    // than guessed: scanning their geometry along the radial, the table reaches
+    // 0.46 either side of its own centre and the box 0.61.
+    //
+    //   Chiikawa  1.55 + 0.40 = 1.95, against a table whose far edge is 2.01
+    //   Hachiware 1.75 + 0.50 = 2.25, against a box whose far edge is 2.36
+    //
+    // BOTH LAND JUST INSIDE THE FAR EDGE, and that is deliberate rather than
+    // sloppy. A character is a billboard with no depth; put its middle a little
+    // short of the piece's far edge and the near half of the piece draws over
+    // its lower body, which is precisely how the anime frames read — the table
+    // top crossing her tummy, the box hiding his knees. Sat clear of the far
+    // edge instead they read as sitting BEHIND the furniture with a gap.
+    //
+    // Clamped to the walk ring by the reader, which neither of these needs
+    // today — 1.95 against 2.25 and 2.25 against 2.75 — but a wider piece or a
+    // smaller room would otherwise seat somebody inside a wall.
+    //
+    // `spot` is their index into `spots` for every room where `beside` finds
+    // nothing, and it is given explicitly rather than left to fall back on cast
+    // order. That preserves the one property the ring had that mattered: an
+    // index nobody shares cannot collide. Chiikawa takes 1 and Hachiware 2
+    // precisely because Usagi now owns 0 — left to `bots.indexOf`, Chiikawa
+    // would have kept claiming 0 and the two of them would have sat in each
+    // other on the first wet afternoon that drove all three into the cave.
+    // ...AND THEY HAVE TO BE STANDABLE, which the first pair of numbers were
+    // not. Both pieces are registered solids — the table with a radius of 0.449
+    // world units, the box 0.364 — and a walk will not put anybody inside one.
+    // At `past` 0.40 Chiikawa's seat was 0.09 INSIDE her own table, so she got
+    // as near as the floor allowed and sat down there: measured at bearing 0.93
+    // out 1.61, off to one side of the table rather than at it. A seat has to
+    // clear the solid it belongs to before anything else about it is true.
+    //
+    //   table  solid 0.449 → past 0.55 sits her 0.10 clear
+    //   box    solid 0.364 → past 0.50 sits him 0.14 clear
+    //
+    // Which costs Chiikawa the overlap the note above wanted: her table's drawn
+    // half-depth (0.46) is all but identical to its solid radius, so there is no
+    // gap between "inside the drawing" and "inside the solid" to sit in, and she
+    // ends up against the near edge rather than behind it. Hachiware keeps his —
+    // the box is drawn 0.61 deep but only 0.364 solid, so he stands legally in a
+    // spot the drawing still covers, and the carton crosses his knees.
+    // `side` is a bearing offset around the room. Hachiware moves 0.14 radians
+    // toward the flower shelf, opening a little space beside the box while
+    // keeping the same depth behind it. His centre remains only 0.57 units from
+    // the box's centre, so it still reads as the table he is using.
+    seats: {
+      chiikawa:  { beside: 'table', past: 0.55, spot: 1 },
+      hachiware: { beside: 'box',   past: 0.50, side: 0.14, spot: 2 },
+      usagi:     { spot: 0 },
+    },
+
+    // There is deliberately NO `seatArrive` here, and the hole is worth a note
+    // because it is the obvious thing to add. Arriving at a seat is not a
+    // tolerance problem: both pieces are solids, and tightening the last
+    // waypoint to 0.20 left Hachiware stopped 0.41 short of his box with the
+    // target on the far side of a thing he will not walk through, standing
+    // there until the errand timed out. The walk gets them to the furniture and
+    // sitting down takes the place — see _takeSeat in household.js.
+
     // What the windows say when nobody is in. Not nothing: a house with every
     // light off reads as derelict rather than as empty, and the lit sheet is
     // the only thing marking the building out after dark. This is a porch light
@@ -3133,14 +3345,34 @@ export const CONFIG = {
     // standing Usagi at three sizes, that is also the one that reads as the same
     // creature.
     //
+    // 2.40 → 1.74, AND THE DERIVATION ABOVE IS WHY rather than an exception to
+    // it. Every step of that reasoning is a ratio against his STANDING size, and
+    // `bodyPlane` 2.1 → 1.52 moved exactly that: he stands 2.02 by 1.35 now, not
+    // 2.79 by 1.86. Running the same sum on the new figures — four fifths of the
+    // standing height along the long axis — gives 1.74, which is 2.40 × 0.724,
+    // the same factor the whole cast came down by. He was not resized here so
+    // much as caught up: the sleeping cards were deliberately held still through
+    // the shrink, and holding a number still is only correct while the thing it
+    // was measured against holds still too.
+    //
+    // The other two sleepers are NOT stale in the same way and stay put. Their
+    // `wide` is a fraction of the quilt that has to hide them, not a fraction of
+    // a body — the bedding never moved, so neither do they.
+    //
     // His card is a ground cap rather than an upright plane, so its frame is the
     // grass's: `x` runs along the drawing and `z` across it, with the drawing's
     // own up at -z. The `zzzAt` offsets are absolute world units and therefore
     // do NOT ride the size above — they were scaled by hand when it changed, and
-    // would need it again.
+    // needed it again here: 0.55/-0.81/0.34 × 0.724. They place the mark against
+    // his head, so leaving them would have parked the Zzz off in the grass.
+    //
+    // `zzzWide` deliberately does NOT scale. It is 0.30 for Chiikawa and 0.28
+    // for Hachiware — a mark drawn at a readable size, one convention across the
+    // cast rather than a measurement of whoever is under it. Shrinking Usagi's
+    // alone would make his the odd one out for no reason a player could see.
     usagi: {
-      wide: 2.40, spin: 0.9,
-      zzzAt: { x: 0.55, z: -0.81, up: 0.34 }, zzzWide: 0.28,
+      wide: 1.74, spin: 0.9,
+      zzzAt: { x: 0.40, z: -0.59, up: 0.25 }, zzzWide: 0.28,
     },
 
     // WHERE HE FLOPS. A bearing and a distance from his own wander anchor in

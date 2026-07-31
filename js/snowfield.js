@@ -138,6 +138,9 @@ export class Snowfield {
     this.clock = 0;
     // Whether a fall has been laid into the map yet. See `fresh`.
     this.laid = false;
+    // The shell's cut edges, kept so they can be re-cut after every fill-in
+    // wash rather than only when the fall was laid. See _stampHoles.
+    this.holes = [];
   }
 
   get texture() { return this.tex; }
@@ -204,6 +207,65 @@ export class Snowfield {
     return { rx: ry * at.stretch, ry };
   }
 
+  // The same, for something that is not round on the ground. A lake is an
+  // ellipse — 1.84 times wider than it is tall — and it is an ellipse aligned to
+  // EAST AND NORTH, which is the pair this canvas's own axes already are. So the
+  // two radii convert independently and the stretch still only applies across.
+  _radiiXY(unitsX, unitsY, at) {
+    return {
+      rx: ((unitsX / this.R / Math.PI) * H) * at.stretch,
+      ry: (unitsY / this.R / Math.PI) * H,
+    };
+  }
+
+  // A HOLE THE SNOW THINS INTO, rather than a blob it thins under.
+  //
+  // The difference from `_blob` is the flat core. A blob is deepest at one point
+  // and fades from the first step outward, which is right for shelter under a
+  // tree and useless here: what this has to guarantee is that the field is
+  // GENUINELY ZERO across a whole region and only then climbs. So the gradient
+  // holds full black out to `core` and ramps to nothing at the rim.
+  //
+  // What it is for is the shell's cut edges — see snowShellGeo, which deletes
+  // every face over a lake and under a roof. Those holes had raw rims: the
+  // displaced sheet simply stopped, a fifth of a unit up, with no underside to
+  // it (one Lambert surface, front faces only) and no skirt closing the side. A
+  // sightline that got under the rim — from ON a frozen pond, or from inside a
+  // room looking out of the door — passed straight through the snow and out the
+  // far side, so the body of a drift was see-through and its far top edge hung
+  // in the air as a loose grey arc.
+  //
+  // Zeroing the field around each hole fixes that without a triangle being
+  // added, because the tuck already does the work: the shell sits at
+  // `R - shellTuck + cover * depth * mask`, so a mask under `shellTuck / depth`
+  // puts it UNDER THE TURF. Ramp the field to zero at the rim and the sheet has
+  // dived below the ground before its edge arrives — there is no rim left to see
+  // beneath. And what it looks like is what it should: snow thinning away to
+  // bare shore, which is what the edge of a frozen pond actually does.
+  _hole(px, py, rx, ry, core) {
+    const g = this.g;
+    g.globalCompositeOperation = 'source-over';
+    for (const dx of [-W, 0, W]) {
+      const x = px + dx;
+      if (x + rx < 0 || x - rx > W) continue;
+      const grad = g.createRadialGradient(0, 0, 0, 0, 0, 1);
+      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      // Strictly below the rim stop, or a core of 1 makes the two coincide and
+      // canvas draws a hard-edged disc with no ramp at all.
+      grad.addColorStop(Math.min(0.995, Math.max(0, core)), 'rgba(0,0,0,1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      g.save();
+      g.translate(x, py);
+      g.scale(rx, ry);
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(0, 0, 1, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+    this.dirty = true;
+  }
+
   // ------------------------------------------------------------ a fresh fall
   //
   // WIPE AND RELAY, called once when a fall starts rather than continuously.
@@ -253,6 +315,7 @@ export class Snowfield {
     }
 
     for (const f of features || []) {
+      if (f.hole) continue;
       this._at(f.dir, at);
       const r = this._radii(f.r, at);
       if (f.level < 0) {
@@ -267,10 +330,64 @@ export class Snowfield {
       }
     }
 
+    // THE HOLES LAST, and in a pass of their own rather than in the loop above.
+    //
+    // They have to win outright. A hole is not a preference about where snow
+    // gathers, it is the one place there must be NO snow — because the shell has
+    // no faces there and its rim has to be buried before it arrives. A drift or
+    // a wall's bank landing on top of one would lift the sheet straight back out
+    // of the ground and hand the rim back. Ordering the array would do it too,
+    // and this cannot be got wrong by someone appending a feature later.
+    //
+    // KEPT, not just drawn, because `_fill` washes white over the WHOLE canvas
+    // and would quietly fill them back in — see _stampHoles.
+    this.holes = (features || []).filter((f) => f.hole);
+    this._stampHoles();
+
     this.was.clear();
     this.warm.clear();
     this.laid = true;
     this.dirty = true;
+  }
+
+  // THE HOLES, RE-CUT. Called once when a fall is laid and again after every
+  // fill-in wash, and the second is the one that matters.
+  //
+  // `_fill` is a flat white fillRect over the entire map — that is the whole
+  // trick of it, one call to put snow back everywhere at once. It has no idea
+  // some of the map is load-bearing. Measured: sixty seconds of heavy snowfall
+  // took the middle of the lake from 0.000 to 0.761, far past the 0.257 where
+  // the shell breaks the turf, so the rims rose back out of the ground during
+  // any long fall and the see-through drift came back with them.
+  //
+  // Re-stamping is the cheap half of that fix's two options. The other is to
+  // teach `_fill` a mask of where it may wash, which is a second full-canvas
+  // operation per wash; this is four gradient fills, at most six times a second,
+  // and only while it is actually snowing.
+  _stampHoles() {
+    if (!this.holes || !this.holes.length) return;
+    const at = { x: 0, y: 0, stretch: 1 };
+    for (const f of this.holes) {
+      this._at(f.dir, at);
+      const r = this._radiiXY(f.rx, f.ry, at);
+      // The band is a distance on the ground, so it is the same on both axes —
+      // which on an ellipse means two different FRACTIONS of the scaled circle
+      // the gradient is drawn in, and only ONE core can be given. It has to be
+      // the LARGER, and that is not a preference:
+      //
+      // The core is where the field is guaranteed zero, and it must reach the
+      // rim on EVERY bearing or the sheet breaks the turf before its own edge
+      // and the rim is back. Take the smaller and the wide axis is left short —
+      // measured on the big lake, whose rim is 4.28 out along east: the core
+      // ended at 3.49 and the shell surfaced at 4.25, three centimetres inside
+      // the very edge it was supposed to be buried under.
+      //
+      // The larger over-carves the NARROW axis instead, pushing its shore about
+      // half a unit further out than asked. That is the safe direction to be
+      // wrong in — too much bare shore is a look, too little is the artefact.
+      const core = Math.max(f.rx / (f.rx + f.band), f.ry / (f.ry + f.band));
+      this._hole(at.x, at.y, r.rx * (1 + f.band / f.rx), r.ry * (1 + f.band / f.ry), core);
+    }
   }
 
   // Back to a world with no snow in it — and back to being free. A map of ones
@@ -282,6 +399,10 @@ export class Snowfield {
     this.g.fillRect(0, 0, W, H);
     this.was.clear();
     this.warm.clear();
+    // A map of ones is a map that changes nothing, and that has to include the
+    // holes: left in the list they would go on being re-cut by every fill of a
+    // summer that has no snow to fill.
+    this.holes = [];
     this.laid = false;
     this.dirty = true;
   }
@@ -357,6 +478,9 @@ export class Snowfield {
     this.g.globalCompositeOperation = 'source-over';
     this.g.fillStyle = `rgba(255,255,255,${a})`;
     this.g.fillRect(0, 0, W, H);
+    // ...and the shell's cut edges are put back under the turf, because the wash
+    // above has just filled them in along with everything else. See _stampHoles.
+    this._stampHoles();
     this.dirty = true;
   }
 

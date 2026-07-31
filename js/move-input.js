@@ -87,12 +87,17 @@ export class MoveInput {
   // and the chatter clock both hang off it — and `onHop` is what lets the cast
   // answer a jump. Both are passed in rather than reached for, so this file
   // needs to know about the rig and nothing else in the world.
-  constructor({ rig, stick, knob, jumpBtn, sprintBtn, onTouched, onHop }) {
+  constructor({ rig, stick, knob, jumpBtn, sprintBtn, sitBtn, onTouched, onHop, onSit }) {
     this.rig = rig;
     this.stick = stick;
     this.knob = knob;
     this.onTouched = onTouched || (() => {});
     this.onHop = onHop || (() => {});
+    // Sitting down lets go of a hand — see toggleSit. Handed in rather than
+    // reached for, like `onHop`, because the household is not this file's
+    // business and a movement surface that knew about it would be the start of
+    // this file knowing about everything.
+    this.onSit = onSit || (() => {});
 
     // The pad. `grab` is a loose piece that was under the finger when the pad
     // took it — see `claim`. The pad keeps hold of it so that letting go without
@@ -135,6 +140,12 @@ export class MoveInput {
         this.toggleSprint();
       });
     }
+    if (sitBtn) {
+      sitBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.toggleSit();
+      });
+    }
   }
 
   // NOTHING MOVES WHILE YOU ARE FRAMING A SHOT.
@@ -170,6 +181,33 @@ export class MoveInput {
     // The rig refuses off the ground on its own, so this needs no gate: the
     // authority on whether you can jump is the thing doing the jumping.
     if (this.rig.hop()) this.onHop();
+  }
+
+  // Sit down, or get back up. One press, both directions — the rig knows which
+  // it is, and the glyph follows from the same flag.
+  //
+  // A PRESS WHILE WALKING STOPS AND SITS, which is the case a "you may only sit
+  // while standing still" rule would have thrown away. Stopping is part of
+  // sitting down rather than a precondition for being allowed to, and it needs
+  // no code of its own: the rig's seated branch ignores the stick and decays the
+  // drive, so planting yourself mid-stride is what already happens.
+  //
+  // Refused off the ground, where there is nothing to sit on. That is the rig's
+  // own rule — `sit` checks `isFirstPerson` — and it is repeated here for the
+  // reason `toggleSprint` repeats its own: CSS `pointer-events` stops a thumb
+  // and does not stop a dispatched event or a keyboard.
+  toggleSit() {
+    if (this.frozen) return;
+    this.onTouched();
+    if (!this.rig.isFirstPerson) return;
+    // Letting go of a hand to sit down, rather than the button going dead while
+    // you are leading somebody. A press is a press, and this is the friendlier
+    // reading of it — you stop, you let go, you sit; they are standing right
+    // there and may well sit down with you.
+    if (!this.rig.standUp()) {
+      this.onSit();
+      this.rig.sit();
+    }
   }
 
   toggleSprint() {
@@ -210,7 +248,16 @@ export class MoveInput {
     // you stop moving — see the disarm in _walk.
     if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) {
       this.toggleSprint();
+      return;
     }
+
+    // C for sitting down and getting up again, the third verb this file owns —
+    // and it is here rather than beside the buttons for the reason the other two
+    // are: a thumb and a thumb's worth of keyboard must not be able to drift
+    // apart. `C` because the letters around the movement keys are spoken for and
+    // it is what the rest of the genre uses for crouching, which is the nearest
+    // thing anybody arrives already knowing.
+    if (e.code === 'KeyC' && !e.repeat) this.toggleSit();
   }
 
   _onKeyUp(e) {

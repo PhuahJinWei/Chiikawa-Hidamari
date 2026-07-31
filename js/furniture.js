@@ -3332,9 +3332,9 @@ function potOffset(raw, pad) {
 
 export function buildTeapot(h) {
   const g = new THREE.Group();
-  // Its own blue is the stool's, on purpose. The room is drawn in four pastels
-  // and a pen, and a fifth colour for one pot would be a fifth colour.
-  const glaze = fillMat(PAL.furnitureBlue);
+  // Hachiware's muted ochre glaze is its own colour rather than the stool's
+  // blue, so changing this belonging does not recolour unrelated furniture.
+  const glaze = fillMat(PAL.kettleGlaze);
   const dark = legMat();
   const mouth = fillMat(PAL.furniturePaper);
 
@@ -3358,6 +3358,16 @@ export function buildTeapot(h) {
   part(g, (pad) => new THREE.CylinderGeometry(
     rLid * 0.86 + pad, rLid * 0.90 + pad, h * 0.075 + pad * 2, 26),
     glaze, (m) => { m.position.y = h + h * 0.0375; }, INK_SMALL);
+
+  // The cover's dark rounded tip, centred under the bail like the reference.
+  // Its lower half sinks into the lid so it reads as a fixed knob rather than
+  // a bead balanced on top.
+  const lidKnob = new THREE.Mesh(
+    new THREE.SphereGeometry(h * 0.115, 16, 10),
+    dark,
+  );
+  lidKnob.position.set(0, h + h * 0.145, 0);
+  g.add(lidKnob);
 
   // The spout, seated well inside the body so the join is buried and only the
   // part that clears it is ever drawn. Built along its own axis and turned,

@@ -552,6 +552,89 @@ html, body {
 
 .act-sprint svg { width: 28px; height: 28px; }
 
+/* SIT, the third of the cluster, DIRECTLY ABOVE SPRINT and the smallest of the
+   three. The cluster is a LADDER — 80 / 64 / 52 — and each rung is how often
+   that button is pressed: you jump constantly, sprint often, sit occasionally.
+   It read 80/64/64 for a while, which claimed sit and sprint were peers; they
+   are not, and two circles the same size in a cluster of three is the sort of
+   thing the eye reads as an accident rather than a decision. 52px is still well
+   clear of the 44pt floor for a touch target.
+
+   The smaller circle also buys the clearance the note below is about: pulling
+   the rim in from 32px to 26px is what finally lifts this button off the fishing
+   pill. `right` is 118 rather than sprint's 112 so the two CENTRES line up —
+   118 + 26 = 144 = 112 + 32 — because a column of circles is aligned on its
+   spine, not on its left edge.
+
+   IT USED TO SIT AT 192/124 AND THAT WAS THREE MISTAKES, all of them from
+   measuring the wrong thing. The note here claimed it "continued the arc" that
+   jump and sprint make. Measured from the corner a right thumb pivots at, the
+   three centres came out 89px, 169px and 273px away: an arc holds its radius,
+   and that one tripled it. The least-used control in the cluster had the
+   longest reach on the screen.
+
+   The gaps were checked per axis — "12px in one, 4px in the other" — which is
+   how you measure rectangles. These are circles on a diagonal, so the real rim
+   distance was hypot(80, 68) - 64, about 41px, against the 15px that holds jump
+   and sprint together. The third circle was not in the cluster; it was near it.
+
+   And it had crossed into the other hand. The walk pad claims every touch left
+   of 46% of the width — see stickZone in config.js — which on a 375px phone is
+   x=172, and this button spanned x 119 to 183. Eighty-three per cent of it
+   stood in the pad's own territory, and it takes its own pointerdown (see
+   move-input.js), so a thumb reaching down to start walking sat you down.
+
+   Straight up from sprint fixes all three at once and needs almost no
+   arithmetic: a shared spine, and a `bottom` that is sprint's own top plus the
+   cluster's 12px. Reach drops from 273px to 214px, the fan curls the way a thumb
+   actually sweeps — left-and-up, then up — and on a 375px phone the whole button
+   clears the pad's edge by 32px.
+
+   ABOVE JUMP WAS THE OTHER CANDIDATE AND IT IS THE ONE PLACE IT CANNOT GO. The
+   reach is better there — 159px against 214 — but `right: 20` is the interaction
+   stack's own column, and while a rod is out that stack drops to `bottom: 132`
+   to bring 「あげる!」 into the thumb's arc. Measured, a sit button above jump
+   lands entirely underneath that pill: 64x40 of overlap, which is the whole
+   button. Shrinking does not rescue it, because the trouble is not the size but
+   that the spot is spoken for. It would also re-file sit as a world verb by
+   putting it back in the column those live in — see the note in index.html for
+   why it was taken out of that stack in the first place. */
+.act-sit {
+  right: 118px;
+  bottom: calc(132px + env(safe-area-inset-bottom));
+  width: 52px;
+  height: 52px;
+  /* THE RING COMES DOWN WITH THE CIRCLE. `.act` sets 7px because a ring wants to
+     be about a tenth of what it is on and the two buttons it was written for are
+     80 and 64. On 52 that same 7px is a seventh, which would make the smallest
+     button in the cluster the heaviest-rimmed thing on the screen — the opposite
+     of what shrinking it was for. 6/2.5 holds the proportion. */
+  --ring-w: 6px;
+  --ring-gap: 2.5px;
+  /* Grid rather than the cluster's flex, so the two glyphs below can share one
+     cell. Overrides `.act` deliberately and only here. */
+  display: grid;
+  place-items: center;
+}
+
+/* TWO GLYPHS, ONE CIRCLE. Stacked in the same cell rather than swapped in JS, so
+   the button never reflows and nothing is rebuilt — only opacity changes, which
+   is also what makes it a crossfade rather than a pop. `is-on` is written from
+   the rig every frame; see syncSitBtn. */
+/* 23px against the circle's 52 is the ratio sprint keeps (28/64) and jump nearly
+   does (38/80). Left at 28 the glyph would fill 54% of the smaller button and it
+   would read as cramped rather than as small. */
+.act-sit svg {
+  grid-area: 1 / 1;
+  width: 23px;
+  height: 23px;
+  transition: opacity 0.14s ease;
+}
+
+.act-sit .act-sit-up { opacity: 0; }
+.act-sit.is-on .act-sit-down { opacity: 0; }
+.act-sit.is-on .act-sit-up { opacity: 1; }
+
 /* ----------------------------------------------------- the interaction stack
 
    Every verb the world is offering right now, one pill each, growing UPWARD out
@@ -589,7 +672,18 @@ html, body {
 .interact {
   position: absolute;
   right: 20px;
-  bottom: max(calc(132px + env(safe-area-inset-bottom)), 26vh);
+  /* THE FLOOR CLEARS THE SIT BUTTON, which is what moving it under the stack
+     made necessary. Sit's top edge is at 184px (132 + its 52); 196 is that plus
+     the cluster's own 12px gap. It only ever binds on a short phone — at 812px
+     tall the 26vh is 211 and wins on its own, so nothing moves on the sizes this
+     is usually played at.
+
+     The old 132 was already too low and had simply not been caught: a pill wide
+     enough to reach across (172px, which the longer verbs are) would have landed
+     on the sit button at its old place too, on any phone short enough for the
+     px arm to win. Moving sit inboard only made it likelier, since a pill now
+     needs 92px rather than 172px to reach. */
+  bottom: max(calc(196px + env(safe-area-inset-bottom)), 26vh);
   display: flex;
   /* Reversed, so the FIRST child is the BOTTOM one. main.js stamps `order` from
      a fixed table and lists the entry nearest the thumb first; reversing here is
@@ -2558,94 +2652,97 @@ html, body {
   z-index: 6;
 }
 
-/* DRAWN, NOT MANUFACTURED.
+/* THE RING, as its own element rather than the button's border, so it can be
+   squeezed independently of the disc — a real shutter closes from both sides at
+   once and a single element cannot do two things to one transform. */
+/* PASTEL, STILL MACHINED — which is the whole brief, and the two halves of it
+   pull in opposite directions on purpose.
 
-   The version this replaces was a phone camera's shutter copied straight: a
-   thin cream ring, a translucent fill and a hard saturated disc, all of it
-   perfectly circular. That was defensible on the grounds that everybody already
-   knows what it is — and it was the one object in this app that looked like it
-   came from a settings screen. Nothing else here is a machine part. Everything
-   else is DRAWN: thick soft ink, cream paper, shapes that are not quite round.
+   A DRAWN VERSION STOOD HERE and was reverted 2026-07-31: ink outlines in the
+   app's own pen, both circles knocked a fraction out of true, a painted shine.
+   It read as belonging to the rest of the app and it read LESS as a shutter,
+   which on the one control you press without looking at it is the wrong trade.
+   So everything structural about a camera's shutter stays exactly as it was —
+   perfect circles, crisp edges, a ring and a disc, no outline, no wobble. What
+   changed is only the colour and the material.
 
-   So it is drawn now, in the same pen as the pack's slots and the sheet's card,
-   and none of what made it legible is given up. It is still the biggest thing
-   on screen, still low and centred, still the only red. Those were the reasons
-   it worked; being machined was never one of them.
+   THE RED IS GONE, and that was the real cost of the old drawing rather than
+   its shape. #E8555F is a recording light: it belonged to a device, and it was
+   the one colour in the app that came from outside this world. The disc is in
+   the same pink family as --accent and --pink now, so the button is of the
+   palette while still being the only saturated thing on a screen that is
+   otherwise meadow and sky.
 
-   THE CIRCLES ARE NOT CIRCLES. Both radii are four uneven percentages rather
-   than 50%, which leaves each shape a fraction out of true — the wobble a hand
-   leaves and a compass cannot. It is well under a pixel of difference at any
-   one point on the edge and it is the single thing doing most of the work
-   here: a perfect circle reads as printed, a slightly wrong one as drawn. */
+   It gives up being loud in the way a warning is loud. That is a real loss and
+   it is bought back by the ring: cream against pink is a stronger edge than
+   cream against red was, and the ink hairline outside it is what makes the
+   whole object hold together over a bright sky. */
 .shot-ring {
   position: absolute;
   inset: 0;
-  border-radius: 52% 48% 50% 50% / 50% 52% 48% 50%;
-  background: var(--paper);
-  /* The ink is INSIDE the edge, which is this app's whole way of outlining a
-     filled shape — see --shell — and at 3.5px it is the weight the sheet's card
-     and the pack's slots wear. It also solves what the old cream ring could
-     not: ink separates from a white sky and a night one alike, where a rim of
-     the app's own cream went quiet against snow. */
+  border: 4px solid var(--face);
+  border-radius: 50%;
+  /* Cream rather than white, so the ring is the app's paper with the world
+     faintly behind it rather than a pane of glass. Translucent still: this sits
+     over a picture somebody is composing, and an opaque puck would be a hole in
+     the shot. */
+  background: rgba(253, 246, 234, 0.45);
+  /* The ink hairline is what the cream cannot do for itself — see index.html. A
+     white rim, which is what every other control here uses to hold itself off
+     the world, is no help against a sky that can BE white, and a pale pink
+     button needs it more than a red one ever did. */
   box-shadow:
-    inset 0 0 0 3.5px var(--ink),
-    0 5px 13px rgba(91, 76, 68, 0.3);
-  transition: transform 0.12s cubic-bezier(0.3, 1.4, 0.5, 1);
+    0 0 0 2.5px rgba(91, 76, 68, 0.36),
+    0 4px 14px rgba(91, 76, 68, 0.3);
+  transition: transform 0.1s ease;
 }
 
 .shot-btn::before {
   content: '';
-  /* Stacked in one grid cell with the shine below, and POSITIONED so both paint
-     above the ring. The ring is `position: absolute` and these are ordinary grid
-     items, so without this the ring wins the painting order and lays its own
-     fill over the red — the loudest thing on the screen, washed out by the
-     element drawn to sit behind it. */
-  grid-area: 1 / 1;
+  /* POSITIONED SO IT PAINTS ABOVE THE RING, which is not a nicety. The ring is
+     `position: absolute` and the disc is an ordinary grid item, so by the
+     painting order a positioned element wins and the ring's own fill was being
+     laid OVER the disc — the loudest thing on the screen, quietly washed out by
+     the element drawn to sit behind it. */
   position: relative;
   z-index: 1;
-  width: 56px;
-  height: 56px;
-  border-radius: 50% 52% 48% 50% / 48% 50% 52% 50%;
-  /* Softened from #E8555F. That red was a recording light; this one is a colour
-     from the same box as the red mushroom, and against 3px of ink it carries
-     just as far while belonging to the drawing. */
-  background: #F26B76;
-  box-shadow: inset 0 0 0 3px var(--ink);
-  transition: transform 0.1s cubic-bezier(0.3, 1.4, 0.5, 1), background 0.1s ease;
-}
-
-/* THE SHINE, which is the mark that says "drawn" faster than anything else on
-   this button: every glossy thing in this world has one small off-centre
-   highlight sitting a little way in from the top left. */
-.shot-btn::after {
-  content: '';
-  grid-area: 1 / 1;
-  position: relative;
-  z-index: 2;
-  width: 15px;
-  height: 10px;
+  width: 58px;
+  height: 58px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
-  transform: translate(-12px, -13px) rotate(-26deg);
-  pointer-events: none;
-  transition: transform 0.1s cubic-bezier(0.3, 1.4, 0.5, 1);
+  /* A soft top light, so the disc reads as a button with a body rather than as
+     a flat circle of colour. Two stops only: this is still the loudest thing on
+     the screen and a gradient with opinions would be too much.
+
+     THE BODY COLOUR IS PICKED AGAINST THE RING, not by eye. The first pass at
+     going pastel used #F0899C, which measures 2.23:1 against this button's own
+     cream ring — under the 3:1 that WCAG asks of a component boundary, and a
+     clear step down from the red it replaced at 3.32:1. Pale pink on cream is a
+     soft edge in a way pale pink on a meadow never was, and the ring is the edge
+     that matters because it is the one constant: the world behind changes every
+     hour, the ring does not.
+
+     #DE607D is the shallowest step back into the family that clears it — 3.22:1,
+     within a whisker of the red's own figure — and it is still unmistakably rose
+     rather than a red. The top stop is a highlight and sits lower at 2.19:1,
+     which is the same spread the red carried (2.68 against 3.32); a dome's
+     lightest point is not the thing carrying its edge. */
+  background: linear-gradient(180deg, #F08BA3 0%, #DE607D 66%);
+  box-shadow: inset 0 -2px 4px rgba(150, 70, 90, 0.22);
+  transition: transform 0.09s ease, background 0.09s ease;
 }
 
-/* THE PRESS SQUASHES RATHER THAN SCALES. A uniform shrink is what a web page
-   does; a drawn thing being pushed goes wider than it goes short, and the ring
-   gives a little in the same direction. Both halves move by different amounts —
-   the disc drops well inside a ring that only tightens — which is what makes it
-   read as mechanism rather than as a hover state. */
+/* Both halves move on the press and by different amounts, which is what makes
+   it feel mechanical: the disc drops well inside a ring that only tightens.
+   THE WHOLE GRADIENT IS RESTATED and not just a colour under it, which is the
+   bug the red version shipped with: `background-image` paints over
+   `background-color`, so an opaque gradient on top meant the darker press
+   colour was set on every press and never once seen. */
 .shot-btn:active::before {
-  transform: scale(0.92, 0.84);
-  background: #DE5561;
+  transform: scale(0.84);
+  background: linear-gradient(180deg, #DE7A92 0%, #C9506C 66%);
 }
 
-.shot-btn:active::after {
-  transform: translate(-11px, -11px) rotate(-26deg) scale(0.86);
-}
-
-.shot-btn:active .shot-ring { transform: scale(0.97, 0.94); }
+.shot-btn:active .shot-ring { transform: scale(0.95); }
 
 /* The fade wants a scale, and this is the one element in the app whose transform
    is already carrying its layout — `translateX(-50%)` is what centres it. Any

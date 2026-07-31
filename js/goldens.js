@@ -133,6 +133,33 @@ for (const spec of CAST) {
 // have. Full is also the reference scene: somebody in, lamp lit.
 globe.setOccupancy(1);
 
+// ...and a word about anything in this world that is not wearing the hour.
+//
+// The sheets prove that what IS lit stays lit; they cannot say a word about a
+// surface nobody registered, because a material that was never patched renders
+// perfectly happily at its own flat colour. It looks a little wrong rather than
+// broken — dark in a bright room, bright in a dark one — and the tiles show it
+// only if it happens to be standing in front of one of six cameras.
+//
+// So the rig asks. See Globe.auditLighting for what counts as accounted for.
+// Printed rather than thrown: an unaccounted material is a thing to go and look
+// at, not a reason to refuse to capture.
+{
+  const audit = globe.auditLighting();
+  const line = Object.entries(audit.counts)
+    .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ');
+  if (audit.unaccounted.length) {
+    console.warn(`LIGHTING AUDIT — ${audit.unaccounted.length} VISIBLE material(s)`
+      + ' wear no hour and no lamp:', audit.unaccounted);
+  }
+  if (audit.hidden.length) {
+    console.info(`lighting audit — ${audit.hidden.length} hidden material(s)`
+      + ' are unaccounted but never drawn:', audit.hidden);
+  }
+  log(`lighting audit: ${audit.total} materials, ${audit.unaccounted.length} visible gaps`
+    + ` (${audit.hidden.length} hidden) — ${line}`);
+}
+
 // THE LANTERNS ARE LIT, because otherwise the reference scene is not on the
 // sheet at all.
 //
