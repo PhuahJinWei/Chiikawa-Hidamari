@@ -5,10 +5,13 @@ import { BANKS } from './lines.js';
 import { Globe } from './scene.js';
 import { PlanetCamera } from './camera-control.js';
 import { Household } from './household.js';
+import { Social } from './social.js';
+import { MoveInput } from './move-input.js';
+import { TowedBody } from './body.js';
 import { Character } from './character.js';
 import { Dialogue } from './dialogue.js';
 import {
-  dirFromLatLon, inLake, inBuilding, inSolid, slideAround, perchUnder,
+  dirFromLatLon, inLake, inBuilding, inSolid, perchUnder,
 } from './sphere.js';
 import {
   activePhase, isAuto, setPhaseOverride,
@@ -16,7 +19,7 @@ import {
 } from './daylight.js';
 import {
   tickWeather, activeWeather, wetness, snowCover, setSnowCover, lightningStruck,
-  rainbowOut, rainbow, iceLook, pondsFrozen, isWater,
+  rainbowOut, rainbow, iceLook, pondsFrozen,
   setWeatherOverride, isAutoWeather, forecast,
   WEATHERS, WEATHER_LABEL,
 } from './weather.js';
@@ -163,128 +166,32 @@ globe.addCharacter(you);
 you.fade = 0;
 you.root.visible = false;
 
-// Between these two altitudes the body condenses from nothing to fully there.
-// The low end is the floor of flight: below it you are landed, or dropping all
-// the way back, and the camera is standing exactly where the body would be —
-// there is nothing honest to draw from inside your own head. The high end is
-// passed early in any climb, so by the time the view has tilted down enough to
-// bring your own spot properly on screen, whoever is standing on it is already
-// solid and the fade itself is never caught midway.
-const BODY_LO = CONFIG.camera.landSnap;
-const BODY_HI = 6.0;
-
-// WHERE THE BODY IS, which is not where the camera is once you are off the
-// ground — and the two being the same thing is what made the far view look
-// broken.
-//
-// The rig's anchor is both "the point you are above" and "where you would
-// land", and a globe-view swipe moves it: that is what makes spinning the
-// planet also carry your spot around. Stood the body on the anchor and the
-// camera is derived from that same anchor, so the two can never move relative
-// to each other — measured at NDC 0.324 before a 3.8-unit swipe and NDC 0.324
-// after it, the identical pixel. The planet turned under a Momonga nailed to
-// the glass, which reads as a sticker on the lens rather than somebody stood
-// in a field.
-//
-// So off the ground the body keeps its own spot and simply stays on the grass
-// it was standing on, exactly like a tree does — it rotates with the terrain,
-// slides across the view, and goes over the curve if you fly far enough. That
-// is the whole fix: parallax it could not have while it was welded to the eye.
-const youDir = rig.anchor.clone();
-const _prevYou = youDir.clone();
-const _youAxis = new THREE.Vector3();
-let youMoving = false;
-
-// ...but never lost. A leash tows the body along once your spot gets this far
-// from it, so flying to the far side of the planet cannot strand the one thing
-// you climbed up to look at. In world units at the globe's radius — comfortably
-// inside the horizon at every altitude the body is visible at (0.96 radians of
-// cap at the low end), so a towed body is off to one side of the view, never
-// off it.
-const BODY_LEASH = 2.7 / CONFIG.globe.radius;
-
-// Whether the BODY is travelling — measured on the body, not on the anchor, so
-// the hop plays for the thing you can actually see moving. The threshold sits
-// well under both walking speeds (the rig's 1.7, the cast's 0.8) and above both
-// the tail of an ease settling and the idle drift of the planet, which at
-// 0.000016 rad/ms tows the body at 0.13 and must never set it hopping.
-const BODY_STEP = 0.35;
-
-// How far off the grass the glide rides, at full height. A little over half the
-// body's own height, which separates it from its shadow without pushing it far
-// enough toward the camera to grow.
-const GLIDE_LIFT = 1.6;
-
-// ...and what it takes to leave the ground at all.
-//
-// A glide is not a way of standing, it is what you do at speed. Momonga walks
-// like anybody else — the same hop the whole cast uses — and only leaps into
-// the sheet with its arms out when the ground is genuinely tearing past. Tying
-// the pose to altitude instead had the body gliding through every idle moment
-// up there, arms out over a planet nobody was moving.
-//
-// Measured off the body rather than chosen: the planet's own idle drift tows it
-// at 0.12, an ordinary swipe peaks at 5.3, and a hard one averages 10.9 and
-// tops out past 14. Ten sits in the gap between the last two — clear of every
-// ordinary look around, and just under the average of a proper shove, so a hard
-// swipe still commits rather than skimming the threshold. For scale it is also
-// six times the rig's own walking speed of 1.7, which is what "an incredible
-// speed" has to mean for a creature this size.
-const GLIDE_SPEED = 10.0;
-
-// Dropping back to a walk takes a bigger slowdown than launching took, so a
-// speed sitting on the threshold cannot strobe the pose between two drawings.
-const GLIDE_DROP = 0.6;
-
-// The launch and the settle, as a time constant. Short, because this is a jump:
-// long enough that the body rises into the air rather than teleporting there,
-// brief enough that it still reads as a push off the ground.
-const GLIDE_EASE_MS = 200;
-
-// Latched (with the hysteresis above) and then eased, so `glide` is both the
-// decision and how far into it the body has got.
-let gliding = false;
-let glide = 0;
-
-// THE TRANSIT RULES, for the towed body only. These used to be the ONLY thing
-// keeping a drawn body out of a trunk, because the camera was allowed through
-// one; the camera is stopped by the same props now (see SOLIDS in sphere.js),
-// so most of what follows fires only while you are airborne and the leash is
-// long enough for the body to lag across something you have flown over. It is
-// kept for exactly that, and because a card sliding through a trunk is not a
-// freedom anybody enjoys, it is a bug they can see. So while the body is
-// visible and being towed:
-//
-//   The house and the solid props (trees and stumps) deflect it,
-//   at the same berth the wandering cast gives a wall. Deflection can hold the
-//   body a prop's radius past the leash, which is fine: the leash exists so
-//   you cannot be STRANDED, and "beside the tree your spot is under" is not
-//   stranded. The moment the body fades out it follows the anchor exactly, so
-//   none of this can fight the landing snap.
-//
-//   Water is not dodged, it is JUMPED — the one answer to "crosses a lake"
-//   that this particular character has always had. Being over water feeds the
-//   same latch the speed does, so the arms-out sheet and the lift ride the one
-//   ease whichever reason put them there. The margins are hysteresis: wider to
-//   stay wet than to get wet, so a tow crawling along a shoreline cannot
-//   strobe the pose at the water's edge.
-const WATER_ENTER = 0.012;   // radians past the shore before the jump begins
-const WATER_STAY = 0.04;     // ...and how far clear it lands on the far side
-let overWater = false;
-
-// The pace the body makes FOR ITSELF when the leash alone would leave it
-// somewhere wrong — sliding round a trunk or a wall, and carrying a jump on to
-// the far shore when the tow stops over the pond. A jump has to finish: the
-// leash is content to park the body mid-air over the water it was crossing,
-// and a glide frozen over a pond is nobody's idea of a jump, so while wet it
-// walks itself on toward your spot, which the rig guarantees is dry ground.
-// Walking pace, not glide pace — this is the landing half of a leap and the
-// tread of a detour, and both should read as feet, not physics.
-const CARRY_SPEED = 3.4;
+// Your own body, drawn only once you are high enough to be looking at it — the
+// fade, the leash, the glide and the transit rules all live in body.js now. It
+// is built here because it needs the rig and the Character above, and nothing
+// else in this file reads it except the shove, which asks it where your feet are.
+const body = new TowedBody({ rig, you });
 
 // Who is home, and the lit windows that say so. Built after the cast, because
 // it is about them.
 const household = new Household({ globe, bots });
+
+// WHO IS TALKING — see social.js, which owns the scheduler and every cooldown
+// behind it. What stays here is the wiring and a handful of one-line delegates:
+// the pointer handlers below call `speak` and `pokeBack` by those names in a
+// dozen places, and a tap on a friend reads better as `pokeBack(bot, ...)` at
+// the point the tap is handled than as a reach through an object.
+const social = new Social({ bots, byChar, globe, rig });
+
+const throughWall = (ch) => social.throughWall(ch);
+const canChatter = (ch) => social.canChatter(ch);
+const speak = (bot, bucket, now) => social.speak(bot, bucket, now);
+const pokeBack = (bot, bucket, now) => social.pokeBack(bot, bucket, now);
+const updateCast = (now) => social.update(now);
+// Both of these are one-shots fired from the weather, and both are gated on the
+// world having started — the start card must not be talked over.
+const strike = (now) => { if (started) social.strike(now); };
+const noticeBow = (now) => { if (started) social.noticeBow(now); };
 
 // Time of day follows the visitor's real clock, so an evening visit is a
 // different place from a lunchtime one — until they pick an hour by hand, at
@@ -341,14 +248,10 @@ let dressed = false;
 // One of them, not all three, and not every bolt. A storm strikes every dozen
 // seconds or so; three characters answering each of them in chorus would read
 // as a cast reacting to a stage direction rather than as people in the rain.
-function strike(now) {
-  if (!started || Math.random() > 0.45) return;
-  const seen = bots.filter((b) => (
-    b.dlg.has('thunder') && !b.dlg.isVisible && b.ch.isVisible && canChatter(b.ch)
-  ));
-  if (!seen.length) return;
-  speak(seen[Math.floor(Math.random() * seen.length)], 'thunder', now);
-}
+//
+// The choosing is Social.strike now — it is a decision about who speaks, which
+// is that file's whole subject. What is left here is the paragraph above, which
+// is about the WEATHER and belongs beside the storm it describes.
 
 // Whether there was a rainbow up on the LAST frame, so that the one frame it
 // arrives on can be found. See below.
@@ -388,12 +291,22 @@ function slipOnIce(dtMs, now) {
     // The LINE is still gated on being seen, a few lines below, which is where
     // that rule belongs: a slip off in the distance is a friend stumbling, and a
     // bubble nobody can see is chatter spent on nothing.
-    if (ch.asleep || now < ch.busyUntil) continue;
+    // ...and never mid-conversation. Asked of the ONE reason rather than of the
+    // ledger as a whole — see Character.holding, whose own note names this case:
+    // a slip should not interrupt a chat, but a character merely resting between
+    // strolls is exactly who ought to be able to go over.
+    //
+    // It read `now < ch.busyUntil` until now, and that field no longer exists —
+    // character.js folded it into the ledger as 'talk'. Against `undefined` the
+    // comparison is always false, so the guard had quietly stopped guarding and
+    // a friend could be pitched onto the ice mid-sentence.
+    if (ch.asleep || ch.holding('talk', now)) continue;
     if (!CONFIG.lakes.some((l) => inLake(ch.dir, l, 0))) continue;
     if (Math.random() > p) continue;
     ch.walking = false;
     ch.errand = null;
-    ch.restUntil = now + CONFIG.weather.slipMs;
+    // Likewise `restUntil`, which is the ledger's 'rest'.
+    ch.hold('rest', now + CONFIG.weather.slipMs);
     // Silent if nobody could see it. A bubble opening on a friend the far side
     // of the planet spends the chatter budget on something nobody watched —
     // the same rule the meeting exchange keeps.
@@ -414,15 +327,7 @@ function slipOnIce(dtMs, now) {
 // come out of the rain a few seconds before the arc arrives, so somebody left
 // on a cushion is somebody who has not noticed yet, and they will have their
 // own chance when they get outside and the gathering picks them up.
-function noticeBow(now) {
-  if (!started) return;
-  const seen = bots.filter((b) => (
-    b.dlg.has('rainbow') && !b.dlg.isVisible && b.ch.isVisible
-    && canChatter(b.ch) && !globe.isInside(b.ch.dir)
-  ));
-  if (!seen.length) return;
-  speak(seen[Math.floor(Math.random() * seen.length)], 'rainbow', now);
-}
+// ...and the choosing is Social.noticeBow, for the reason the thunder's is.
 
 // Hand the hour to a different clock. Always this rather than setPhaseOverride
 // directly, because the deadline the *previous* clock set has to be retired
@@ -460,26 +365,9 @@ function arcBetween(a, b) {
   return Math.acos(Math.min(1, Math.max(-1, a.dot(b)))) * R;
 }
 
-// Stood at the edge of a lake, rather than in one.
-//
-// It used to mean in one, which is now impossible — the rig refuses the step.
-// Left as it was, the whole `water` bank would simply never be reached again.
-// The shore is the better trigger anyway, because it is what the lines already
-// say: 「あっ、ぬれちゃうよ…!」 is a warning that you *will* get wet and
-// 「あっ、そこ みずだよ!」 is pointing the water out to you. Both read oddly
-// aimed at somebody stood in the middle of a pond, and exactly right aimed at
-// somebody who has just walked up to one.
-function playerAtWater() {
-  // 「あっ、ぬれちゃうよ…!」 is about getting wet, and on ice nobody is going to.
-  // The whole bucket stands down rather than being reworded: a friend warning
-  // you off a pond you are comfortably standing on reads as them not having
-  // looked at it.
-  if (pondsFrozen()) return false;
-  for (const lake of CONFIG.lakes) {
-    if (inLake(playerDir, lake, CONFIG.player.shoreNotice)) return true;
-  }
-  return false;
-}
+// `playerAtWater` stood here — stood at the EDGE of a lake rather than in one,
+// since being in one is impossible now that the rig refuses the step. It is
+// Social.playerAtWater, with the rest of what decides who says what.
 
 // This app writes nothing down. Two keys older builds left behind — the hour
 // you had picked, and the timestamp behind "it remembers you came" — are
@@ -496,45 +384,23 @@ try {
   localStorage.removeItem('hidamari.lastVisit');
 } catch { /* private mode: nothing was ever written to clear */ }
 
-// Now that they roam the whole planet, "can I see them" has to mean actually
-// in frame — not merely on this side of the horizon. Otherwise a speech bubble
-// turns up at the edge of the screen with nobody attached to it.
-function onScreen(ch) {
-  if (!ch.isVisible) return false;
-  ch.headWorld(probe);
-  probe.y += globe.world.position.y;
-  probe.project(globe.camera);
-  return probe.z < 1 && Math.abs(probe.x) < 1.0 && Math.abs(probe.y) < 1.1;
-}
+// `onScreen`, `throughWall` and `canChatter` stood here, and so did every
+// cooldown behind them — `nextChatterAt`, `lastTouchAt`, `saidLongIdle`,
+// `greetedKey`, `greetCooldownUntil`, `meetUntil`, `pendingReply`,
+// `wasInWater`, `waterQuietUntil`, nine module-level `let`s scattered between
+// the pointer routing and the drawer UI. All of it is in social.js, for the
+// reason its own header gives: those are a CONVERSATION's state, and a
+// conversation spans frames, spans characters and belongs to none of them.
+//
+// The three predicates come back as delegates above, because a dozen call
+// sites here read better as `throughWall(b.ch)` than as a reach through an
+// object — and `throughWall` in particular is asked by things that have
+// nothing to do with talking, like which character a tap may land on.
 
-// Whether a wall stands between you and them. Everyone is in the one world
-// now, so the projection alone cannot say — somebody sat at home projects
-// onto the front of the house perfectly well. A line spoken through masonry
-// is the thing this exists to stop; the open door is narrow enough that
-// treating the wall as total costs one rare charming case and saves the
-// constant absurd one.
-function throughWall(ch) {
-  return globe.isInside(ch.dir) !== insideHouse();
-}
-
-function canChatter(ch) {
-  if (!onScreen(ch) || throughWall(ch)) return false;
-  if (rig.isFirstPerson && arcBetween(ch.dir, playerDir) > CONFIG.social.farSpeakArc) return false;
-  return true;
-}
-
+// Whether the world is running yet. The one flag that genuinely belongs to this
+// file: everything that speaks or reacts is gated on it, so the start card
+// cannot be talked over.
 let started = false;
-let nextChatterAt = 0;
-let lastTouchAt = 0;
-let saidLongIdle = false;
-
-// social state
-let greetedKey = null;
-let greetCooldownUntil = 0;
-let meetUntil = 0;
-let pendingReply = null;
-let wasInWater = false;
-let waterQuietUntil = 0;
 
 // --- pointer routing
 //
@@ -545,18 +411,36 @@ let waterQuietUntil = 0;
 //
 // A pinch is therefore two *camera* fingers, never the pad plus one.
 const pointers = new Map();
-// `grab` is a loose piece that was under the finger when the pad took it — see
-// onDown. The pad keeps hold of it so that letting go without having pushed can
-// mean "pick that up" rather than nothing at all.
-const pad = { id: null, travel: 0, lastX: 0, lastY: 0, grab: null };
+// The pad itself lives in move-input.js now, with the keyboard that says the
+// same thing — see `moves` above. What stays here is the arbitration between
+// the three kinds of finger, which is about all of them and so belongs to none.
 const look = { id: null, mode: null, ch: null, lastX: 0, lastY: 0, travel: 0 };
 const pinch = { a: null, b: null, start: 0 };
 
 function touched() {
-  lastTouchAt = performance.now();
-  saidLongIdle = false;
-  rig.markTouched(lastTouchAt);
+  const now = performance.now();
+  social.touched(now);
+  rig.markTouched(now);
 }
+
+// EVERYTHING THAT SAYS "GO THAT WAY" — the thumb pad, the keyboard, and the two
+// action buttons — in one place. See move-input.js.
+//
+// Built here rather than down with the rest of the controls because the pointer
+// handlers below hand it their touches, and it reads better for the thing they
+// defer to to have been introduced first. The elements it draws into are in the
+// document already; nothing in this file waits for load.
+const moves = new MoveInput({
+  rig,
+  stick: document.getElementById('stick'),
+  knob: document.getElementById('stick-knob'),
+  jumpBtn: document.getElementById('jump-btn'),
+  sprintBtn: document.getElementById('sprint-btn'),
+  onTouched: touched,
+  // A hop is a wave, and whoever is near enough waves back — see hopSeen, which
+  // is a function declaration and so is already here to be named.
+  onHop: () => hopSeen(),
+});
 
 function gapBetween(a, b) {
   const pa = pointers.get(a);
@@ -595,64 +479,14 @@ function pickCharacter() {
   return best;
 }
 
-function anyoneSpeaking() {
-  return bots.some((b) => b.dlg.isVisible);
-}
-
-function silenceOthers(except) {
-  for (const b of bots) if (b !== except && b.dlg.isVisible) b.dlg.hide();
-}
-
-// gapMin/gapMax are the QUIET between lines, so this takes the moment the last
-// one ends rather than the moment it began. They used to be the same call —
-// scheduleNext(now) at the point of speaking — which was near enough while
-// every line lasted about three seconds flat. Now that a long one runs to
-// seven, a gap counted from the start would frequently be up before the line it
-// was supposed to follow, and the three of them would talk without a pause
-// anywhere in it.
-function scheduleNext(from) {
-  const d = CONFIG.dialogue;
-  nextChatterAt = from + d.gapMin + Math.random() * (d.gapMax - d.gapMin);
-}
-
-function speak(bot, bucket, now) {
-  silenceOthers(bot);
-  bot.dlg.say(bucket, now);
-  scheduleNext(now + bot.dlg.durationMs);
-}
-
-function speakAmbient(bot, now) {
-  silenceOthers(bot);
-  bot.dlg.ambient(now);
-  scheduleNext(now + bot.dlg.durationMs);
-}
-
-// Being spoken TO — the poke, the greeting — with a beat after it before the
-// same friend will answer again. See social.pokeQuietMs.
+// `anyoneSpeaking`, `silenceOthers`, `scheduleNext`, `speak`, `speakAmbient`
+// and `pokeBack` stood here. All six are Social's, and `speak`/`pokeBack` come
+// back as delegates above so the call sites below are unchanged.
 //
-// Every way of addressing somebody comes through here rather than through
-// `speak` directly, which is the whole point: the guard belongs to the ACT of
-// poking and not to the button that happens to be the newest way of doing it.
-// Tapping a friend spams exactly as well as pressing 「はなす」 does, and a rule
-// that only covered the pill would have fixed the symptom I noticed and left the
-// one I did not.
-//
-// AN ABSORBED PRESS IS SILENT, and that is a deliberate exception to the rule
-// `refuse` states — that a button answering a press with silence reads as
-// broken. It is not silence: they are mid-sentence, the bubble is on screen, and
-// the answer to "say something" is the thing they are already saying. What would
-// read as broken is the alternative, which is what this replaced — cutting a
-// friend off mid-word to start them again.
-//
-// The window is measured from the END of the line, so it is asked AFTER the
-// line has been picked: `durationMs` is a property of the line, and there is no
-// line to ask about until `speak` has chosen one.
-function pokeBack(bot, bucket, now) {
-  if (now < (bot.quietUntil || 0)) return false;
-  speak(bot, bucket, now);
-  bot.quietUntil = now + bot.dlg.durationMs + CONFIG.social.pokeQuietMs;
-  return true;
-}
+// The one behaviour that moved rather than merely relocating is in pokeBack:
+// Social's calls `bot.ch.notice(now)`, which restarts the attention window on
+// somebody you have just addressed — see Character.notice, and the note there
+// about why being ADDRESSED counts and ambient chatter does not.
 
 // --- the pouch
 //
@@ -1356,7 +1190,7 @@ for (const id of Object.keys(inventory.uniques)) {
 
 // Turns the current camera finger, plus this new one, into a zoom.
 function startPinch() {
-  const ids = [...pointers.keys()].filter((id) => id !== pad.id);
+  const ids = [...pointers.keys()].filter((id) => !moves.owns(id));
   if (ids.length < 2) return;
   clearLook();
   pinch.a = ids[ids.length - 2];
@@ -1407,16 +1241,7 @@ function onDown(e) {
   // the stick, let go without pushing to pick the thing up. A press that turns
   // into a walk was never a grab, and a press that never moved was never a
   // walk, so nothing has to be guessed at the moment the finger lands.
-  if (!hit && pad.id === null && rig.isFirstPerson && inStickZone(e)) {
-    pad.id = e.pointerId;
-    pad.travel = 0;
-    pad.grab = grabbable;
-    pad.lastX = e.clientX;
-    pad.lastY = e.clientY;
-    showStick(e);
-    readStick(e);
-    return;
-  }
+  if (!hit && moves.claim(e, grabbable)) return;
 
   // First camera finger looks. A second one is a pinch — and either way the
   // pad carries on underneath.
@@ -1452,12 +1277,8 @@ function onMove(e) {
     return;
   }
 
-  if (e.pointerId === pad.id) {
-    pad.travel += Math.hypot(e.clientX - pad.lastX, e.clientY - pad.lastY);
-    pad.lastX = e.clientX;
-    pad.lastY = e.clientY;
-    readStick(e);
-    touched();
+  if (moves.owns(e.pointerId)) {
+    moves.drag(e);
     return;
   }
 
@@ -1576,27 +1397,26 @@ function onUp(e) {
     pinch.a = null;
     pinch.b = null;
     pinch.start = 0;
-    lastTouchAt = now;
+    social.lastTouchAt = now;
     rig.markTouched(now);
     return;
   }
 
-  if (e.pointerId === pad.id) {
-    pad.id = null;
-    hideStick();
+  if (moves.owns(e.pointerId)) {
     // A tap in the corner with no push used to mean "walk over there". It
     // means nothing now: the stick is for walking and a tap is for pointing,
     // and the pad's corner is the one place a tap could never have been
     // pointing at anything anyway.
     //
-    // With ONE exception, and it is the reason the pad keeps `grab`: a thing
+    // With ONE exception, and it is the reason the pad keeps a `grab`: a thing
     // lying at your feet is pointing at something, and the pad's corner is
     // exactly where it appears. Let go without having pushed the stick and the
     // press was a tap on that; push the stick and it was a walk, and the piece
-    // is still there to be tapped when you come back.
-    if (pad.grab && pad.travel < CONFIG.player.tapSlop) takeLoose(pad.grab);
-    pad.grab = null;
-    lastTouchAt = now;
+    // is still there to be tapped when you come back. `release` is what decides
+    // which of the two it was, and hands back the piece only for a tap.
+    const grab = moves.release();
+    if (grab) takeLoose(grab);
+    social.lastTouchAt = now;
     rig.markTouched(now);
     return;
   }
@@ -1629,8 +1449,8 @@ function onUp(e) {
       // The two used to sit a couple of inches either side of each other and it
       // made no difference: one pace forward tripped it just the same. The bug
       // never depended on which side of the line the standoff was.
-      greetedKey = bot.spec.key;
-      greetCooldownUntil = now + CONFIG.social.greetCooldown;
+      social.greetedKey = bot.spec.key;
+      social.greetCooldownUntil = now + CONFIG.social.greetCooldown;
 
       // A TAP IS A VISIT, WHATEVER YOU ARE CARRYING.
       //
@@ -1708,7 +1528,7 @@ function onUp(e) {
   }
 
   clearLook();
-  lastTouchAt = now;
+  social.lastTouchAt = now;
   rig.markTouched(now);
 }
 
@@ -1760,8 +1580,7 @@ function onPress(el, fn) {
   el.addEventListener('click', () => {
     fn();
     const now = performance.now();
-    lastTouchAt = now;
-    saidLongIdle = false;
+    social.touched(now);
     rig.markTouched(now);
   });
 }
@@ -2019,8 +1838,7 @@ function cancelDrag() {
 
 function tapSlot(i) {
   const now = performance.now();
-  lastTouchAt = now;
-  saidLongIdle = false;
+  social.touched(now);
   rig.markTouched(now);
 
   // A pending "how many?" is answered by its own buttons; a tap anywhere else in
@@ -2298,43 +2116,9 @@ document.addEventListener('keydown', (e) => {
 // your thumb lands in the lower-left, so there is never anything to reach for.
 // The canvas owns the touch, which is what lets a character under your thumb
 // take priority over it.
-const stick = document.getElementById('stick');
-const knob = document.getElementById('stick-knob');
-const stickOrigin = { x: 0, y: 0 };
-
-function inStickZone(e) {
-  const z = CONFIG.player.stickZone;
-  return e.clientX < window.innerWidth * z.x && e.clientY > window.innerHeight * z.y;
-}
-
-function showStick(e) {
-  stickOrigin.x = e.clientX;
-  stickOrigin.y = e.clientY;
-  stick.style.left = `${e.clientX}px`;
-  stick.style.top = `${e.clientY}px`;
-  knob.style.transform = '';
-  stick.classList.add('is-live');
-}
-
-function readStick(e) {
-  let dx = e.clientX - stickOrigin.x;
-  let dy = e.clientY - stickOrigin.y;
-  const max = CONFIG.player.stickRadius;
-  const len = Math.hypot(dx, dy);
-  if (len > max) { dx *= max / len; dy *= max / len; }
-  knob.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
-
-  let nx = dx / max;
-  let ny = dy / max;
-  if (Math.hypot(nx, ny) < CONFIG.player.deadzone) { nx = 0; ny = 0; }
-  rig.setMove(nx, ny);
-}
-
-function hideStick() {
-  stick.classList.remove('is-live');
-  knob.style.transform = '';
-  rig.setMove(0, 0);
-}
+// Its geometry, its knob, and the keyboard that now says the same thing all
+// moved to move-input.js — see `moves` at the top of the file, which the pointer
+// handlers hand their touches to.
 
 // Two rungs again — ground and sky — because the room stopped being a rung:
 // it is a place you walk into, not a mode you switch out of. It works from
@@ -2350,6 +2134,9 @@ onPress(viewToggle, () => {
 // Both on pointerdown rather than click, because both are about NOW: a jump
 // that waits for the finger to come back up lands after the moment that asked
 // for it, and arming a run belongs to the press, not the release.
+// Kept here only to be PAINTED — see the loop, which lights the sprint off the
+// rig every frame and greys both off the ground. What they DO is wired in
+// move-input.js, beside the keys that do the same two things.
 const jumpBtn = document.getElementById('jump-btn');
 const sprintBtn = document.getElementById('sprint-btn');
 
@@ -3167,8 +2954,8 @@ function talkToMate() {
   // Frame the conversation — step in if you are back a way, square up either
   // way. See closeIn, which is careful never to walk you backwards.
   rig.closeIn(bot.ch);
-  greetedKey = bot.spec.key;
-  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  social.greetedKey = bot.spec.key;
+  social.greetCooldownUntil = now + CONFIG.social.greetCooldown;
   // Absorbed while they are still answering the last one — see pokeBack. The
   // framing above happens either way, because squaring up on a friend who is
   // mid-sentence is exactly right.
@@ -3194,8 +2981,8 @@ function handToMate() {
   const bot = mate.bot;
   const now = performance.now();
   rig.closeIn(bot.ch);
-  greetedKey = bot.spec.key;
-  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  social.greetedKey = bot.spec.key;
+  social.greetCooldownUntil = now + CONFIG.social.greetCooldown;
   // A unique is LENT and a stackable is GIVEN — the same split the tap used to
   // make silently, now made by a button that said which it would be.
   //
@@ -3230,8 +3017,8 @@ function swapWithMate() {
   const key = bot.spec.key;
   const now = performance.now();
   rig.closeIn(bot.ch);
-  greetedKey = key;
-  greetCooldownUntil = now + CONFIG.social.greetCooldown;
+  social.greetedKey = key;
+  social.greetCooldownUntil = now + CONFIG.social.greetCooldown;
   const again = Date.now() - inventory.lastGiven(key) < CONFIG.social.giftCooldown;
   if (!again) inventory.markGiven(key);
   inventory.setUnique(mine, { state: 'given', to: key });
@@ -3596,39 +3383,19 @@ function syncInteract() {
   }
 }
 
-// The hop, and now the only way to make one — the double tap that used to
-// share the verb is gone with tap-to-walk. `hopSeen` still answers it, because
-// a hop is a wave whoever started it.
-jumpBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  touched();
-  // rig.hop refuses off the ground on its own, so this needs no gate: the
-  // authority on whether you can jump is the thing doing the jumping.
-  if (rig.hop()) hopSeen();
-});
-
-// A tap that ARMS the run, not a hold that is one: press it and your movement
-// is a sprint until you stop moving, at which point it stands down by itself —
-// the rig owns that, see the disarm in _walk — so there is no run mode left
-// switched on to rediscover three strolls later. Pressing again while armed
-// disarms, for the change of mind between arming and setting off.
+// The jump and the run are wired in move-input.js, where the space bar and the
+// shift key ask for the same two things. Both handlers and the reasoning behind
+// them went with the verbs.
 //
-// The lit state is painted from the rig every frame (see the loop) rather
-// than toggled here, because the rig can stand the sprint down without being
-// asked, and a button still lit after the run ended would be lying about the
-// one thing it exists to say.
-sprintBtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  touched();
-  // Gated here as well as hidden in CSS, because `pointer-events: none` is a
-  // statement about the mouse and not about the app: it stops a thumb, and it
-  // does not stop a dispatched event, a stylesheet that failed to load, or the
-  // next person to reach for `display` instead. A run armed in the sky sits
-  // there doing nothing visible and then fires the instant you land — so the
-  // rule lives with the state it protects.
-  if (!rig.isFirstPerson) return;
-  rig.sprintOn = !rig.sprintOn;
-});
+// A tap ARMS the run rather than holding one: press it and your movement is a
+// sprint until you stop moving, at which point it stands down by itself — the
+// rig owns that, see the disarm in _walk — so there is no run mode left switched
+// on to rediscover three strolls later.
+//
+// The lit state is painted from the rig every frame (see the loop) rather than
+// toggled at the press, because the rig can stand the sprint down without being
+// asked, and a button still lit after the run ended would be lying about the one
+// thing it exists to say.
 
 // --- the clock, and the day it opens into
 //
@@ -3995,8 +3762,7 @@ timeTrack.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   e.stopPropagation();
   const now = performance.now();
-  lastTouchAt = now;
-  saidLongIdle = false;
+  social.touched(now);
   rig.markTouched(now);
 });
 
@@ -4142,7 +3908,7 @@ startEl.addEventListener('click', () => {
   setTimeout(() => controls.classList.add('is-ready'), 260);
 
   const now = performance.now();
-  lastTouchAt = now;
+  social.lastTouchAt = now;
   rig.markTouched(now);
   // The same tap that starts the app is the one iOS requires before it will
   // hand over device tilt.
@@ -4162,129 +3928,19 @@ startEl.addEventListener('click', () => {
 //
 // Lifted out of frame() whole when the room arrived, and unchanged besides —
 // the alternative was a wrapper that put ninety lines out by one indent.
-function updateCast(now) {
-  playerDir.copy(rig.anchor);
-
-  // Walking up to somebody should be noticed. Without this, greetings only
-  // ever happened on teleport and going over on foot felt ignored.
-  if (rig.isFirstPerson) {
-    let near = null;
-    let nearD = Infinity;
-    for (const b of bots) {
-      // Never through the wall: the nearest character can be one sat at home
-      // a metre of masonry away, and being greeted by them from your side of
-      // it would be the house talking.
-      //
-      // ...and never somebody asleep, which is what `isVisible` is answering
-      // here. Over the horizon it changes nothing — nobody that far off is
-      // inside greetArc — but a sleeper is a body standing right where you are
-      // walking, and without this, creeping up on Chiikawa at three in the
-      // morning is met with 「おかえり」 from a drawing of him under a quilt.
-      if (!b.ch.isVisible || throughWall(b.ch)) continue;
-      const d = arcBetween(b.ch.dir, playerDir);
-      if (d < nearD) { nearD = d; near = b; }
-    }
-    const s = CONFIG.social;
-    if (near && nearD < s.greetArc) {
-      if (greetedKey !== near.spec.key && now > greetCooldownUntil && !anyoneSpeaking()) {
-        greetedKey = near.spec.key;
-        greetCooldownUntil = now + s.greetCooldown;
-        rig.focus = near.ch;
-        // Walking in on somebody at home is its own moment with its own bank —
-        // 「いらっしゃい」, not 「やあ」. The same proximity fires it, because
-        // walking in IS walking up to them now; the roof overhead is what
-        // picks the words.
-        const home = insideHouse() && globe.isInside(near.ch.dir);
-        speak(near, home ? 'indoor' : 'greetBack', now);
-      }
-    } else if (nearD > s.greetClearArc) {
-      greetedKey = null;   // wander off and coming back counts as new
-    }
-
-    // Arriving at a shore.
-    const wet = playerAtWater();
-    if (wet && !wasInWater && now > waterQuietUntil && !anyoneSpeaking()) {
-      const witness = bots.find((b) => onScreen(b.ch));
-      if (witness) {
-        speak(witness, 'water', now);
-        waterQuietUntil = now + s.waterCooldown;
-      }
-    }
-    wasInWater = wet;
-  }
-
-  // Two of them meeting. Only started when you can actually watch it happen,
-  // otherwise the cooldown gets spent on a conversation nobody saw.
-  if (pendingReply && now > pendingReply.at) {
-    const reply = pendingReply;
-    pendingReply = null;
-    speak(reply.bot, 'meetReply', now);
-    // Both of them stay put until the answer has been read too. meetHoldMs
-    // was measured from the opening line, and a reply that now waits for that
-    // line to finish can outlast it — which had the pair of them turning and
-    // strolling away from each other mid-sentence.
-    const until = now + reply.bot.dlg.durationMs;
-    reply.bot.ch.busyUntil = Math.max(reply.bot.ch.busyUntil, until);
-    reply.to.ch.busyUntil = Math.max(reply.to.ch.busyUntil, until);
-  }
-  if (!pendingReply && now > meetUntil && !anyoneSpeaking()) {
-    const s = CONFIG.social;
-    for (let i = 0; i < bots.length && !pendingReply; i++) {
-      for (let j = i + 1; j < bots.length; j++) {
-        const a = bots[i];
-        const b = bots[j];
-        if (a.ch.attentive || b.ch.attentive) continue;
-        // NOT ON A WALK WITH A DEADLINE. The hold this sets is already ignored
-        // by somebody in a hurry, so they would not have stopped — but two
-        // friends passing at midnight striking up a conversation neither of
-        // them halts for is worse than no conversation: it is a chat held by
-        // two people walking away from each other. At that hour, and in a
-        // downpour, they have somewhere to be.
-        if (a.ch.hurrying || b.ch.hurrying) continue;
-        if (arcBetween(a.ch.dir, b.ch.dir) > s.meetArc) continue;
-        if (!onScreen(a.ch) && !onScreen(b.ch)) continue;
-        speak(a, 'meet', now);
-        // Answer once the opening line has been read, not partway through it.
-        // speak() silences whoever else is talking, so a reply on a timer
-        // counted from the start arrived on top of the line it was answering
-        // and cut it off — which made the one exchange in the app that is
-        // genuinely a conversation the hardest thing in it to follow.
-        const replyAt = now + a.dlg.durationMs + s.meetReplyMs;
-        pendingReply = { bot: b, to: a, at: replyAt };
-        // Stood still at least until the answer is due; the reply above
-        // extends this again once its own length is known.
-        a.ch.busyUntil = Math.max(now + s.meetHoldMs, replyAt);
-        b.ch.busyUntil = a.ch.busyUntil;
-        meetUntil = now + s.meetCooldown;
-        break;
-      }
-    }
-  }
-  if (!anyoneSpeaking() && now > nextChatterAt) {
-    const focused = rig.focus ? byChar.get(rig.focus) : null;
-    let pick = (focused && Math.random() < CONFIG.dialogue.focusBias)
-      ? focused
-      : bots[Math.floor(Math.random() * bots.length)];
-    // Nobody talks from somewhere you cannot see them — nor, on foot, from
-    // so far off that their bubble points at a speck on the horizon.
-    if (!canChatter(pick.ch)) pick = bots.find((b) => canChatter(b.ch));
-    if (pick) speakAmbient(pick, now);
-    else scheduleNext(now);
-  }
-
-  if (!saidLongIdle && !anyoneSpeaking()
-      && now - lastTouchAt > CONFIG.dialogue.longIdleMs) {
-    saidLongIdle = true;
-    // Whoever you are visiting, but only if they are still there to be seen.
-    // focus is never cleared — walk away and it still names the last person
-    // you went to — so without the check a 「まだ いる…?」 could be spoken by
-    // somebody round the far side of the planet, where positionBubbles hides
-    // the bubble and the line is simply lost.
-    const focused = rig.focus && onScreen(rig.focus) ? byChar.get(rig.focus) : null;
-    const pick = focused || bots.find((b) => onScreen(b.ch));
-    if (pick) speak(pick, 'longIdle', now);
-  }
-}
+// It is Social.update now, reached through the `updateCast` delegate above so
+// the frame still reads the same. The paragraph stays because it is the reason
+// the whole block is gated on being outdoors, and that reasoning is about this
+// app's geometry rather than about the scheduler.
+//
+// ONE THING CHANGED IN THE MOVE, and it is a fix rather than a transcription:
+// the two lines that held a pair of friends still through their conversation
+// wrote `ch.busyUntil = Math.max(...)`. That field no longer exists — character.js
+// replaced it with the hold ledger, where the same booking is
+// `hold('talk', until, true)` — so what was left here had been quietly writing a
+// property nobody reads. Two of them meeting still spoke, and then both walked
+// off mid-exchange, which is exactly the bug the reply timing above was written
+// to prevent. Social does it through the ledger.
 
 // updateGuests stood here — the indoor twin of updateCast, for a room that
 // was another world. One world now, one loop: walking in on whoever is home
@@ -4316,6 +3972,11 @@ function frame(now) {
   // One rig, always driving. The doorway used to take the camera here for its
   // choreographed passage; the passage is a doorway you walk through now, so
   // there is nothing to take it FOR.
+  // The keys' turn at the throttle, before the rig reads it. A thumb on the pad
+  // writes on its own events and wins outright while it is down — see the
+  // precedence note in move-input.js — so on a touch device this is a no-op.
+  moves.tick();
+
   rig.update(dt, now);
   const inside = insideHouse();
 
@@ -4420,96 +4081,9 @@ function frame(now) {
   }
 
   // You. Only there at all once you are high enough not to be standing inside
-  // your own head — see BODY_LO/BODY_HI — and on your own patch of ground
-  // rather than under the camera, see youDir.
-  const youFade = Math.min(1, Math.max(0, (rig.alt - BODY_LO) / (BODY_HI - BODY_LO)));
-
-  // The leash tightens as you come down, and reaching zero exactly where the
-  // body finishes fading is what removes the last seam: on the way up the body
-  // is released to stay behind, and on the way down it is drawn home, arriving
-  // under your feet at the very moment it stops being visible. Nothing ever
-  // jumps, and standing where you land is guaranteed rather than corrected —
-  // a leash of zero IS "follow the anchor exactly", so the walk on the ground
-  // needs no separate case.
-  const leash = BODY_LEASH * youFade;
-  const gap = youDir.angleTo(rig.anchor);
-  if (gap > leash) {
-    _youAxis.crossVectors(youDir, rig.anchor);
-    // Zero only if the two are already the same direction, or opposed — and
-    // opposed cannot happen, since the leash is enforced every frame from a
-    // gap that starts at nothing.
-    if (_youAxis.lengthSq() > 1e-12) {
-      youDir.applyAxisAngle(_youAxis.normalize(), gap - leash).normalize();
-    }
-  }
-
-  // The transit rules — see WATER_ENTER above. After the tow and before the
-  // speed is read, so a detour is part of the motion the hop plays for. One
-  // circle per kind per frame: a slide that lands in a neighbouring circle —
-  // trees come in stands — is that circle's business next frame.
-  if (youFade > 0) {
-    const carry = (CARRY_SPEED / CONFIG.globe.radius) * (dt / 1000);
-    const wall = inBuilding(youDir, CONFIG.wander.wallKeep);
-    if (wall) slideAround(youDir, wall, rig.anchor, CONFIG.wander.wallKeep, carry);
-    // The trunk rather than the canopy — see SOLIDS in sphere.js. This used to
-    // ask the sightline list, which is the whole drawn width, so a body being
-    // towed past a tree swung out to the edge of its LEAVES: a stride and a half
-    // of visible detour around thin air, and in the opposite direction from the
-    // camera, which walked straight on through. Now that the camera is stopped
-    // at the trunk the two agree, and this fires only where it still can — while
-    // you are airborne and the leash is long enough for the body to lag across
-    // something you have already flown over.
-    const prop = inSolid(youDir, CONFIG.wander.wallKeep);
-    if (prop) slideAround(youDir, prop, rig.anchor, CONFIG.wander.wallKeep, carry);
-    // Over water, which is what turns a walk into a crossing — the body is
-    // towed and the glide comes on however slowly you are moving. A frozen pond
-    // is not a crossing: you are standing on it. Gliding over ice you could
-    // walk on is the one thing that would give the whole trick away.
-    let wet = false;
-    if (!pondsFrozen()) {
-      for (const lake of CONFIG.lakes) {
-        if (inLake(youDir, lake, overWater ? WATER_STAY : WATER_ENTER)) { wet = true; break; }
-      }
-    }
-    overWater = wet;
-
-    // Carry the jump through to the far shore — see CARRY_SPEED.
-    if (overWater && dt > 0) {
-      const on = Math.min(youDir.angleTo(rig.anchor), carry);
-      if (on > 1e-6) {
-        _youAxis.crossVectors(youDir, rig.anchor);
-        if (_youAxis.lengthSq() > 1e-12) {
-          youDir.applyAxisAngle(_youAxis.normalize(), on).normalize();
-        }
-      }
-    }
-  } else {
-    overWater = false;
-  }
-
-  if (dt > 0) {
-    const speed = (_prevYou.angleTo(youDir) * CONFIG.globe.radius * 1000) / dt;
-    youMoving = speed > BODY_STEP;
-    // Harder to enter than to stay in — see GLIDE_DROP. Water overrides the
-    // speed question entirely: however slowly you are towed, a crossing flies.
-    gliding = overWater || speed > (gliding ? GLIDE_SPEED * GLIDE_DROP : GLIDE_SPEED);
-    _prevYou.copy(youDir);
-  }
-  glide += ((gliding ? 1 : 0) - glide) * (1 - Math.exp(-dt / GLIDE_EASE_MS));
-  // Standing and walking are the default; the glide is the exception, and it is
-  // speed that buys it. The fade multiplies the lift as well as the pose, so a
-  // body still condensing into view cannot be caught halfway up in mid-air, and
-  // one on the ground is always on its feet — which is also what a mirror or a
-  // still pool will want to reflect.
-  you.standAt(youDir, dt, {
-    walking: youMoving,
-    lift: GLIDE_LIFT * glide * youFade,
-    posture: youFade > 0 && glide > 0.5 ? 'fly' : 'stand',
-  });
-  you.fade = youFade;
-  you.root.visible = youFade > 0.004;
-  if (you.root.visible) you.update(dt, now, globe.camera);
-
+  // your own head, and on your own patch of ground rather than under the camera
+  // — the fade, the leash, the transit rules and the glide are all body.js's.
+  body.update(dt, now, globe.camera);
   // The anchor comes from the rig a few lines up, and has to: the sky is hung
   // off where you are stood, so it is stale by a frame if read any earlier.
   //
@@ -4541,12 +4115,22 @@ function frame(now) {
   // decided AFTER the focus is, and the focus is settled with the buttons.
 
   // Shove the bear about, if your feet are anywhere near it. Only from the
-  // ground and only from indoors, which is where the only loose thing in the
-  // world is lying: shoving furniture from the sky is not a verb this app has,
-  // and `youDir` rather than the camera's anchor because it is your BODY that
+  // ground: shoving furniture from the sky is not a verb this app has, and the
+  // BODY's spot rather than the camera's anchor because it is your body that
   // does the shoving — the two agree while you are stood, and where they part
   // company (mid-flight) the answer is that you are not touching anything.
-  globe.nudgeLoose(insideHouse() ? youDir : null, dt);
+  //
+  // IT USED TO ALSO REQUIRE BEING INDOORS, and that had stopped being true long
+  // before it stopped being written. The gate said `insideHouse()`, on the
+  // reasoning that the room is "where the only loose thing in the world is
+  // lying" — which it was, when the loose pieces were furniture. The carryable
+  // uniques ended that: a bear can be set down anywhere on the planet, and
+  // nudgeLoose was taught the outdoor case at the time (see the room clamp,
+  // which asks WHICH room and steps aside when the answer is none). The gate was
+  // simply never opened to match, so the one thing that could reach that code
+  // out of doors — your shins — could not. A bear on the grass was a bear you
+  // walked straight through.
+  globe.nudgeLoose(rig.isFirstPerson ? body.dir : null, dt);
 
   // The day runs on its own — it is the one thing here that does — and the
   // interior reads its light off the same blend the sky does (see tintIn in
@@ -4653,10 +4237,7 @@ function frame(now) {
     // finger still feeding one. Dropping the id as well as the drawing is what
     // stops a thumb that never lifted from steering an invisible pad the moment
     // you land again; the pointer just goes inert until it comes up.
-    if (!rig.isFirstPerson && pad.id !== null) {
-      pad.id = null;
-      hideStick();
-    }
+    if (!rig.isFirstPerson) moves.cancel();
 
     positionBubbles();
     // Only down on the grass, and only under the sky. From the sky the whole
@@ -4776,7 +4357,13 @@ if ('serviceWorker' in navigator && !IS_LOCAL) {
 // defined on the deployed site.
 if (IS_LOCAL) {
   window.hidamari = {
-    bots, rig, globe, household, you, fishing, inventory,
+    // `social` is here for the reason social.js was written: a conversation's
+    // state used to be a dozen module-level `let`s that nothing could reach, so
+    // "why is nobody talking" had no answer short of adding a log line. Now the
+    // cooldowns are fields on one object — `meetUntil`, `nextChatterAt`,
+    // `greetedKey` — which can be read, and set to 0 to try the thing again
+    // without waiting out the cooldown.
+    bots, rig, globe, household, you, fishing, inventory, social,
     // THE SKY, by hand. `sky('rain')` holds it there; `sky()` gives it back to
     // the schedule. Every key in WEATHERS is fair game — see weather.js.
     //
