@@ -352,6 +352,10 @@ const PHASE_START = {
 // the planet rather than to wherever a paused timer had got to.
 let hand = null;
 
+// A real day, in milliseconds. Named because two things divide by it and a
+// magic 86400000 in either would be a number you have to decode.
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // The hand-wound hour, wrapped back into a day.
 function handHours() {
   const turned = ((performance.now() - hand.since) / CONFIG.daylight.fastDayMs) * 24;
@@ -384,6 +388,29 @@ export function nowHours() {
 // running. A fast day is not an automatic one.
 export function isAuto() {
   return hand === null;
+}
+
+// HOW FAST WORLD TIME IS RUNNING against the wall clock, as a multiplier: 1 when
+// the real clock is keeping the hour, and 120 on a hand-wound day, which turns
+// twenty-four hours in twelve minutes.
+//
+// It exists because `nowHours` above was only half an answer. Anything asking
+// what time it is got dragged along with the scrubber; anything measuring how
+// long something TAKES was still counting wall milliseconds, and the two are the
+// same number right up until somebody sets the hour by hand.
+//
+// That split was a real bug rather than a tidiness point. The snow's melt is a
+// twenty-minute time constant, which on a fast day is a forty-HOUR one in world
+// terms — so winter ended on the schedule and the drifts stood through days of
+// summer sky, because the sky was sprinting and the thaw was not. Every clock
+// that measures a duration the schedule can outrun has to be scaled by this: see
+// the aftermath block in weather.js, which is all three of them.
+//
+// Worked out from `fastDayMs` rather than stated, so the one number that sets
+// how long a fast day takes goes on setting it — see handHours, which is the
+// same division.
+export function clockRate() {
+  return hand ? DAY_MS / CONFIG.daylight.fastDayMs : 1;
 }
 
 export function setPhaseOverride(phase) {

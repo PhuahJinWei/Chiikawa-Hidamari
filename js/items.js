@@ -44,15 +44,49 @@ import { FISH_SPECIES } from './config.js';
 import { paintFishCard, paintKusa, paintSheet } from './art.js';
 import { IMG } from './assets.js';
 
+// ONE LINE ABOUT EACH THING, for the panel that opens when you tap a slot.
+//
+// The names in this table are descriptions — 「しましまの おさかな」 is what the
+// fish looks like — so a detail panel that showed only the name would be the
+// slot's own label read back at you. The note is the part you could not have got
+// from looking: where it turns up, what it is for, whose it is.
+//
+// Register is the app's: hiragana, small words, no kanji a child would trip on,
+// and one sentence rather than a paragraph. They are FLAVOUR and nothing reads
+// them for a fact — no code branches on a note — so they are safe to rewrite
+// freely, which is the point of keeping them in one block instead of scattered
+// through the table.
+//
+// The fish live in their own map because their rows are GENERATED from the
+// roster in config.js and there is nowhere in a generated row to write one by
+// hand. Keyed by species id, which is also the item id — see the note below.
+const FISH_NOTE = {
+  peachCarp: 'ひかりに すかすと ほんのり ももいろ。',
+  apricotMoonspotCarp: 'せなかの まるい もようが つきみたい。',
+  goldenDashfin: 'すいすい およぐ。とても はやい。',
+  limeBlossomfin: 'はるの くさと おなじ いろを している。',
+  limebarMinnow: 'しましまが いっぴきずつ ちがう。',
+  mintPearlMinnow: 'みずたまが ぷつぷつ ならんでいる。',
+  skyTeardropFish: 'そらを ひとくち のんだ みたいな いろ。',
+  blueButtonPuffer: 'びっくりすると もっと まんまるに なる。',
+  lilacNeedlefish: 'ほそくて ながい。えだと まちがえそう。',
+  lavenderPebblefin: 'ゆうがたの みずうみに よく にあう いろ。',
+  pinkRipplefin: 'からだの なみが みずの なみと かさなる。',
+  blushspotLoach: 'はなびらが ついたまま およいでいる みたい。',
+};
+
 export const ITEMS = {
   ...Object.fromEntries(FISH_SPECIES.map((sp) => [
-    sp.id, { kind: 'stackable', fish: true, name: sp.name },
+    sp.id, { kind: 'stackable', fish: true, name: sp.name, note: FISH_NOTE[sp.id] },
   ])),
 
   // 草むしり. The humblest thing a pouch can hold and the most canonical
   // labour on this planet — pulled out of the meadow itself, one tuft at a
   // time, and received by the cast with complete sincerity.
-  kusa: { kind: 'stackable', name: 'つんだ くさ' },
+  kusa: {
+    kind: 'stackable', name: 'つんだ くさ',
+    note: 'くさむしりの おしごとで つむ。つんでも つんでも はえてくる。',
+  },
 
   // The two mushrooms, and they are two ITEMS rather than one because they are
   // two drawings: a red one and a brown one are two things to find, and folding
@@ -62,8 +96,14 @@ export const ITEMS = {
   //
   // `cover` names the drawing in IMG, so the card in your hand is the same
   // drawing that was standing in the grass.
-  kinoko1: { kind: 'stackable', cover: 'mushroom1', name: 'あかい きのこ' },
-  kinoko2: { kind: 'stackable', cover: 'mushroom2', name: 'ちゃいろい きのこ' },
+  kinoko1: {
+    kind: 'stackable', cover: 'mushroom1', name: 'あかい きのこ',
+    note: 'くさむらに ぽつんと はえている。めだつ いろ。',
+  },
+  kinoko2: {
+    kind: 'stackable', cover: 'mushroom2', name: 'ちゃいろい きのこ',
+    note: 'おちばの したに かくれている。みつけにくい。',
+  },
 
   // THE UNIQUES — see the kind's note above. `art` names the loose furniture
   // model this item wears; an explicit furniture `item` id distinguishes
@@ -71,10 +111,22 @@ export const ITEMS = {
   // of each item id in the world, which is the entire meaning of the kind. They are
   // never in the pouch: a unique is in its spot, in your hand, set down
   // somewhere, or lent to a friend on a timer.
-  bear: { kind: 'unique', art: 'plushie', name: 'くまさん' },
-  kettle: { kind: 'unique', art: 'teapot', name: 'やかん' },
-  chiikawaBook: { kind: 'unique', art: 'openbook', name: 'ほん' },
-  chiikawaHouseKey: { kind: 'unique', art: 'housekey', name: 'おうちのかぎ' },
+  bear: {
+    kind: 'unique', art: 'plushie', name: 'おきにいりの ぬいぐるみ',
+    note: 'ちいかわの たいせつな ぬいぐるみ。おふとんの そばが ていいち。',
+  },
+  kettle: {
+    kind: 'unique', art: 'teapot', name: 'やかん',
+    note: 'ハチワレの やかん。どうくつぐらしにも おゆは いる。',
+  },
+  chiikawaBook: {
+    kind: 'unique', art: 'openbook', name: 'くさむしりけんていの ほん',
+    note: 'ちいかわが 5きゅうを めざして よむ ほん。らくがきも たいせつ。',
+  },
+  chiikawaHouseKey: {
+    kind: 'unique', art: 'housekey', name: 'おうちのかぎ',
+    note: 'けんしょうで あたった おうちの かぎ。なくしたら むちゃたいへん。',
+  },
   // The floor lantern. It was deliberately left out of this group for a while,
   // on the reasoning that walking off with the room's only lamp is a different
   // feature — and it is, but it is this one: a light you can carry is the whole
@@ -83,26 +135,51 @@ export const ITEMS = {
   //
   // The bulb is NOT here and should not be. It is screwed to the ceiling, which
   // is the difference between a lamp and a light fitting.
-  lamp: { kind: 'unique', art: 'lantern', name: 'ランプ' },
+  lamp: {
+    kind: 'unique', art: 'lantern', name: 'ランタン',
+    note: 'もちあるける あかり。ひるに つけても ちょっと うれしい。',
+  },
   // Hachiware's copy uses the same model and name, but a separate id is what
   // lets the inventory track the two physical lanterns independently.
-  hachiwareLamp: { kind: 'unique', art: 'lantern', name: 'ランプ' },
-  // Hachiware's two rubbish bags are separate physical objects and use
-  // separate art because their body profiles and colours differ.
-  trashBag: { kind: 'unique', art: 'trashbag', name: 'ごみぶくろ' },
-  trashBagAlt: { kind: 'unique', art: 'trashbag2', name: 'ごみぶくろ' },
+  hachiwareLamp: {
+    kind: 'unique', art: 'lantern', name: 'ランタン',
+    note: 'ハチワレの どうくつを てらす。ドアは なくても あかりは ある。',
+  },
+  // The two tied cave bags are separate physical objects and use separate art
+  // because their body profiles and colours differ. Their contents are never
+  // identified, so the player-facing copy does not assume they are rubbish.
+  trashBag: {
+    kind: 'unique', art: 'trashbag', name: 'むすんだ ふくろ',
+    note: 'ハチワレの どうくつに ある。なかみは ひみつ。',
+  },
+  trashBagAlt: {
+    kind: 'unique', art: 'trashbag2', name: 'むすんだ ふくろ',
+    note: 'もう ひとつの ふくろ。こちらも きっちり ひみつ。',
+  },
   // Chiikawa's own pink sasumata. Its separate id is what makes the physical
   // weapon persist between its home spot, the hand, and placed locations.
-  chiikawaWeapon: { kind: 'unique', art: 'pinkweapon', name: 'ピンクのさすまた' },
+  chiikawaWeapon: {
+    kind: 'unique', art: 'pinkweapon', name: 'ピンクのさすまた',
+    note: 'ちいかわの とうばつの どうぐ。ハチワレと おそろい。',
+  },
   // Hachiware's own three-string guitar: one physical instrument that moves
   // between its cave-floor pose, the player's hand, and a character's hands.
-  hachiwareGuitar: { kind: 'unique', art: 'guitar', name: 'ギター' },
+  hachiwareGuitar: {
+    kind: 'unique', art: 'guitar', name: 'ギター',
+    note: 'ハチワレが「ひとりごつ」を ひいた ギター。げんは みっつ。',
+  },
   // Hachiware's compact camera is likewise one persistent physical belonging.
   // Its supplied slot illustration is registered separately in assets.js.
-  hachiwareCamera: { kind: 'unique', art: 'camera', name: 'カメラ' },
+  hachiwareCamera: {
+    kind: 'unique', art: 'camera', name: 'カメラ',
+    note: 'ハチワレが ずっと ほしかった ほんもの。きずも あじ。',
+  },
   // Hachiware's blue counterpart is another physical weapon, not a recolour of
   // the same inventory entry, so both can exist and be carried independently.
-  hachiwareWeapon: { kind: 'unique', art: 'blueweapon', name: 'ブルーのさすまた' },
+  hachiwareWeapon: {
+    kind: 'unique', art: 'blueweapon', name: 'ブルーのさすまた',
+    note: 'ハチワレの とうばつの どうぐ。ちいかわと おそろい。',
+  },
 };
 
 // Species index → item id, for the one place that meets a fish as a fish rather

@@ -130,6 +130,11 @@ export class Snowfield {
     this.pushAt = 0;
     // Fill-in owed but not yet worth spending — see _fill.
     this.owed = 0;
+    // ...and the same debt PER WARM SPOT — see `thaw`. One counter each rather
+    // than one shared, because each lamp melts at its own brightness and a dim
+    // one's share of a shared debt is exactly the sub-quantum step that rounds
+    // away to nothing.
+    this.warm = new Map();
     this.clock = 0;
     // Whether a fall has been laid into the map yet. See `fresh`.
     this.laid = false;
@@ -263,6 +268,7 @@ export class Snowfield {
     }
 
     this.was.clear();
+    this.warm.clear();
     this.laid = true;
     this.dirty = true;
   }
@@ -275,6 +281,7 @@ export class Snowfield {
     this.g.fillStyle = '#ffffff';
     this.g.fillRect(0, 0, W, H);
     this.was.clear();
+    this.warm.clear();
     this.laid = false;
     this.dirty = true;
   }
@@ -353,6 +360,48 @@ export class Snowfield {
     this.dirty = true;
   }
 
+  // ------------------------------------------------------------- a warm spot
+  //
+  // LIGHT LANDING ON SNOW TAKES IT AWAY. Given every lamp currently reaching the
+  // ground, thins the field under each of them.
+  //
+  // It is the same blob the shelter under a tree is drawn with, and that is the
+  // point of doing it here rather than as a new kind of thing: a melt ring is
+  // not a decal laid over the snow, it is snow that is not there, so it inherits
+  // the depth, the displaced shell, the footprints crossing it and the hour's
+  // own light for free. Walk into a lamp's ring in a deep winter and the ground
+  // steps down, because the shell is displaced by this same map.
+  //
+  // WHAT MAKES IT A CYCLE rather than a slow erasure is that nothing here fights
+  // `_fill`. A lamp opens its ring while the sky is clear; the next fall closes
+  // it, at `fillRate`, from the same map. So a lantern left burning through a
+  // still night clears a patch of grass by morning and the next snow buries it
+  // again, and neither had to know about the other.
+  //
+  // ONE DEBT PER SPOT, and this is the file's own trap for the second time — see
+  // `_fill` for the whole story. A dim lamp asked for its share of a single
+  // shared debt is precisely the sub-quantum step that a canvas rounds away, and
+  // it would have gone on rounding it away forever. Each spot saves up
+  // separately until its own next wash is worth drawing.
+  //
+  // `flowMs` is WORLD time, like the fill it opposes. `count` is how many of
+  // `spots` are live this frame — the caller keeps a pool and writes over it
+  // rather than building a list a frame, so the array is longer than the answer.
+  thaw(spots, flowMs, count = spots.length) {
+    if (!this.laid || !count) return;
+    const rate = CONFIG.weather.thawRate;
+    const at = { x: 0, y: 0, stretch: 1 };
+    for (let i = 0; i < count; i++) {
+      const s = spots[i];
+      const owed = (this.warm.get(s.key) || 0) + ((flowMs / 1000) * s.k * rate);
+      if (owed < FILL_STEP) { this.warm.set(s.key, owed); continue; }
+      this.warm.set(s.key, 0);
+      this._at(s.dir, at);
+      const r = this._radii(s.r, at);
+      this._blob(at.x, at.y, r.rx, r.ry, Math.min(0.35, owed), false);
+    }
+  }
+
   // Everything per frame that is not a walker: the fill-in, and pushing the
   // map to the GPU if anything has touched it.
   //
@@ -361,6 +410,24 @@ export class Snowfield {
   // changed or the whole field did. Six a second is past the point anybody can
   // see a print appear, and on the vast majority of frames `dirty` is false and
   // this does nothing at all.
+  //
+  // THE FILL IS ON THE WALL CLOCK, DELIBERATELY, and it was on the world clock
+  // for one day. The reasoning that put it there sounded right — the sky lays
+  // snow at world speed on a hand-wound day, so surely it fills prints at world
+  // speed too — and what it actually did was saturate the map. At 120× the wash
+  // is 3% a frame: the whole field hit flat white in about two seconds of
+  // snowfall, which erased the drifts and the banks `fresh` had just laid, ate
+  // every footprint the moment it was stamped, and left the lamps' melt losing
+  // a race it is supposed to win. Reported as "walking leaves no trail and the
+  // snow will not melt", which was all one bug.
+  //
+  // The principle that decides it: A PRINT RACES THE WALKER WHO MADE IT, and
+  // every walker — the cast and the player alike — moves on the wall clock.
+  // Winding the day faster does not make anybody walk faster, so it must not
+  // make their trail close faster either. The aftermath values in weather.js
+  // scale by `clockRate` because they race the SCHEDULE; this one races people.
+  // The lamps' `thaw` below stays on world time by the same test — it races the
+  // night, not anybody's feet.
   update(dtMs, flakes) {
     this.clock += dtMs;
     if (!this.laid) return;

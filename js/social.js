@@ -166,6 +166,21 @@ export class Social {
     return true;
   }
 
+  // Somebody has come and sat down beside you — see the joinsit mode in
+  // household.js. One quiet line as they settle, and nothing asked of you.
+  //
+  // THE LINE IS THE WHOLE OF THE EVENT and it should stay that way. No prompt,
+  // no pill, nothing to answer: they came over because you sat still long
+  // enough, and the correct thing for the app to do next is nothing at all.
+  //
+  // `sitTogether` falls back to `poke` for anybody without one, the same
+  // half-drawn courtesy every other bucket extends — see Dialogue.has.
+  sitDown(bot, now) {
+    this.speak(bot, bot.dlg.has('sitTogether') ? 'sitTogether' : 'poke', now);
+    bot.ch.notice(now);
+    bot.quietUntil = now + bot.dlg.durationMs + CONFIG.social.pokeQuietMs;
+  }
+
   // A finger landed somewhere. Resets the long-idle clock; the rig is told
   // separately by the caller, because that is its business rather than this.
   touched(now) {
@@ -309,6 +324,24 @@ export class Social {
           const hold = Math.max(now + s.meetHoldMs, replyAt);
           a.ch.hold('talk', hold, true);
           b.ch.hold('talk', hold, true);
+          // SOME MEETINGS ARE ONES THEY SIT DOWN FOR — see social.meetSitChance.
+          // Two friends sitting together on the grass talking is the most
+          // Chiikawa image this world can produce, and it costs nothing but the
+          // decision to take the meeting that already happened and let it last.
+          //
+          // BOTH OR NEITHER. A pair where one sat and the other stood over them
+          // would read as an interrogation rather than as a chat, so the roll is
+          // made once for the meeting rather than once each.
+          //
+          // Refused to anybody already off their feet — somebody up on a pudding
+          // is having their own moment, and dropping them onto the grass to have
+          // this one would take one away to give another.
+          if (!a.ch.perched && !b.ch.perched && Math.random() < s.meetSitChance) {
+            const until = now + s.meetSitMin
+              + Math.random() * (s.meetSitMax - s.meetSitMin);
+            a.ch.sitFor(until);
+            b.ch.sitFor(until);
+          }
           this.meetUntil = now + s.meetCooldown;
           break;
         }

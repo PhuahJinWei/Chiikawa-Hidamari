@@ -36,7 +36,7 @@
 // which is exactly what you want while working on it.
 
 import { CONFIG } from './config.js';
-import { nowHours, activePhase } from './daylight.js';
+import { nowHours, activePhase, clockRate } from './daylight.js';
 // One way only — sphere.js has no dependency but three.js, which is what makes
 // it safe for this file to reach down into. See isWater at the foot of the file.
 import { inLake } from './sphere.js';
@@ -598,12 +598,36 @@ export function tickWeather(dtMs, tMs) {
   // that flipping twice.
   _live.shelter = _want.shelter;
 
+  // --------------------------------------------------------------- aftermath
+  //
+  // WHAT THE SKY LEAVES BEHIND, and all three of them run on WORLD time rather
+  // than on the wall.
+  //
+  // That distinction did not exist until the hour could be wound by hand, and
+  // its absence was a real bug. The schedule above reads `nowHours`, so a fast
+  // day drags the fronts along with it at a hundred and twenty times the wall
+  // clock; these three counted plain milliseconds and did not move. The melt is
+  // the one where it showed: a twenty-minute time constant is a FORTY-HOUR one
+  // in world terms at that rate, so winter would end on the schedule and the
+  // drifts would still be standing days of sky later, under a summer sun, with
+  // the cast in coats because the cover said so.
+  //
+  // The sky's own ease below is deliberately NOT scaled, and the two are
+  // different questions: that one is smoothing a button press so a hand-picked
+  // weather does not cut between frames, which is a fact about frames. These are
+  // durations the world is meant to feel — how long a puddle lasts, how long a
+  // winter does — and a world running at speed should feel them at speed.
+  //
+  // On the real clock `clockRate` is exactly 1 and every number below is the
+  // number it always was.
+  const flow = dtMs * clockRate();
+
   // The ground filling and draining. `drops` is the tap; nothing else feeds it,
   // so a sky that clears leaves the water exactly where it was and lets it go
   // on its own schedule.
   const target = Math.min(1, _live.drops * w.soak);
   const tau = target > wet ? w.wetMs : w.dryMs;
-  wet += (target - wet) * (1 - Math.exp(-dtMs / tau));
+  wet += (target - wet) * (1 - Math.exp(-flow / tau));
 
   // ...and the white, which is NOT the same shape and was written as though it
   // were. `flakes` is its tap and rain is not: falling on already-wet ground
@@ -626,9 +650,9 @@ export function tickWeather(dtMs, tMs) {
   // simply divides into it. Same one line, and now a flurry left running does
   // what a flurry left running does.
   if (_live.flakes > 0.02) {
-    settled += (w.lay - settled) * (1 - Math.exp(-(dtMs * _live.flakes) / w.layMs));
+    settled += (w.lay - settled) * (1 - Math.exp(-(flow * _live.flakes) / w.layMs));
   } else {
-    settled += (0 - settled) * (1 - Math.exp(-dtMs / w.meltMs));
+    settled += (0 - settled) * (1 - Math.exp(-flow / w.meltMs));
   }
 
   sheltering = sheltering ? (_live.drops > w.stayIn || _live.shelter) : _live.shelter;
@@ -637,7 +661,7 @@ export function tickWeather(dtMs, tMs) {
   // the sky, so the ice inherits the melt's own long clock and is the last
   // thing left of a winter — see freezeAt in CONFIG.weather.
   iceLatch = iceLatch ? settled > w.thawAt : settled > w.freezeAt;
-  ice += ((iceLatch ? 1 : 0) - ice) * (1 - Math.exp(-dtMs / w.freezeMs));
+  ice += ((iceLatch ? 1 : 0) - ice) * (1 - Math.exp(-flow / w.freezeMs));
 
   // A RAINBOW NEEDS A SUN, and the schedule has never heard of the hour. So the
   // gate goes on here, where both facts are to hand.

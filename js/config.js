@@ -545,10 +545,10 @@ export const PAL = {
   // spurs and the little paired ticks that fill the middle of a plate.
   caveMark: [124, 100, 88],
   // The grass on the clifftop, and the fringe of it that overhangs the edge.
-  // Deliberately the ground's own green rather than a third one: it is the same
-  // meadow, lifted. The fringe is a shade deeper so the overhang reads as being
-  // in its own shadow, which is how the reference draws it.
-  cliffGrass: '#B7DC8D',
+  // It uses the meadow's exact base green so the cave crown looks like a piece
+  // of the globe's field lifted over the stone. The deeper green belongs only
+  // to the shaded underside of that overhang.
+  cliffGrass: '#B4DC8E',
   cliffGrassEdge: '#8FBF66',
 
   furniturePaper: '#FFFDF8',
@@ -707,9 +707,9 @@ export const PAL = {
   // ...and the pair lying flat beside them, which the reference draws as one
   // colour for both.
   bookStack: '#A25C62',
-  // Chiikawa's open picture book: warm card beneath creamy pages, with a
-  // slightly darker page edge so its thin stack remains readable from the
-  // doorway.
+  // Chiikawa's open grass-pulling study book: warm card beneath creamy pages,
+  // with a slightly darker page edge so its thin stack remains readable from
+  // the doorway.
   openBookCover: '#D5B57E',
   openBookPaper: '#FFF8E8',
   openBookEdge: '#D8C39A',
@@ -994,6 +994,42 @@ export const CONFIG = {
     // Stood on a planet this small the horizon sits about 30 degrees BELOW
     // eye level — you are effectively always on top of a hill. Looking level
     // shows nothing but sky, so the resting gaze tilts down.
+    // HOW FAR THE EYE DROPS WHEN YOU SIT DOWN.
+    //
+    // Measured off the drawing rather than chosen, the same way eyeHeight was:
+    // the sit sheet stands 1.19 tall against the idle sheet's 1.91, and the eyes
+    // in it sit 0.86 above the ground against 1.47 standing. So sitting takes
+    // 0.61 off the eye line, and that is this number — a seated momonga sees the
+    // world from where a seated momonga's eyes are.
+    //
+    // It is subtracted inside `eyeAlt`, which means every question the rig asks
+    // about being landed moves with it and none of them had to be told: the
+    // pinch's bank, the walk gate, the fall, the selfie's refusal off the
+    // ground. Sitting is a lower place to be standing, and the rig already knows
+    // what standing somewhere is.
+    sitDrop: 0.61,
+    // ...and the gaze that goes with it. A seated creature is nearer the grass
+    // and looks a little further UP than a standing one — not level, because the
+    // horizon on a planet this small is still below you, but less steeply down
+    // than restLookPitch, which was measured for an eye two thirds of a metre
+    // higher. Sitting to watch the sky and being shown the same patch of ground
+    // you were already looking at would be the one thing that makes the whole
+    // gesture pointless.
+    sitLookPitch: -0.16,
+    // HOW LONG GETTING UP TAKES, before a push on the stick becomes a walk.
+    //
+    // Without it, standing and walking happen in the same continuous push — the
+    // frame the stick moves stands you up, and the very next one is already
+    // walking — which measured at 2cm of travel before the pose had even
+    // changed. Sitting down is deliberate and undoing it should cost the same
+    // beat that doing it did, or the pose reads as something the game shrugs
+    // off rather than something you chose.
+    //
+    // It is FILLED rather than dead: the camera is rising through exactly these
+    // frames, from the seated eye back to the standing one. Long enough to read
+    // as getting to your feet, short enough that nobody trying to leave feels
+    // held.
+    sitRiseMs: 380,
     restLookPitch: -0.30,
     faceLookPitch: -0.26,   // when stood in front of someone
     minLookPitch: -0.95,
@@ -1011,8 +1047,12 @@ export const CONFIG = {
     headingSens: 0.0090,
     lookPitchSens: 0.0032,
     anchorSens: 0.0026,
-    gyroSens: 0.009,
-    gyroShare: 0.30,
+    // `gyroSens` and `gyroShare` stood here — how hard the phone's own lean
+    // pushed the view, and the seventeen degrees it was allowed at most. The
+    // sensor is gone; see the note at the top of PlanetCamera's constructor for
+    // what it cost. Removed rather than left at zero, because a knob that can be
+    // turned up to re-enable something nobody wants back is not documentation,
+    // it is a trap with a number in it.
     // The time constant on the camera's easing, NOT a per-frame fraction. It
     // used to be one — 0.085 of the way there every frame — which quietly made
     // the whole feel of the camera depend on the refresh rate: the same swipe
@@ -1609,6 +1649,21 @@ export const CONFIG = {
     // A floor on how long the pair stand still for; the exchange extends it
     // when the lines it picked run longer than this.
     meetHoldMs: 7000,
+    // HOW OFTEN A MEETING IS ONE THEY SIT DOWN FOR, and how long they stay down.
+    //
+    // Not every time. Two friends bumping into each other on a path exchange a
+    // word and carry on, and that is most meetings; sitting down for one is what
+    // turns it into an afternoon rather than a passing hello. At a third it is
+    // uncommon enough to notice and common enough to see.
+    //
+    // The sit OUTLASTS the exchange on purpose. The lines are over in seven or
+    // eight seconds and two friends who stood straight back up the moment the
+    // talking stopped would look like they had been waiting for it to end. So
+    // the pair stay down well past the last word — the conversation is the
+    // reason they sat, not the duration of the sitting.
+    meetSitChance: 0.34,
+    meetSitMin: 18000,
+    meetSitMax: 34000,
     farSpeakArc: 15,     // on foot, nobody further than this starts chattering
     waterCooldown: 15000,   // quiet time after somebody teases you for paddling
 
@@ -1636,6 +1691,22 @@ export const CONFIG = {
     speed: 0.80,         // world units per second
     restMin: 1800,
     restMax: 6000,
+    // ...AND HOW OFTEN A REST IS A PROPER SIT DOWN, out on the grass.
+    //
+    // One stroll in nine ends with somebody sitting down rather than standing
+    // about. It sounds low and is not: three of them are strolling all day, and
+    // every leg of every trip rolls this — so the planet nearly always has
+    // somebody sat down somewhere, while any ONE character sitting is still an
+    // event you notice rather than a thing they do constantly.
+    //
+    // The sit is far longer than the rest it replaces (which is under six
+    // seconds), and that gap IS the feature. A rest is a pause in a journey; a
+    // sit is having stopped. Anything short enough to read as a pause would make
+    // the pose meaningless — somebody who sat down and immediately got up again
+    // would look like a fault rather than like somebody enjoying the afternoon.
+    sitChance: 0.11,
+    sitMin: 22000,
+    sitMax: 48000,
     // They stop wandering when you have come to see them, which reads as
     // noticing you — and stops the one you just walked over to strolling off
     // mid-conversation. Keyed on who you are visiting rather than raw
@@ -1811,25 +1882,51 @@ export const CONFIG = {
     // lens nearer than you asked — see the march — but never further.
     selfieMin: 2.2,
     selfieMax: 5.5,
-    // HOW FAR ROUND YOU THE LENS MAY BE SLID, in radians — 30° each way. The
-    // arc, the zoom range above and the pitch's own lift are together the
-    // "fixed area" the camera may be moved in: a box around your shoulders that
-    // you cannot drive the camera out of, so no framing is ever a lost camera.
-    selfieSideMax: 0.52,
-    // Radians of swing per pixel of two-finger drag. A third of the screen is
-    // most of the arc, which is the rate a map app pans at and the one a thumb
-    // already knows.
-    selfiePanSens: 0.0022,
-    // ...and how much of that a held key is worth per second, IN THE SAME
-    // PIXELS, so the two surfaces go through one conversion rather than each
-    // carrying its own idea of how far a pan is. 170 crosses the whole arc in
-    // about a second and a half, which is a beat longer than a drag takes and
-    // is the right way round: a key is held, a finger is aimed.
-    selfiePanKey: 170,
-    // ...and the zoom's twin, in e-folds per second. The whole range from a
-    // portrait to the hillside is a ratio of 2.5, so 0.6 crosses it in about a
-    // second and a half too.
-    selfieZoomKey: 0.6,
+    // `selfieSideMax`, `selfiePanSens`, `selfiePanKey` and `selfieZoomKey` stood
+    // here — the old bearing pan and its keys. They slid the LENS round you at a
+    // fixed distance while the aim stayed nailed to your chest, so every framing
+    // they could reach put you dead centre with a different background behind:
+    // measured at full swing, NDC x = -0.01. Turning your body does the same
+    // thing without a bound, which made the bounded copy the one to spend.
+    // What replaced them is below — the same two fingers, moving the FRAME.
+    //
+    // HOW FAR ACROSS THE PICTURE YOU MAY BE SLID, as a fraction of the lens's
+    // own distance rather than a length in the world. A fixed offset that reads
+    // as a third of the frame at arm's length is off the edge of a shot zoomed
+    // in to 2.2, where the half-frame measures 0.615 units; a fraction means the
+    // same thing at every zoom. 0.17 puts you a little past the thirds line and
+    // never near enough to the edge to fall out of your own photograph.
+    selfieShiftMax: 0.17,
+    selfieShiftSens: 0.0011,
+    // ...and HOW HIGH UP YOU THE LENS LOOKS, absolute rather than an offset,
+    // because "at his feet" and "over his head" are facts about a body rather
+    // than about how far away a camera is. `selfieAim` 1.25 is the chest and
+    // stays the resting value; 0.30 is the ground at your toes, which with the
+    // lens high is the looking-down-at-a-tiny-momonga shot, and 2.60 clears the
+    // top of a 2.02-unit head, which with the lens low is the hero shot against
+    // the sky. Those two are the whole reason this control exists.
+    selfieAimLow: 0.30,
+    selfieAimHigh: 2.60,
+    selfieAimSens: 0.0075,
+    // ...and what a held key is worth per second, in the same pixels both of
+    // those are measured in, so the two surfaces go through one conversion.
+    // About a second and a half to cross either axis, matching the tilt.
+    selfieFrameKey: 200,
+    // ...and how far it may be tilted, as the pitch term `selfieSwing` is
+    // multiplied by. Chosen so that the whole of `selfieLow`..`selfieTop` can
+    // actually be reached and neither end is a number the control cannot get to:
+    //   (0.85 - 1.9) / 1.5 = -0.70   the low shot, looking up at you
+    //   (3.6  - 1.9) / 1.5 = +1.13   the high shot, looking down
+    // A little past each so the ends are comfortable rather than exact. This is
+    // deliberately NOT `camera.minLookPitch`/`maxLookPitch`: that pair is the
+    // walking gaze and is asymmetric because on this planet up is only sky —
+    // see the note in applyDrag for what borrowing it cost.
+    selfieTiltMin: -0.75,
+    selfieTiltMax: 1.18,
+    // The zoom's own key rate stood here too. WASD frames the picture now and
+    // the wheel is the desktop zoom, which it already was — a keyboard duplicate
+    // of a control every desktop pointer has was the cheapest of the four keys
+    // to spend on the axis that had none.
     // What a LENS needs to clear a trunk, as against the 0.15 berth a walking
     // body keeps. Trunks are registered at 0.13–0.20 radians, so the body's
     // margin was very nearly doubling every tree on the planet; this is enough
@@ -2271,9 +2368,9 @@ export const CONFIG = {
       // The low table sits below the window, with its long edge following the
       // curve of the wall and its top left clear.
       { art: 'table', at: 1.20, out: 1.55, h: 0.46, spin: 1.20 },
-      // Chiikawa's open picture book rests at the centre of the table. It is
-      // its own unique item rather than baked-in clutter, so picking it up
-      // removes this physical copy from the tabletop.
+      // Chiikawa's grass-pulling Grade 5 study book rests at the centre of the
+      // table. It is its own unique item rather than baked-in clutter, so
+      // picking it up removes this physical copy from the tabletop.
       { art: 'openbook', at: 1.20, out: 1.55, h: 0.22, spin: 1.20,
         lift: 0.485, item: 'chiikawaBook' },
       // Clock-face arrangement, viewed with the entrance at six: the yellow
@@ -2496,15 +2593,17 @@ export const CONFIG = {
       { art: 'bulb', ceiling: true, h: 1.03 },
     ],
 
-    // Sitting support remains generic even though neither room currently
-    // contains a seat. The player does not sit in this version of the house.
+    // How far a character sinks while they have no sitting drawing of their
+    // own, as a fraction of their drawn height. A standing sheet with its feet
+    // on the floor reads as somebody standing; dropped by a third, the line
+    // crosses where their legs would fold and it reads as sitting.
     //
-    // How far a character sinks into a seat while they have no sitting drawing
-    // of their own, as a fraction of their drawn height. A standing sheet with
-    // its feet on a stool reads as somebody standing ON the stool; dropped by a
-    // third, the seat line crosses where their legs would fold and it reads as
-    // sitting. Ignored the moment a real `sit` sheet exists, because a drawing
-    // made for the job knows where its own base is.
+    // DEAD FOR EVERYBODY CURRENTLY DRAWN, and kept for the reason a blink
+    // fallback is kept. It is ignored the moment a real `sit` sheet exists —
+    // see the gate in character.js — and all four of them have one now, so
+    // nothing in this world sinks. It is what a fifth character with no sitting
+    // drawing would do on the day they arrive, which is the same half-drawn
+    // courtesy every other posture extends.
     sitSink: 0.34,
 
     // Where a tap on the house sets you down, as a distance from the MIDDLE of
@@ -2646,7 +2745,7 @@ export const CONFIG = {
       { art: 'nightstand', at: 1.75, out: 3.05, h: 0.62 },
       { art: 'trashbag', at: -2.15, out: 3.08, h: 0.78, item: 'trashBag' },
       { art: 'trashbag2', at: -1.78, out: 3.10, h: 0.72, item: 'trashBagAlt' },
-      // Chiikawa's kettle now sits on clear floor near the cave entrance.
+      // Hachiware's kettle sits on clear floor near the cave entrance.
       { art: 'teapot', at: 0.05, out: 1.05, h: 0.26, spin: 0.62,
         item: 'kettle' },
       // Hachiware's worn mat lies across the middle of the cave, with its long
@@ -2745,6 +2844,53 @@ export const CONFIG = {
   //
   // `gapMin` is the number to turn. Everything else is shape.
   household: {
+    // ------------------------------------------- COMING TO SIT WITH YOU
+    //
+    // Sit down out on the grass and stay there, and whoever is nearby wanders
+    // over and sits with you.
+    //
+    // IT IS THE ONE THING IN THIS APP THAT STARTS AT THEIR END. Every other
+    // social moment here begins with you: you walk over, you tap, you press a
+    // pill, you hand something across. This is the only one where you do
+    // nothing at all — you stop, and after a while somebody comes. That
+    // inversion is the whole reason it is worth building, and it is why the
+    // rule is "sit still and wait" rather than anything you could press.
+    //
+    // `settleMs` is what stops it being a trick you can perform. Sitting for a
+    // moment is not an invitation; sitting for a while is. It is long enough
+    // that pressing すわる and immediately expecting company does not work, and
+    // short enough that somebody who genuinely settled in gets an answer.
+    joinSettleMs: 7000,
+    // How near they have to be to notice you sitting there. Generous — this is
+    // "somewhere on this side of the planet" rather than "already beside you",
+    // because the walk over is most of the charm.
+    joinArc: 14.0,
+    // Where they end up: how far from you, and at which bearings off your own
+    // facing. One each, in list order, so two arrivals cannot pick the same
+    // patch of grass — the same trick `_standSpot` uses indoors.
+    //
+    // BESIDE rather than in front. Facing you across a metre and a half would
+    // be an audience; a loose arc alongside is sitting WITH somebody. The
+    // bearings are past a right angle for that reason.
+    // THE ARRIVAL TOLERANCE IS PART OF THIS NUMBER, which is the whole reason
+    // it is not the ~1.8 it looks like it should be. A walk counts as arrived
+    // within `arriveArc` of its target — 0.9 out here — and they approach from
+    // outside, so a target at 1.75 was reached from 0.85 away and everybody sat
+    // in everybody's lap. Measured at 0.86, 0.97 and 1.22 with three of them
+    // down: one overlapping heap rather than a row of friends.
+    //
+    // 2.6 leaves the nearest possible landing at 1.7 and the furthest at 2.6,
+    // which reads as sitting together at every point in that range.
+    joinBesideArc: 2.6,
+    joinBearings: [1.25, -1.25, 2.35],
+    // Once somebody has sat with you and got up again, this long before they
+    // will do it a second time. Long enough that it stays an event.
+    joinCooldownMs: 60000,
+    // ...and a ceiling on one sitting, for the case where you never move. They
+    // get up, wander off, and may come back later — which is better than three
+    // friends pinned beside you for as long as the app is open.
+    joinStayMax: 4 * 60 * 1000,
+
     gapMin: 5 * 60 * 1000,
     gapMax: 11 * 60 * 1000,
     // ...and the first one is not due for a while after you arrive, so the
@@ -3273,6 +3419,57 @@ export const CONFIG = {
     // blizzard genuinely wipes the field. If tracks are vanishing while you
     // watch, this is the number; the trodden depth is the other one.
     fillRate: 0.022,
+
+    // ...AND WHAT TAKES IT AWAY AGAIN WITHOUT A THAW: light landing on it. See
+    // `thaw` in snowfield.js and the spot list in scene.js.
+    //
+    // `thawRate` is how fast a lamp at full burn eats the snow directly under
+    // it, per world-second, as a share of whatever depth is there. It compounds,
+    // so it is a time constant in disguise: at 0.025 the lamp's middle is
+    // visibly opening by twenty world-seconds, down to bare ground around a
+    // minute and a half.
+    //
+    // BRACKETED FROM BOTH SIDES RATHER THAN CHOSEN, and both ends are worth
+    // keeping because the good value is not near the middle of them.
+    //
+    // 0.010 was four world-minutes, on the theory that a ring opening while you
+    // watched would read as the lamp being hot rather than the night passing.
+    // Backwards: the one moment anybody SETS a lantern down in deep snow is the
+    // moment they are standing there looking at it, and a melt that pays off
+    // only after they wander away reads as not working — "the lamp still gets
+    // buried". A lamp IS hot, and it should look like one.
+    //
+    // 0.045 overshot the other way: the ring opened almost as fast as the
+    // lantern could be put down, which stops being a lamp warming the ground and
+    // starts being a hole that appears where you point. This sits nearer the
+    // fast end than the slow one, because that is where the useful failure was.
+    //
+    // IT IS THE OPPOSITE END OF `fillRate` AND THAT IS THE FEATURE. Nothing
+    // arbitrates between them; they are the same map written from two sides. A
+    // lamp opens its ring under a clear sky and a falling snow closes it, so the
+    // patch of grass by the lantern is a thing the weather takes back and gives
+    // again without either rule knowing the other exists.
+    thawRate: 0.025,
+
+    // How much of a lamp's own reach the melt covers. WELL INSIDE the light: a
+    // pool fades out over its whole radius and the snow only goes where the
+    // light is actually strong, so a ring the full width of the glow would read
+    // as the lamp having a hard edge — which is the one thing every other part
+    // of this system is careful not to give it.
+    //
+    // Measured against the lantern rather than the houses, because that is the
+    // one somebody carries out and sets down and then stands next to. Its reach
+    // is 2.38, so this clears about 1.3 units around it — a pool a good deal
+    // wider than the lamp and still narrower than a character is tall, which is
+    // what makes it read as warmth pooling rather than as a crater. It was 0.70
+    // and that was 1.7 units, better than two character-widths across for one
+    // small lantern, which is where "a bit too wide" came from.
+    //
+    // For a building this is measured PAST THE WALL — the reach of a window's
+    // spill already is (see `uLampInner`) — so a lit house clears an apron at
+    // its own feet and eats into the bank the fall left against it, which is
+    // both what a warm building does and the reason the bank is worth having.
+    thawReach: 0.55,
 
     // ------------------------------------------------------------ the ponds
     //

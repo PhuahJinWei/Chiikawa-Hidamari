@@ -356,11 +356,23 @@ export class MoveInput {
     // trap this file was written to close: one owner, one table, and the
     // destination decided here where the view is already known.
     //
-    // A and D slide the lens round you, which is the pan the two-finger drag
-    // does on a phone. W and S dolly it, which is the pinch. Between them that
-    // is the whole of the camera on a machine with no second finger — and both
-    // are the same key doing the same thing it does on foot, aimed at the lens
-    // instead of at your legs.
+    // ALL FOUR KEYS FRAME THE PICTURE. A and D slide you across it, W and S up
+    // and down it — the two-finger drag a phone has, on the two axes a keyboard
+    // has anyway. It is the same stick shape doing the same thing it does on
+    // foot, pointed at the framing instead of at your legs.
+    //
+    // W and S USED TO ZOOM and no longer need to: the wheel already did, on
+    // every desktop pointer there is, and a keyboard duplicate of a control you
+    // already have was the cheapest of four keys to spend on an axis that had
+    // none. See the wheel in main.js.
+    //
+    // BOTH AXES MOVE YOU, not the view, so the keys agree with the drag rather
+    // than with a map application: D puts you to the right of the picture and W
+    // puts you higher up it, which is what the same two fingers do on a phone.
+    // Getting this half right and half wrong is the easy mistake — measured, D
+    // moved the avatar right while W moved it down — because `_ky` is negative
+    // for forward and the axis that needs no flip looks like the one that does.
+    // The ranges and the aim's own sign live in selfieFrame.
     if (this.frozen) {
       if (this._wrote || this.rig.drive > 0) {
         this._wrote = false;
@@ -368,12 +380,10 @@ export class MoveInput {
       }
       const p = CONFIG.player;
       const dt = Math.min(dtMs, 100) / 1000;      // a stall must not lurch it
-      if (this._kx) this.rig.selfiePan(this._kx * p.selfiePanKey * dt);
-      // Forward is negative and forward means nearer, so the sign lands the
-      // right way round without an apology. Exponential because the zoom is a
-      // ratio: a second of W takes the same BITE out of the distance whether the
-      // lens is at arm's length or across the garden.
-      if (this._ky) this.rig.selfieZoom(Math.exp(this._ky * p.selfieZoomKey * dt));
+      if (this._kx || this._ky) {
+        const px = p.selfieFrameKey * dt;
+        this.rig.selfieFrame(this._kx * px, this._ky * px);
+      }
       return;
     }
     if (this.pad.id !== null) return;

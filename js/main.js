@@ -408,12 +408,133 @@ try {
 // file: everything that speaks or reacts is gated on it, so the start card
 // cannot be talked over.
 let started = false;
-// When the ground last left your feet while holding a hand — see the release
-// in the frame loop, which waits out surface wobbles before letting go.
+// When the ground last left your feet, or 0 while they are down — see the frame,
+// where one reading of it answers for the hand and for the camera button both.
 let handAirAt = 0;
+// How long the feet must be up before it counts as flying. `isFirstPerson` drops
+// false for a few frames whenever the surface under you changes height — a
+// stump, the doorstep lip — and acting on the first of those broke a held hand
+// on an ordinary walk and would blink the camera button as you stepped up. Half
+// a second is a glide or the sky climb; a wobble never lasts that long.
+const AIR_SETTLE = 550;
 // Whether your own body is currently wearing its pleased face — see the swap in
 // the frame, and PLAYER in cast.js for the sheet.
 let youGlad = 'normal';
+
+// --- your own mood
+//
+// A FACE THAT DOES SOMETHING WHEN NOBODY ASKED IT TO.
+//
+// Momonga had two expressions and both were switches: pleased while a hand was
+// held, and whatever the pose picker was set to. Everywhere else — walking,
+// landing a fish, standing in the snow, gliding — you wore one resting face
+// forever. That was invisible while nothing could see you and became the whole
+// problem the moment the selfie put your own head on screen: the friends beside
+// you emote off their line bank several times a minute, and you were the one
+// still card in the picture.
+//
+// YOU HAVE NO LINE BANK, and that is the constraint this works around rather
+// than fights. A bot's face comes off what it is saying (`onExpression` at the
+// dialogue), and you never say anything — so the face has to come off what
+// happens TO you instead, plus a slow drift so that nothing happening is not
+// the same as nothing showing.
+//
+// Two mechanisms, one channel:
+//
+//   BEATS are reactions with a deadline — you landed a fish, you hopped, the
+//   sky opened. They are the interesting half and they are all one-liners at
+//   call sites that already exist.
+//
+//   THE DRIFT is what fills the silence. Every 12–30 seconds a resting face
+//   quietly becomes a pleased one for a few seconds and goes back. Rare enough
+//   that catching one feels like catching a mood rather than watching a loop,
+//   and it is the only part of this that does not need something to react to.
+//
+// Both write the same two fields, so a beat landing mid-drift simply replaces
+// it and the later deadline wins — there is no queue and nothing to arbitrate.
+const MOOD = {
+  // How long an ordinary reaction is worn. Long enough to be seen if you look
+  // up, short enough that the face is not a state you have to wait out.
+  beatMs: 2400,
+  // ...and the big one. Landing a fish is the moment a trip was for.
+  gladMs: 3400,
+  // The quiet drift: how long between them, and how long one lasts.
+  //
+  // TWELVE SECONDS AT THE FLOOR because this is read in a selfie, where you are
+  // stood still looking at your own face and a minute is an eternity; thirty at
+  // the ceiling because a face that changes on a metronome stops reading as a
+  // mood at all. The spread between them is what makes it feel unscheduled.
+  driftMinMs: 12000,
+  driftMaxMs: 30000,
+  driftMs: 2800,
+  // What a drift may turn up. `delight` is in it once against `happy` twice, so
+  // the big face stays a third as common as the small one — and `surprise` is
+  // deliberately absent: nothing surprises you for no reason, and a face that
+  // did would be the avatar reacting to something the player cannot see.
+  drift: ['happy', 'happy', 'delight'],
+};
+
+// A span of time picked at random inside a range. household.js has its own
+// `between` and this is deliberately not imported from it: that one is part of
+// how the cast is timed, and a shared helper across those two files would be a
+// dependency between the mind and the input layer for the sake of one line.
+function someMs(a, b) { return a + Math.random() * (b - a); }
+
+// The face a moment put there and when it runs out, plus what a moment has
+// ASKED for and not yet been given. Null between beats, which is what lets the
+// hand and the resting face show through.
+let moodFace = null;
+let moodUntil = 0;
+let moodNextAt = 0;
+let moodWant = null;
+
+// SOMETHING HAPPENED. Called from wherever it happened, which is the whole
+// design: no polling, no guessing from state, and adding a reaction later is
+// one line at the site that already knows.
+//
+// IT RECORDS A LENGTH RATHER THAN A DEADLINE, and that is not fussiness. This
+// is called from taps, pointer handlers and callbacks, none of which have the
+// frame's clock in their hands — so the obvious version stamped
+// `performance.now() + ms` here and compared it against the `now` the frame
+// passes in, which are two different clocks the moment anything drives the loop
+// by hand. Measured with a stepped harness: every beat expired on the frame
+// after it started and the face flickered between two expressions at 60Hz.
+// Handing the frame a duration and letting IT stamp the deadline means there is
+// only ever one clock in this file's arithmetic.
+//
+// The bigger ask wins when two land in the same frame, so a hop cannot cut
+// short the grin a landed fish just earned.
+function feel(face, ms = MOOD.beatMs) {
+  if (moodWant && moodWant.ms > ms) return;
+  moodWant = { face, ms };
+}
+
+// ...and what that adds up to this frame, or null for "nothing of my own".
+//
+// Also where the drift is WOUND, and it is wound from the end of the last beat
+// rather than on a free-running timer: something happening to you resets the
+// clock on the quiet drift, so a busy minute never doubles up and a quiet one
+// always fills. `moodNextAt` is written in exactly two places — here, when a
+// beat ends, and once on the first frame — which is what keeps it a schedule
+// rather than a number that jitters every time it is read.
+function moodNow(now) {
+  if (moodWant) {
+    const until = now + moodWant.ms;
+    if (!moodFace || until >= moodUntil) { moodFace = moodWant.face; moodUntil = until; }
+    moodWant = null;
+  }
+  if (moodFace && now >= moodUntil) {
+    moodFace = null;
+    moodUntil = 0;
+    moodNextAt = now + someMs(MOOD.driftMinMs, MOOD.driftMaxMs);
+  }
+  if (moodFace) return moodFace;
+  if (!moodNextAt) { moodNextAt = now + someMs(MOOD.driftMinMs, MOOD.driftMaxMs); return null; }
+  if (now < moodNextAt) return null;
+  moodFace = MOOD.drift[Math.floor(Math.random() * MOOD.drift.length)];
+  moodUntil = now + MOOD.driftMs;
+  return moodFace;
+}
 
 // --- pointer routing
 //
@@ -566,6 +687,10 @@ const fishing = new Fishing(globe, {
   // arrive in a bag with no room for it.
   canKeep: (id) => inventory.hasRoomFor(id),
   onCatch: (id, kept) => {
+    // ...AND YOUR FACE SAYS SO. Before the keep test, because delight is about
+    // having landed it rather than about having room for it — a fish let go for
+    // want of space was still a fish you caught.
+    feel('delight', MOOD.gladMs);
     // Counted either way: you landed it and saw what it was, which is what the
     // 図鑑 is a record of. Only a kept one goes in the pack.
     inventory.tally(id);
@@ -1383,16 +1508,21 @@ function onMove(e) {
     }
     // ...and the OTHER half of the same gesture. Two fingers travelling together
     // keep the gap constant and so say nothing to the zoom above; what they move
-    // is the point between them, and in the selfie that slides the lens round
-    // you. One gesture, two meanings, neither costing the other anything — which
-    // is why the pan went here rather than onto a third finger nobody has.
+    // is the point between them, and in the selfie that MOVES THE FRAMING —
+    // sideways along the picture and up and down your body. One gesture, two
+    // meanings, neither costing the other anything, which is why this went here
+    // rather than onto a third finger nobody has.
     //
-    // Sideways only. The lens already rises and falls with the one-finger drag,
-    // and a second height control would be two knobs fighting over one number.
+    // BOTH AXES NOW. It read only `midX` while the pan slid the lens round you,
+    // because a vertical twin would have fought the one-finger tilt over the
+    // same number. Moving the AIM instead makes them different questions — how
+    // high the camera is, and how high up you it looks — so the vertical half of
+    // this gesture has something of its own to say at last.
     if (rig.selfieOn) {
       const mx = pinch.midX;
+      const my = pinch.midY;
       midOf(pinch);
-      rig.selfiePan(pinch.midX - mx);
+      rig.selfieFrame(pinch.midX - mx, pinch.midY - my);
     }
     return;
   }
@@ -1462,6 +1592,9 @@ function onMove(e) {
 // waving.
 function hopSeen() {
   const s = CONFIG.social;
+  // A hop is the one thing in this game you do for no reason at all, so it is
+  // the one most worth having a face for.
+  feel('happy');
   for (const b of bots) {
     // A hop is a wave, and you cannot see one through masonry — nor answer one
     // in your sleep. `hopBack` is a lift on the BODY card, which a sleeper is
@@ -1676,8 +1809,12 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 window.addEventListener('resize', () => globe.resize());
+// Turning the phone still needs the canvas re-measured; it no longer needs the
+// device tilt's baseline reset alongside, there being no baseline and no tilt.
+// See the note in camera-control.js. The delay stays — iOS reports the new size
+// a beat after the event.
 window.addEventListener('orientationchange', () => {
-  setTimeout(() => { globe.resize(); rig.recentreGyro(); }, 120);
+  setTimeout(() => globe.resize(), 120);
 });
 
 // --- on-screen controls
@@ -1686,7 +1823,6 @@ window.addEventListener('orientationchange', () => {
 const controls = document.getElementById('controls');
 const viewToggle = document.getElementById('view-toggle');
 const selfieToggle = document.getElementById('selfie-toggle');
-const selfieCap = document.getElementById('selfie-cap');
 const shotBtn = document.getElementById('shot-btn');
 const stickEl = document.getElementById('stick');
 const actionsEl = document.getElementById('actions');
@@ -1695,6 +1831,10 @@ const poseBar = document.getElementById('pose-bar');
 const poseWrap = document.getElementById('pose-wrap');
 const poseToggle = document.getElementById('pose-toggle');
 const poseCap = document.getElementById('pose-cap');
+// The collapsed button's two faces: the drawn one, and the mark おまかせ wears
+// in place of one. paintPoses shows exactly one.
+const poseFace = document.getElementById('pose-face');
+const poseAuto = document.getElementById('pose-auto');
 const unlockNote = document.getElementById('unlock');
 
 // WHAT YOUR FACE MAY DO FOR A PICTURE.
@@ -1709,24 +1849,105 @@ const unlockNote = document.getElementById('unlock');
 // is in yours, resting otherwise. Keeping it as the DEFAULT entry means the
 // picker adds a choice without taking the old behaviour away from anybody who
 // never opens it.
+// `face` is the sheet each one shows in the picker — see faceIcon. おまかせ has
+// none ON PURPOSE and must not borrow the resting one: it is the app choosing,
+// which is a different answer from 「すまし」 and would be indistinguishable from
+// it if the two wore the same picture. It gets a mark instead.
 const POSES = [
-  { key: null, word: 'おまかせ' },
-  { key: 'normal', word: 'すまし' },
-  { key: 'happy', word: 'にっこり' },
-  { key: 'delight', word: 'だいすき' },
-  { key: 'surprise', word: 'びっくり' },
+  { key: null, word: 'おまかせ', face: null },
+  { key: 'normal', word: 'すまし', face: 'normal' },
+  { key: 'happy', word: 'にっこり', face: 'happy' },
+  { key: 'delight', word: 'だいすき', face: 'delight' },
+  { key: 'surprise', word: 'びっくり', face: 'surprise' },
 ];
+
+// YOUR HEAD, CUT OUT OF YOUR OWN EXPRESSION SHEET.
+//
+// The picker used to be five words and nothing else, which asked you to know
+// what 「だいすき」 looks like on a momonga before you had ever seen it — in a
+// camera, of all places, where the whole question is what your face will do.
+// These are the very drawings the avatar wears, so choosing is recognising
+// rather than guessing.
+//
+// A SQUARE TAKEN OFF THE TOP of the opaque bounds, which is head and shoulders
+// for anybody drawn standing up. Cropping to a guessed face rectangle would be
+// a per-character measurement nobody wants to maintain; the top square needs no
+// numbers and cannot cut a head in half.
+//
+// The summer wardrobe always, even in a snowstorm. What is being chosen is the
+// FACE, and drawing the coat into a 32px thumbnail would only make four
+// pictures that differ by a hat.
+const FACE_PX = 96;
+const faced = new Map();
+
+function faceIcon(expr) {
+  const had = faced.get(expr);
+  if (had) return had;
+
+  // THROUGH paintSheet FIRST, and not as decoration: `IMG.sheets` holds Image
+  // elements, and sheetBounds reads pixels — it wants a canvas and throws on
+  // anything else. paintSheet is the one conversion every other reader of these
+  // drawings already goes through, and it caches, so this costs nothing the
+  // avatar has not already paid.
+  const sheets = IMG.sheets[PLAYER.key];
+  const src = paintSheet(sheets[expr] || sheets.normal);
+  const b = sheetBounds(src);
+  const w = b.maxX - b.minX + 1;
+  const h = b.maxY - b.minY + 1;
+  const side = Math.min(w, h);
+
+  const out = document.createElement('canvas');
+  out.width = FACE_PX;
+  out.height = FACE_PX;
+  const g = out.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, b.minX + (w - side) / 2, b.minY, side, side, 0, 0, FACE_PX, FACE_PX);
+
+  const url = out.toDataURL();
+  faced.set(expr, url);
+  return url;
+}
 
 // Which one is pressed, or null for おまかせ. Cleared when the view is turned
 // off, so a pose is something you strike for a shot rather than a mood you
 // leave your body wearing for the rest of the session.
 let youPose = null;
 
+// The mark 「おまかせ」 wears instead of a face, built rather than written into
+// index.html because the rows themselves are — see the loop below.
+const SPARKS = [
+  'M12 4.1l1.5 4.2 4.2 1.5-4.2 1.5L12 15.5l-1.5-4.2L6.3 9.8l4.2-1.5Z',
+  'M18.1 14.5l.75 2.05 2.05.75-2.05.75-.75 2.05-.75-2.05-2.05-.75 2.05-.75Z',
+];
+
+function poseThumb(pose) {
+  if (pose.face) {
+    const img = document.createElement('img');
+    img.className = 'pose-face';
+    img.alt = '';
+    img.src = faceIcon(pose.face);
+    return img;
+  }
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'pose-auto');
+  for (const d of SPARKS) {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
 for (const pose of POSES) {
   const b2 = document.createElement('button');
   b2.type = 'button';
   b2.className = 'pose-pick';
-  b2.textContent = pose.word;
+  const word = document.createElement('span');
+  word.textContent = pose.word;
+  b2.append(poseThumb(pose), word);
   b2.addEventListener('click', () => {
     youPose = pose.key;
     paintPoses();
@@ -1758,9 +1979,19 @@ function paintPoses() {
   // THE COLLAPSED BUTTON SAYS WHICH FACE IS CHOSEN, which is what the row used
   // to say by being visible. A drawer that shows nothing of its contents makes
   // you open it to find out what you already decided.
-  const now = POSES.find((q) => q.key === youPose);
-  const word = now ? now.word : POSES[0].word;
-  if (poseCap.textContent !== word) poseCap.textContent = word;
+  //
+  // It now SHOWS it as well as saying it. The button wears the face it is set
+  // to, so the answer is readable without reading — and 「おまかせ」 wears the
+  // mark instead, because the app choosing is not a face.
+  const now = POSES.find((q) => q.key === youPose) || POSES[0];
+  if (poseCap.textContent !== now.word) poseCap.textContent = now.word;
+  // `toggleAttribute` rather than `.hidden`, because one of these two is an SVG.
+  // `hidden` is an HTMLElement property and setting it on an SVGElement writes a
+  // plain JS expando that no selector will ever match — so the mark would simply
+  // never go away. The attribute is understood by both.
+  poseFace.toggleAttribute('hidden', !now.face);
+  poseAuto.toggleAttribute('hidden', !!now.face);
+  if (now.face) poseFace.src = faceIcon(now.face);
 }
 paintPoses();
 const viewCap = document.getElementById('view-cap');
@@ -1801,10 +2032,31 @@ const sheetCard = document.getElementById('sheet-card');
 const tabPack = document.getElementById('tab-pack');
 const tabZukan = document.getElementById('tab-zukan');
 const sheetBody = document.getElementById('sheet-body');
-const sheetCap = document.getElementById('sheet-cap');
-const dropBtn = document.getElementById('sheet-drop');
-const countRow = document.getElementById('sheet-count');
+// The panel under the grid — see index.html. It is one box with four faces, and
+// paintDetail is the only thing that decides which one is showing.
+const sheetDetail = document.getElementById('sheet-detail');
+const detailHint = document.getElementById('detail-hint');
+const detailImg = document.getElementById('detail-img');
+const detailName = document.getElementById('detail-name');
+const detailMeta = document.getElementById('detail-meta');
+const detailNote = document.getElementById('detail-note');
+const detailFam = document.getElementById('detail-fam');
+const holdBtn = document.getElementById('act-hold');
+const binBtn = document.getElementById('act-bin');
+const binLabel = document.getElementById('act-bin-label');
+const countRow = document.getElementById('detail-count');
 const countN = document.getElementById('count-n');
+const goBtn = document.getElementById('count-go');
+
+// What the four icon families are called, for the chip on the panel. The keys
+// are ICON_CAT's, which come from the icon FILE NAMES — see assets.js — so this
+// is the one place those turn back into words a player reads.
+const FAMILY = {
+  common: 'しぜんの もの',
+  fish: 'おさかな',
+  unique: 'おうちの もの',
+  special: 'だいじな もの',
+};
 
 // 'pack', 'zukan', or null. One card serves both — see index.html for why.
 let sheetMode = null;
@@ -1812,6 +2064,11 @@ let sheetMode = null;
 // the rest of the sheet's state because openSheet clears it, and a `let` further
 // down the file would still be in its dead zone when it does.
 let askN = null;
+// THE SLOT THE PANEL IS DESCRIBING, or null. This is what a tap means now, and
+// it is deliberately not the same thing as `inventory.held`: looking at a thing
+// and carrying it are two facts, and a tap that did both was the reason the
+// panel had nothing to be.
+let pickN = null;
 // How many of that stack. Back to one every time the question is asked:
 // 「すてる ９こ」 is not something anybody wants to press twice by accident
 // because the last stack happened to be big.
@@ -1847,6 +2104,17 @@ function openSheet(mode) {
   // left floating over a closed sheet.
   cancelDrag();
   askN = null;
+  // OPENS ON WHAT IS IN YOUR HAND, and on nothing at all when your hand is
+  // empty. The panel is not remembering what you last tapped — that would be UI
+  // history, and reopening the bag onto a thing you looked at once and walked
+  // away from is a memory nobody asked it to keep. This is a FACT about the
+  // pack, the same fact the accent ring is drawing in the grid, and the panel
+  // agreeing with the ring is what makes the two one statement instead of two.
+  //
+  // It also completes the loop the もつ button opens: taking a thing in hand
+  // shuts the card, so the next time you come back the first thing the bag says
+  // is what you are carrying — and the verb already under your thumb is しまう.
+  pickN = inventory.slots[inventory.held] ? inventory.held : null;
 
   if (mode === 'pack') paintPack();
   else if (mode === 'zukan') paintZukan();
@@ -1883,6 +2151,7 @@ function paintPack() {
     slot.className = 'pack-slot'
       + (cell ? '' : ' is-empty')
       + (cell && inventory.held === i ? ' is-held' : '')
+      + (cell && pickN === i ? ' is-picked' : '')
       + (askN === i ? ' is-asking' : '');
     // The picture is decoration once the button says what it is: two readings of
     // the same thing is one too many when the second is 「あかい きのこ あかい きのこ」.
@@ -1915,7 +2184,7 @@ function paintPack() {
     grid.appendChild(slot);
   }
   sheetBody.appendChild(grid);
-  showRow();
+  paintDetail();
 }
 
 // --- taking things out, and moving them about
@@ -1978,7 +2247,7 @@ function armSlot(el, i) {
 function under(x, y) {
   const el = document.elementFromPoint(x, y);
   if (!el) return null;
-  if (el.closest('#sheet-drop')) return 'bin';
+  if (el.closest('#act-bin')) return 'bin';
   const slot = el.closest('.pack-slot');
   if (!slot || !slot.parentElement) return null;
   return [...slot.parentElement.children].indexOf(slot);
@@ -2002,14 +2271,14 @@ function startDrag(i, el, e) {
   // the very node holding the pointer capture, and every move after it would go
   // somewhere else. Nothing repaints until the drag is over.
   el.classList.add('is-source');
-  showRow();
+  paintDetail();
   moveDrag(e.clientX, e.clientY);
 }
 
 function moveDrag(x, y) {
   ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
   const hit = under(x, y);
-  const next = hit === 'bin' ? dropBtn
+  const next = hit === 'bin' ? binBtn
     : (typeof hit === 'number' && hit !== dragFrom
       ? sheetBody.querySelectorAll('.pack-slot')[hit] : null);
   if (next === overEl) return;
@@ -2023,7 +2292,16 @@ function endDrag(x, y) {
   const hit = under(x, y);
   cancelDrag();
   if (hit === 'bin') { binDrop(from); return; }
-  if (typeof hit === 'number' && hit !== from) { inventory.moveSlot(from, hit); return; }
+  if (typeof hit === 'number' && hit !== from) {
+    // The pick is an INDEX, and a move is exactly the event that makes an index
+    // mean something else. Rather than chase it through a swap or a merge — where
+    // "the thing I was looking at" is genuinely ambiguous once two stacks have
+    // become one — the panel simply lets go. Rearranging your bag is not reading
+    // about it.
+    pickN = null;
+    inventory.moveSlot(from, hit);
+    return;
+  }
   // Let go over nothing, or over where it started: it simply goes back. Repainted
   // because cancelDrag only undoes the drag's own marks, and a refused move
   // leaves the grid otherwise untouched.
@@ -2036,7 +2314,7 @@ function cancelDrag() {
   if (overEl) { overEl.classList.remove('is-over'); overEl = null; }
   for (const s of sheetBody.querySelectorAll('.is-source')) s.classList.remove('is-source');
   dragFrom = null;
-  showRow();
+  paintDetail();
 }
 
 function tapSlot(i) {
@@ -2050,48 +2328,128 @@ function tapSlot(i) {
 
   const cell = inventory.slots[i];
   if (!cell) return;
-  // Pressing the slot you are already holding puts it away — the same button
-  // meaning take-out and put-back, which is how a pocket works. The sheet STAYS
-  // OPEN either way now: you came in here to look at your bag, and taking one
-  // thing out is not a reason to be shown the door.
-  if (inventory.held === i) inventory.putAway();
-  else inventory.holdSlot(i);
+  // A TAP IS A QUESTION NOW, not an action. It used to take the thing straight
+  // into your hand, which made the one press you would naturally use to LOOK at
+  // something the same press that changed what you were carrying — and left the
+  // panel below with nothing to be except a caption.
+  //
+  // Tapping the open one closes it, so the same press means show-me and
+  // that's-enough. Taking it in hand is a button on the panel, where the other
+  // verb already lives and where both can say what they do.
+  pickN = pickN === i ? null : i;
+  paintPack();
 }
 
-// The two lines under the grid, and the row that is a drop target while a tile
-// is in the air and a question after one has landed on it.
-function showRow() {
-  const asking = askN !== null ? inventory.slots[askN] : null;
-  const dragged = dragFrom !== null ? inventory.slots[dragFrom] : null;
-  sheetCard.classList.toggle('is-moving', !!(asking || dragged));
-  // The pack always keeps the row, empty or not, so the card is the same height
-  // whether or not your hand is full. Only the 図鑑 gives the space back.
-  sheetCap.hidden = false;
+// もつ／しまう, the verb the tap used to be. Reads the PICK rather than a slot
+// index of its own, because the panel and this button are describing the same
+// thing by construction — there is no way to press it for a slot you are not
+// currently looking at.
+// THE TWO DIRECTIONS ARE NOT SYMMETRICAL, and only one of them shuts the card.
+//
+// もつ is the end of the errand. You opened the bag to fetch something, and the
+// thing you fetched is now in your hand and OUT THERE — on your avatar, in the
+// world, ready to be handed to somebody. Leaving the card up parks a panel in
+// front of the result of what you just did, and every visitor's next press would
+// be the close button anyway.
+//
+// しまう is the opposite: you are tidying, not leaving. Putting a thing away is
+// a move WITHIN the bag, and shutting the bag on somebody mid-sort would make
+// rearranging it a series of reopenings. It matches the one exit this already
+// had — setting a unique down with 「おく」 closes for the same reason もつ now
+// does, because that too ends with the thing out in the world.
+function holdAct() {
+  if (pickN === null || !inventory.slots[pickN]) return;
+  if (inventory.held === pickN) { inventory.putAway(); return; }
+  inventory.holdSlot(pickN);
+  openSheet(null);
+}
 
-  if (asking) {
-    // Landed on the bin, and there is more than one, so the only thing still
-    // unanswered is how many.
-    sheetCap.textContent = `${ITEMS[asking.id].name} を いくつ すてる？`;
-    dropBtn.textContent = 'すてる';
-    countRow.hidden = false;
-    dropN = Math.min(Math.max(1, dropN), asking.n);
-    countN.textContent = dropN;
-  } else if (dragged) {
-    // In the air. The row is somewhere to let go of it — 「おく」 puts a unique
-    // down in the world, 「すてる」 lets a stackable go, two words because they
-    // are two different endings, exactly as the action pill distinguishes おく
-    // from しまう.
-    sheetCap.textContent = ITEMS[dragged.id].name;
-    dropBtn.textContent = ITEMS[dragged.id].kind === 'unique' ? 'おく' : 'すてる';
-    countRow.hidden = true;
-  } else {
-    // Resting. What is in your hand if anything, and otherwise nothing at all —
-    // except for an empty pack, which has to say so: sixteen dashed holes and no
-    // words is a panel that looks broken rather than one that looks empty.
-    const held = inventory.held === null ? null : inventory.slots[inventory.held];
-    if (held) sheetCap.textContent = `${ITEMS[held.id].name} を もっているよ`;
-    else sheetCap.textContent = inventory.slots.some(Boolean) ? '' : 'まだ なにも もっていないよ';
+// THE PANEL UNDER THE GRID, in whichever of its four faces the pack is currently
+// wearing: resting, describing what you tapped, offering itself as a place to
+// let go of a tile in the air, or asking how many. One function decides, so two
+// of them can never be up at once — which the row this replaced could do, since
+// "asking" was inferred there from whether a count happened to be visible.
+function paintDetail() {
+  // WHAT THE PANEL IS ABOUT, in priority order. All three are slot indices and
+  // at most one is ever set: a question is being asked about a slot, or a tile
+  // is in the air, or you tapped something. The pick survives the other two, so
+  // letting go of a drag drops you back on whatever you were reading.
+  //
+  // Both indices are re-checked against the pack rather than trusted, because
+  // the things that can empty a slot mostly happen somewhere else: the last of a
+  // stack given to a friend, a unique set down in the world, a gift taken out of
+  // your hand. Every one of those routes through inventory.onChange and lands
+  // here with an index pointing at a hole.
+  if (pickN !== null && !inventory.slots[pickN]) pickN = null;
+  if (askN !== null && !inventory.slots[askN]) askN = null;
+
+  const dragging = dragFrom !== null;
+  const at = askN !== null ? askN : (dragging ? dragFrom : pickN);
+  const cell = at === null ? null : inventory.slots[at];
+
+  // Still the grid's own signal, and still only about a drag: while a tile is in
+  // the air every empty slot is somewhere it could land, and says so.
+  sheetCard.classList.toggle('is-moving', dragging);
+
+  sheetDetail.hidden = false;
+  sheetDetail.className = 'detail ' + (
+    askN !== null ? 'is-asking'
+      : dragging ? 'is-dragging'
+        : cell ? 'is-picked' : 'is-rest');
+
+  if (!cell) {
+    // Nothing tapped. Either the pack has things in it and nobody has asked
+    // about one yet, or it is empty and has to say so — sixteen dashed holes and
+    // no words is a panel that looks broken rather than one that looks empty.
+    detailHint.textContent = inventory.slots.some(Boolean)
+      ? 'タップすると くわしく みられるよ'
+      : 'まだ なにも もっていないよ';
+    sheetDetail.removeAttribute('data-cat');
+    return;
   }
+
+  const it = ITEMS[cell.id];
+  const unique = it.kind === 'unique';
+  sheetDetail.dataset.cat = ICON_CAT[cell.id] || '';
+  // The SLOT's picture rather than the world's drawing of the thing — the same
+  // tile you tapped, so the panel is visibly about that square and not about a
+  // second, similar object. See slotIcon.
+  detailImg.src = slotIcon(cell.id);
+  detailName.textContent = it.name;
+  detailMeta.textContent = metaLine(cell);
+  detailNote.textContent = it.note || '';
+  detailFam.textContent = FAMILY[ICON_CAT[cell.id]] || '';
+
+  holdBtn.textContent = inventory.held === at ? 'しまう' : 'もつ';
+  // Two endings, two glyphs — see the note in index.html. A stackable is let go
+  // of; a unique is set down in the grass where you can walk over and pick it up
+  // again, and drawing a rubbish bin under a bear would promise the wrong one.
+  binBtn.dataset.verb = unique ? 'put' : 'bin';
+  binLabel.textContent = unique ? 'おく' : 'すてる';
+
+  if (askN !== null) {
+    dropN = Math.min(Math.max(1, dropN), cell.n);
+    countN.textContent = dropN;
+  }
+}
+
+// The second line of the panel: how many you have, and — for the things the 図鑑
+// keeps a tally of — how many you have ever met. The tally is the more
+// interesting number of the two and the one you cannot get anywhere else in the
+// pack, which is why it is here rather than only in the other tab.
+function metaLine(cell) {
+  const it = ITEMS[cell.id];
+  // Not 「１こ もっている」. Being the only one is the whole meaning of the kind,
+  // and a count of one on a bear would be a stranger claim than none at all.
+  if (it.kind === 'unique') return 'せかいに ひとつだけ';
+  // Terse on purpose. This shares a row with the family chip and has to survive
+  // a 375px phone, so 「７こ もっている」 lost the verb it did not need — the
+  // panel is already a list of facts about the thing in the picture.
+  const have = `${cell.n}こ`;
+  const met = inventory.caught[cell.id] || 0;
+  if (it.fish) return `${have}　/　つった ${met}かい`;
+  if (it.cover) return `${have}　/　みつけた ${met}かい`;
+  return have;
 }
 
 // --- letting go of things
@@ -2133,8 +2491,11 @@ function binDrop(i) {
   if (c.n === 1) { inventory.discard(i, 1); return; }
 
   // More than one, so the amount is genuinely ambiguous and throwing them away
-  // cannot be undone. The row turns into the question instead of guessing.
+  // cannot be undone. The panel turns into the question instead of guessing —
+  // and keeps the pick pointed at the same slot, so the thing being counted goes
+  // on being described above the counter rather than vanishing behind it.
   askN = i;
+  pickN = i;
   dropN = 1;
   paintPack();
 }
@@ -2152,9 +2513,9 @@ function confirmDrop() {
 // A refusal has to look like one; a button that quietly does nothing reads as
 // broken. Borrowed from the action pills' own shake — see refuse().
 function shakeDrop() {
-  dropBtn.classList.remove('is-refused');
-  void dropBtn.offsetWidth;
-  dropBtn.classList.add('is-refused');
+  binBtn.classList.remove('is-refused');
+  void binBtn.offsetWidth;
+  binBtn.classList.add('is-refused');
 }
 
 // THE 図鑑, in a drawer of its own. It shared the pack's panel while both were
@@ -2180,8 +2541,10 @@ const ZUKAN = [
 
 function paintZukan() {
   sheetBody.textContent = '';
-  sheetCap.textContent = '';
-  sheetCap.hidden = true;
+  // The one place the space genuinely should go rather than be held: a record
+  // has nothing to describe and no verbs to offer, so the panel would be a
+  // hundred empty pixels holding the list off the bottom of the card.
+  sheetDetail.hidden = true;
   sheetCard.classList.remove('is-moving');
   for (const section of ZUKAN) {
     const ids = Object.keys(ITEMS).filter((id) => section.has(ITEMS[id]));
@@ -2290,10 +2653,19 @@ onPress(tabZukan, () => openSheet('zukan'));
 onPress(document.getElementById('sheet-close'), () => openSheet(null));
 onPress(document.getElementById('sheet-scrim'), () => openSheet(null));
 
-// Only ever the confirm for a pending amount. While a tile is in the air this
-// is a place to LET GO of it, not something to press — the drag's own pointerup
-// is what lands it there.
-onPress(dropBtn, confirmDrop);
+// The panel's two verbs. Both read the pick rather than taking an index, which
+// is what makes it impossible to press either one for a slot the panel is not
+// currently describing.
+onPress(holdBtn, holdAct);
+onPress(binBtn, () => { if (pickN !== null) binDrop(pickN); });
+
+// The bin is ALSO where a dragged tile lands, and that costs nothing here: a
+// drag holds the pointer capture on the slot it started from, so its pointerup
+// never reaches this button and never fires a click. Pressing it and dropping
+// onto it are the same intention anyway — see binDrop, which is what both do.
+
+// Only ever the confirm for a pending amount.
+onPress(goBtn, confirmDrop);
 onPress(document.getElementById('count-all'), () => {
   const c = askN === null ? null : inventory.slots[askN];
   if (c) setDropN(c.n);
@@ -3008,7 +3380,7 @@ const ixEl = document.getElementById('interact');
 // keeps it — and the whole point of the gaps below is that kin stand together.
 // Splitting them to seat one of them would be spending the grouping to buy the
 // anchor, when both fit.
-const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'grab', 'fish', 'light', 'talk', 'hold', 'play', 'give', 'swap', 'giveBack'];
+const IX_ORDER = ['strike', 'reel', 'stow', 'put', 'sit', 'grab', 'fish', 'light', 'talk', 'hold', 'play', 'give', 'swap', 'giveBack'];
 
 // WHAT EACH VERB IS ABOUT, which is what the gaps in the column are drawn from.
 //
@@ -3038,6 +3410,12 @@ const IX_GROUP = {
   // What is in your hand, anchored at the bottom — see IX_ORDER.
   stow: 'hand',
   put: 'hand',
+  // YOURSELF, which is a family of one and is not a stretch. Every other verb
+  // here is about a thing out there — something in your hand, something you are
+  // facing, somebody in front of you. Sitting is about the only thing on this
+  // screen that is none of those, so it stands apart with a gap either side
+  // rather than being filed under the nearest neighbour.
+  sit: 'self',
   // What you are facing out in the world.
   grab: 'world',
   fish: 'world',
@@ -3070,6 +3448,11 @@ const IX_GLYPH = {
   // A four-point sparkle: the thing you are sending them to is a delight, and
   // this is the plainest drawing of one.
   play: '<path d="M12 4.5l1.7 5.8L19.5 12l-5.8 1.7L12 19.5l-1.7-5.8L4.5 12l5.8-1.7Z"/>',
+  // A seat in profile: a back, a cushion line, and the ground under it. Drawn
+  // side-on because that is the one angle at which "sitting" is a silhouette
+  // rather than a posture you have to read — the same reason a speech bubble is
+  // drawn from the side.
+  sit: '<path d="M8 4.8v7.4h7.6"/><path d="M5.6 12.2h11.2"/><path d="M7.4 15v4.2"/><path d="M15 15v4.2"/>',
   // The same arrow the other way about — away from you, toward them. The pair
   // are deliberately mirror images: 「わたす」 and 「かえして」 are one object
   // making one journey, and which way it is going is the whole of the
@@ -3194,6 +3577,22 @@ const ACTIONS = {
   // this mostly stops the one case where it did: tidying your hand with nobody
   // and nothing else around.
   stow: { word: () => 'しまう', run: () => inventory.putAway() },
+  // SIT WHERE YOU STAND. There is no seat to find and nothing to claim: the rig
+  // has already guaranteed that wherever your feet are is somewhere legal — out
+  // of the water, off the walls, clear of the trunks — so anywhere you can stand
+  // is somewhere you can sit, and that is the entire placement rule.
+  //
+  // It inherits every interesting surface for free, because the rig can already
+  // STAND on the standable tops: sitting on the stump is sitting while you
+  // happen to be standing on the stump, and the ice on a frozen pond is the
+  // same. No seat objects, no spot table, no claiming.
+  //
+  // ONE SLOT, TWO WORDS, the way 「つける／けす」 works: it reads what pressing it
+  // DOES rather than what you currently are.
+  sit: {
+    word: () => (rig.seated ? 'たつ' : 'すわる'),
+    run: () => { if (!rig.standUp()) rig.sit(); },
+  },
   // THE WORD CARRIES THE STATE, so this needs no lit styling of its own. As a
   // lone round button it was filled when the light was on and outlined when it
   // was off, because a glyph cannot say which way it is about to go. A pill can:
@@ -3254,6 +3653,20 @@ function actionsNow() {
   // reading a pill for.
   if (inventory.holding || inventory.heldUnique) list.push('stow');
   if (inventory.heldUnique) list.push('put');
+  // SITTING, WHEN YOU HAVE STOPPED. Offered to somebody standing still and to
+  // somebody already sat down; withheld while you are walking, which is the one
+  // state where it could never be what you meant.
+  //
+  // That gate is what keeps it from being a permanently parked button — the
+  // thing this stack exists to be rid of. Sitting is genuinely always AVAILABLE
+  // on the ground, so by the usual rule it would sit there forever; stopping is
+  // what turns it from a fact about your body into an offer. It also reads
+  // rather well: come to a halt somewhere nice and the world asks.
+  //
+  // Not offered while a hand is held, either. Getting up to walk hand in hand
+  // and sitting down are two answers to the same moment, and the one that
+  // involves another person wins.
+  if ((rig.seated || !rig.isWalking) && !household.handHeld) list.push('sit');
   // WORLD VERBS DO NEED IT, because a verb about an object is unusable without
   // knowing which object, and proximity cannot say. One hand: nothing may be
   // taken up while a unique is already in it.
@@ -3575,6 +3988,9 @@ function takeBackLoan() {
   // off the ground does.
   inventory.putAway();
   inventory.setUnique(id, { state: 'hand' });
+  // Getting something back is a small gladness, and it is yours rather than
+  // theirs — they have their own line for it on the next line down.
+  feel('happy');
   // They hand it over and say so. `handBack` is a bucket a bank may not have,
   // and the fallback is the same half-drawn courtesy the sheets get: somebody
   // with no line for this still answers, with an ordinary one.
@@ -3877,7 +4293,12 @@ function syncInteract() {
     const key = want[i];
     let rec = ixNodes.get(key);
     if (!rec) {
-      rec = buildIx(key, wasEmpty);
+      // ...but never for 「すわる」, which would otherwise bounce every single
+      // time you came to a halt in an empty meadow. The announce is for the
+      // world OFFERING you something — a friend arriving in reach, a thing
+      // coming into view — and sitting is not an offer, it is a fact about your
+      // own body that stopped being hidden. See .ix-fresh.
+      rec = buildIx(key, wasEmpty && key !== 'sit');
       ixNodes.set(key, rec);
       ixEl.appendChild(rec.el);
     }
@@ -4421,7 +4842,12 @@ paintScrubber();
 paintSky();
 globe.warmSkies();
 
-// --- start gate, which is also the gesture iOS needs before handing over tilt
+// --- start gate
+//
+// It used to be described as "also the gesture iOS needs before handing over
+// tilt", and carried `rig.enableGyro()` at the bottom for that reason. Both are
+// gone with the sensor — so this tap is now only what it looks like, and a first
+// run opens on the meadow rather than on a permission dialog.
 startEl.addEventListener('click', () => {
   if (started) return;
   started = true;
@@ -4443,9 +4869,6 @@ startEl.addEventListener('click', () => {
   const now = performance.now();
   social.lastTouchAt = now;
   rig.markTouched(now);
-  // The same tap that starts the app is the one iOS requires before it will
-  // hand over device tilt.
-  rig.enableGyro();
   speak(bots[0], 'greet', now);
 }, { once: true });
 
@@ -4601,8 +5024,11 @@ function frame(now) {
   // crosses `dressAt`, so a face swap inside it would have waited for the
   // weather to change before your expression could — which on a clear day is
   // never. The same edge-guard trap the hand's own leash fell into once.
-  // A CHOSEN POSE WINS, and おまかせ falls back to what this always did.
-  const want = youPose || (household.handHeld ? 'happy' : 'normal');
+  // A CHOSEN POSE WINS, then whatever just happened to you, then the hand, then
+  // rest. Four sources, one line, in the order a face actually answers them:
+  // what you are deliberately doing beats what you are feeling beats how things
+  // are beats nothing in particular. See moodFace.
+  const want = youPose || moodNow(now) || (household.handHeld ? 'happy' : 'normal');
   if (want !== youGlad) {
     youGlad = want;
     you.setExpression(want);
@@ -4763,11 +5189,21 @@ function frame(now) {
     // switch on that nothing is honouring.
     if (!onFoot && rig.selfieOn) rig.setSelfie(false);
 
+    // ONE CLOCK FOR "GENUINELY OFF THE GROUND", read by everything that has to
+    // tell a real departure from a surface wobble. It was the hand's alone and
+    // is shared now that the camera button needs the same answer — a second copy
+    // of this counter would be a second chance for the two to disagree about
+    // whether you are flying.
+    //
+    // Started whenever the feet are up rather than only while a hand is held, so
+    // the reading is about the WORLD rather than about what you happen to be
+    // doing in it. Nothing can be taken up mid-air to be caught out by that: the
+    // pill that takes a hand needs somebody in front of you, and that needs both
+    // feet down.
     if (onFoot) handAirAt = 0;
-    else if (household.handHeld) {
-      if (!handAirAt) handAirAt = now;
-      else if (now - handAirAt > 550) releaseHand();
-    }
+    else if (!handAirAt) handAirAt = now;
+    const flying = handAirAt > 0 && now - handAirAt > AIR_SETTLE;
+    if (flying && household.handHeld) releaseHand();
     // ...and if the world let go for you, your own walk is free again. The
     // household drops the hand inside its own mode exit; this keeps the two in
     // step without either having to know about the other.
@@ -4793,7 +5229,18 @@ function frame(now) {
     // already taken is yours, however the camera left.
     const hasCam = inventory.slotOf('hachiwareCamera') >= 0;
     if (rig.selfieOn && !hasCam) rig.setSelfie(false);
-    selfieToggle.classList.toggle('is-gone', !hasCam);
+    // ...AND NOT IN THE FAR VIEW EITHER. Up in the sky the lens belongs to the
+    // globe and there is no body down there to look back at, so the switch is a
+    // promise the app cannot keep — and this corner has always said what you can
+    // do NOW rather than what you could do somewhere else. It used to grey out
+    // instead, which is the treatment for a thing that is temporarily refused;
+    // the far view is a different place, not a refusal.
+    //
+    // OFF `flying` RATHER THAN `onFoot`, and that is the whole care in this
+    // line. `onFoot` drops false for a few frames every time the surface under
+    // you changes height, so hiding on it would blink the button off and on as
+    // you walked over a stump — the exact bug 「てをはなす」 had. See the clock.
+    selfieToggle.classList.toggle('is-gone', !hasCam || flying);
     // ...and on the frame it BECOMES true, say so. Announced from here rather
     // than from the pickup itself because there is more than one way for a
     // camera to reach your hands — off the cave floor, out of the pouch, handed
@@ -4815,14 +5262,17 @@ function frame(now) {
     // notice that teaches rather than confirms — make it recoverable, and let
     // the player earn the repeat by doing the thing that earned it the first
     // time.
-    if (hasCam && !camSeen) { camSeen = true; showUnlock(); }
+    if (hasCam && !camSeen) { camSeen = true; showUnlock(); feel('surprise', MOOD.gladMs); }
     else if (!hasCam) camSeen = false;
-    // Off the ground there is nothing to look back at — and the far view has
-    // the camera anyway, so the switch would be a promise this cannot keep.
-    // The word turns over with the state, exactly as そらへ's does.
-    selfieToggle.classList.toggle('is-off', !onFoot);
-    const selfieWord = rig.selfieOn ? 'まえを みる' : 'じぶんを みる';
-    if (selfieCap.textContent !== selfieWord) selfieCap.textContent = selfieWord;
+    // `selfieToggle.classList.toggle('is-off', !onFoot)` stood here. The button
+    // is gone in the far view now rather than greyed, so there is no state left
+    // in which a dimmed one could be seen.
+    //
+    // THE WHOLE OF THE BUTTON'S TWO FACES, in one attribute. It used to compare
+    // and write a caption string here every frame to change it twice a session;
+    // both the word and the glyph are now the flip's own two sides in CSS, and
+    // this is the switch that turns it. Set unconditionally because writing the
+    // same value is not a style change and starts no transition.
     selfieToggle.setAttribute('aria-pressed', rig.selfieOn ? 'true' : 'false');
     // The shutter and the poses come and go with the view they belong to.
     const shooting = rig.selfieOn && onFoot;
@@ -4830,7 +5280,7 @@ function frame(now) {
     poseWrap.classList.toggle('is-gone', !shooting);
     // A drawer left hanging open under a button that has just gone is a panel
     // floating in a corner attached to nothing. Shut on the way out rather than
-    // hidden with it, so pressing じぶんを みる again finds it closed.
+    // hidden with it, so pressing カメラ again finds it closed.
     if (!shooting && poseWrap.classList.contains('is-open')) openPoses(false);
     // ...and the walking controls go the other way. Hidden rather than greyed,
     // because in this view they are not disabled — they are irrelevant, and the

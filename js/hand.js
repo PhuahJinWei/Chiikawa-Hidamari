@@ -107,6 +107,14 @@ export class Hand {
     // owns the hour has something to write to without walking the graph.
     this.heldMats = [];
     this._tex = null;
+    // WHAT IS IN THE SLOT: 'card', 'mesh', or null for a hand that has never
+    // held anything. Not "what is on screen" — `clear()` deliberately leaves it
+    // alone, because a card that has been put away is still a card for as long
+    // as it takes to shrink away, and that soft exit is the point of it.
+    //
+    // It exists because update() has to choose between the slot's two possible
+    // occupants and had no straight answer to ask. See the note there.
+    this._kind = null;
     // The held piece's own slot pose, when it brought one — see holdMesh.
     this._pose = null;
     // Where the scale is and where it is going: 0 is an empty hand, 1 is the
@@ -161,6 +169,7 @@ export class Hand {
     // A drawing never brings a pose — cards all live at the one slot.
     this._pose = null;
     this._fit();
+    this._kind = 'card';
     this._canvas = canvas;
     this._heldObj = null;
     this._dropMesh();
@@ -186,10 +195,23 @@ export class Hand {
     // the thing in it, so the rise and the bob happen where the piece is.
     this._pose = pose || null;
     this._fit();
+    this._kind = 'mesh';
     this._canvas = null;
     this._heldObj = obj;
     this._dropMesh();
     this.card.visible = false;
+    // ...and the drawing that WAS in the slot is let go of, texture and all.
+    // A card cannot be seen again until hold() puts a new one in, so this is a
+    // picture nobody can look at holding GPU memory the GC cannot see the size
+    // of — the same argument hold() makes when it swaps one drawing for another.
+    //
+    // Guarded, because resize() re-runs holdMesh on whatever is already held.
+    if (this._tex) {
+      this._tex.dispose();
+      this._tex = null;
+      this.mat.map = null;
+      this.mat.needsUpdate = true;
+    }
     // Sized and centred by fitHeld — see furniture.js, which carries the note on
     // why this must be measured off a parentless copy at scale 1, and why the
     // copy's own rotation is left exactly as its builder posed it.
@@ -249,14 +271,28 @@ export class Hand {
     // s > 0.02` flat, which quietly turned the card back on underneath a held
     // bear every frame after holdMesh had switched it off: the bear and a fish
     // card in the same hand, the card winning on render order.
-    // `mat.map` in the test is not belt and braces. Put a built piece in the
-    // hand and then set it down, and the mesh goes at once while the slot is
-    // still easing shut — which handed the card its turn, with no texture ever
-    // loaded into it. A MeshBasicMaterial with no map is WHITE, so setting the
-    // bear down printed a blank card the size of a fish on the meadow beside
-    // it for a third of a second.
+    //
+    // Then it read `shown && !this.meshHolder && !!this.mat.map`, and the last
+    // of those was the bug. It was reaching for "is a CARD what is in the slot"
+    // and asking "is there a texture lying about" instead — two questions with
+    // the same answer only while the hand had never held a drawing. Once it had,
+    // they came apart in the gap `clear()` opens: setting a built piece down
+    // drops the mesh AT ONCE, on purpose, while the slot is still easing shut,
+    // and for those eighteen frames the card was the only occupant left, with
+    // the last drawing still loaded under it. Hold a fish, pick up the kettle,
+    // set the kettle down — and the fish you put away two actions ago came back
+    // up and shrank away in your hand. Measured at 0.3 seconds.
+    //
+    // (The white flash the map test was added for is a case of the same thing:
+    // a hand that had held no drawing had no texture either, and a MeshBasicMaterial
+    // with no map is WHITE. `_kind` answers that one too — a slot that last took
+    // a mesh is not showing a card, textured or bare.)
+    //
+    // So it asks the question it means. `_kind` is what was last PUT here, which
+    // `clear()` leaves standing — a card put away is still a card while it
+    // shrinks, and that is the soft exit clear() is written for.
     const shown = s > 0.02;
-    this.card.visible = shown && !this.meshHolder && !!this.mat.map;
+    this.card.visible = shown && this._kind === 'card';
     if (this.meshHolder) this.meshHolder.visible = shown;
     if (!shown) return;
 

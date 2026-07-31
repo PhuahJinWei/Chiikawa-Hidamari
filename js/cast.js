@@ -141,8 +141,8 @@ export const CAST = [
     name: 'ちいかわ',
     scale: 0.90,
     home: { lat: 0.251, lon: -0.782 },
-    sheets: ['idle', 'happy', 'delight', 'sleep'],
-    snow: ['idle', 'happy', 'delight'],
+    sheets: ['idle', 'happy', 'delight', 'sit', 'sleep'],
+    snow: ['idle', 'happy', 'delight', 'sit'],
     likes: ['kusa'],
   },
 
@@ -151,8 +151,8 @@ export const CAST = [
     name: 'ハチワレ',
     scale: 1.00,
     home: { lat: 0.372, lon: 0.592 },
-    sheets: ['idle', 'happy', 'surprise', 'sleep', 'pastime-1'],
-    snow: ['idle', 'happy', 'surprise', 'pastime-1'],
+    sheets: ['idle', 'happy', 'surprise', 'sit', 'sleep', 'pastime-1'],
+    snow: ['idle', 'happy', 'surprise', 'sit', 'pastime-1'],
     // Fish. ALL of them, taken off the roster rather than listed, because what
     // Hachiware likes is fish — that was already true of the three koi and
     // writing out twelve ids would turn a characteristic into an inventory. The
@@ -168,8 +168,8 @@ export const CAST = [
     name: 'うさぎ',
     scale: 0.97,
     home: { lat: -0.059, lon: 0.748 },
-    sheets: ['idle', 'happy', 'surprise', 'sleep', 'pastime-1'],
-    snow: ['idle', 'happy', 'surprise', 'pastime-1'],
+    sheets: ['idle', 'happy', 'surprise', 'sit', 'sleep', 'pastime-1'],
+    snow: ['idle', 'happy', 'surprise', 'sit', 'pastime-1'],
     likes: ['kinoko1', 'kinoko2'],
   },
 ];
@@ -196,22 +196,31 @@ export const PLAYER = {
   // standing about, so most of the time you are up there you are on your feet
   // in the resting sheet, walking when your spot is towed along. See
   // GLIDE_SPEED in main.js for what it takes to leave the ground.
-  // `happy` is the one expression you have, and it exists because the selfie
-  // view put your own face on screen for the first time — see the swap in
-  // main.js, which wears it while somebody's hand is in yours. A PLACEHOLDER
-  // for now: the file is a copy of the idle sheet, so nothing looks wrong, and
-  // redrawing it is the whole of finishing the job.
-  // FOUR FACES TO POSE WITH, which is what a camera turned on yourself asks
-  // for that nothing else ever did. `happy` is also worn automatically while a
-  // hand is held; the other two are yours to pick — see the pose bar in main.js.
+  // FOUR FACES, which is what a camera turned on yourself asked for that
+  // nothing else ever did — and they are all DRAWN now, the placeholders these
+  // three shipped as (copies of the idle sheet) replaced 2026-07-31.
   //
-  // PLACEHOLDERS for now: every one of these is a copy of the idle sheet, so
-  // the picker works and nothing looks broken, and redrawing them is the whole
-  // of finishing the job.
-  sheets: ['idle', 'fly', 'happy', 'delight', 'surprise'],
-  // You get wrapped up too, and both postures are drawn — which matters more
+  // They earn their keep twice over, because the face is no longer only a thing
+  // the pose bar sets. `happy` is worn while a hand is held, on a hop, and when
+  // something is handed back to you; `delight` lands a fish; `surprise` is the
+  // camera turning up. And with nothing happening at all a mood drifts across
+  // them every twenty seconds or so, which is what stops you being the one
+  // still card in a picture full of friends who emote off their line banks.
+  // See MOOD in main.js.
+  //
+  // `sleepy` and `worried` are deliberately still absent. Both are things that
+  // HAPPEN to somebody rather than things a face does for a camera, and the
+  // player has neither a bedtime nor a line bank to earn one with.
+  // `sit` is the third posture and the one that is only ever seen on purpose.
+  // The glide happens to you at speed; sitting is a thing you press a button to
+  // do, and the whole point of pressing it is to be somewhere rather than to get
+  // anywhere. In first person it drops the eye — see camera.sitDrop — and in the
+  // selfie view it is the drawing this whole feature is for.
+  sheets: ['idle', 'fly', 'sit', 'happy', 'delight', 'surprise'],
+  // You get wrapped up too, and every posture is drawn — which matters more
   // for the player than for anybody else: yours is the only body that can be
   // gliding over a white planet, and a momonga in summer clothes mid-glide over
-  // snow would be the one costume mistake permanently in shot.
-  snow: ['idle', 'fly', 'happy', 'delight', 'surprise'],
+  // snow would be the one costume mistake permanently in shot. The same goes
+  // double for sitting, which is a pose you hold for as long as you like.
+  snow: ['idle', 'fly', 'sit', 'happy', 'delight', 'surprise'],
 };

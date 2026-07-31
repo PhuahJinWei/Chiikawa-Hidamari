@@ -1422,44 +1422,121 @@ export function paintFishCard(img) {
 
 // A fistful of pulled grass, for the pouch and the hand. The blades in the
 // world have no ink — grass is the one thing the pen never touches out there —
-// so the card keeps that rule: strokes of the meadow's own two greens, fanned
-// from the grip, roots showing. The roots are the point; attached grass is
-// scenery, pulled grass is 草むしり.
+// and the card keeps that rule. It is one flat, soft-green silhouette: broad
+// leaves fanning from a small joined middle, like the simple cut-paper shape in
+// the anime, with three pulled roots hanging below it. The six round-ended leaf
+// strokes and beige threads that stood here read as a whisk at hand size;
+// tapered filled leaves and outlined roots keep their shape when the card is
+// small and make the handful feel soft rather than wiry.
 let KUSA_CARD = null;
 
 export function paintKusa() {
   if (KUSA_CARD) return KUSA_CARD;
-  const W = 120;
-  const H = 168;
+  const W = 256;
+  const H = 256;
   const c = makeCanvas(W, H);
   const g = c.getContext('2d');
-  g.lineCap = 'round';
-  const gx = W * 0.5;
-  const gy = H * 0.78;
-  // Blades, fanned. Two greens alternating, the tips bowing outward.
-  const blades = [
-    [-0.55, 0.94], [-0.30, 1.06], [-0.08, 1.12], [0.14, 1.04], [0.38, 0.92], [0.55, 0.8],
+
+  // One continuous contour rather than separate radial ribbons. Apart from
+  // matching the reference much more closely, that distinction matters at the
+  // size it is held: separate leaves reduce to a many-pointed star, while this
+  // outline keeps the broad lobes, shallow notches and asymmetric little lower
+  // shoots that make it read as a handful of soft grass.
+  //
+  // These points are deliberately sparse. Canvas joins them into an organic
+  // cut-paper outline. The rounded ink stroke is the same warm line used by
+  // the rest of the game's drawings: heavy enough to survive at hand and pouch
+  // size, without turning the shallow notches between leaves into black wedges.
+  const outline = [
+    [139, 49], [139, 62], [138, 71], [139, 80], [141, 88], [144, 95],
+    [150, 91], [154, 85], [160, 81], [167, 78], [175, 76], [184, 75],
+    [194, 75], [203, 76], [211, 78], [215, 82],
+    [206, 83], [199, 86], [191, 88], [184, 91], [178, 95], [172, 99],
+    [167, 104], [162, 109], [160, 112], [161, 116],
+    [168, 117], [177, 118], [187, 118], [193, 120],
+    [185, 122], [177, 124], [170, 127], [163, 130], [159, 136], [161, 139],
+    [165, 140], [166, 144], [169, 146], [168, 148],
+    [160, 148], [156, 149], [153, 147], [152, 138], [150, 130], [147, 123],
+    [140, 120], [138, 123], [140, 131], [143, 138], [143, 143], [142, 147],
+    [138, 148], [133, 143], [127, 139], [120, 136], [112, 134], [104, 134],
+    [95, 135], [88, 138], [81, 141], [75, 145], [70, 150], [68, 153],
+    [67, 146], [70, 139], [74, 133], [79, 128], [86, 125], [95, 124],
+    [102, 121], [103, 117], [101, 114], [95, 110], [88, 107], [81, 104],
+    [74, 101], [66, 99], [61, 99],
+    [67, 97], [76, 96], [86, 96], [94, 98], [102, 98], [103, 94],
+    [101, 91], [98, 84], [94, 78], [90, 72], [85, 67], [80, 62],
+    [74, 58], [66, 56], [63, 54],
+    [73, 54], [82, 55], [90, 57], [97, 60], [103, 64], [109, 68],
+    [114, 73], [119, 78], [122, 78], [125, 76],
+    [125, 69], [128, 61], [132, 55], [137, 50],
   ];
-  for (const [i, [lean, len]] of blades.entries()) {
-    g.strokeStyle = i % 2 ? PAL.grassBladeHigh : PAL.grassBladeLow;
-    g.lineWidth = W * 0.075;
+
+  g.save();
+
+  // The pulled roots sit behind the leafy body, so their three joins disappear
+  // into the grip instead of ending as visible round caps. Unlike the leaves,
+  // the reference draws these as three SOLID ink strokes—there is no green
+  // centre. Their unequal lengths are load-bearing too: the nearly vertical
+  // middle root is longest, the left root reaches most of the way down, and the
+  // right root stops noticeably sooner.
+  const roots = [
+    [
+      [143, 146],
+      [139, 156, 151, 167, 146, 179],
+      [142, 191, 157, 201, 150, 213],
+      [146, 225, 156, 234, 152, 240],
+    ],
+    [
+      [141, 148],
+      [145, 157, 133, 167, 138, 177],
+      [141, 187, 126, 195, 132, 205],
+      [134, 211, 124, 216, 127, 218],
+    ],
+    [
+      [145, 148],
+      [151, 155, 150, 166, 160, 175],
+      [169, 181, 162, 190, 171, 196],
+      [178, 199, 172, 203, 176, 204],
+    ],
+  ];
+  g.strokeStyle = PAL.line;
+  g.lineWidth = 7.2;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (const root of roots) {
     g.beginPath();
-    g.moveTo(gx, gy);
-    g.quadraticCurveTo(
-      gx + lean * W * 0.30, gy - len * H * 0.42,
-      gx + lean * W * 0.52, gy - len * H * 0.62,
-    );
+    g.moveTo(root[0][0], root[0][1]);
+    for (let i = 1; i < root.length; i++) g.bezierCurveTo(...root[i]);
     g.stroke();
   }
-  // The roots below the grip: short pale threads, a smudge of soil.
-  g.strokeStyle = '#D8C49A';
-  g.lineWidth = W * 0.035;
-  for (const lean of [-0.3, 0, 0.35]) {
-    g.beginPath();
-    g.moveTo(gx, gy);
-    g.quadraticCurveTo(gx + lean * W * 0.12, gy + H * 0.07, gx + lean * W * 0.22, gy + H * 0.13);
-    g.stroke();
-  }
+
+  g.fillStyle = '#CDE49F';
+  g.strokeStyle = PAL.line;
+  g.lineWidth = 6.2;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(outline[0][0], outline[0][1]);
+  for (let i = 1; i < outline.length; i++) g.lineTo(outline[i][0], outline[i][1]);
+  g.closePath();
+  g.fill();
+  g.stroke();
+
+  // The three roots and the leafy body meet in one dark, irregular knot in the
+  // reference. Without it the tiny space between four independently
+  // antialiased edges shows the ground through as a hole. Drawn last, this
+  // closes that seam and also hides the perfectly round caps where the roots
+  // begin.
+  g.fillStyle = PAL.line;
+  g.beginPath();
+  g.moveTo(137, 145);
+  g.bezierCurveTo(140, 141, 148, 142, 152, 146);
+  g.bezierCurveTo(155, 150, 152, 157, 147, 158);
+  g.bezierCurveTo(141, 159, 136, 154, 137, 145);
+  g.closePath();
+  g.fill();
+  g.restore();
+
   KUSA_CARD = c;
   return c;
 }
@@ -4260,7 +4337,6 @@ export function paintCaveSkin() {
   g.fillStyle = shade;
   g.fillRect(0, 0, W, H);
 
-  const theta = (y) => (y / H) * (Math.PI / 2);
   // The same polar construction as the room, but coarser because the mound is
   // read from several paces away. It is painted across the whole shell first;
   // the turf below then covers its crown, leaving a continuous irregular net
@@ -4272,11 +4348,10 @@ export function paintCaveSkin() {
     scratchScale: 0.42,
   });
 
-  // THE TURF, and its fringe. The whole point of the mound reading as a piece
-  // of landscape rather than as a boulder is this one edge: a band of green
-  // over the top whose lower boundary is a row of soft lumps, hanging over the
-  // rock like a tablecloth. It is what says the green is ON TOP of the grey
-  // rather than beside it.
+  // THE TURF, and its fringe. This is a piece of the globe's meadow lifted over
+  // the stone, not a separate grass illustration: the fill, bowed tick groups,
+  // and tiny blossom specks all come from the same biome table and the same
+  // painters used by paintGlobe().
   //
   // It has to close on itself — the canvas wraps the dome — so the last bump is
   // clamped to the right edge at exactly the height the first one starts at,
@@ -4298,13 +4373,43 @@ export function paintCaveSkin() {
   traceFringe();
   g.lineTo(W, 0);
   g.closePath();
-  g.fillStyle = PAL.cliffGrass;
+  const meadow = CONFIG.biomes.find((b) => b.key === 'meadow');
+  g.fillStyle = meadow?.ground || PAL.cliffGrass;
   g.fill();
 
-  // The line along its underside, which is what makes the overhang read as an
-  // overhang rather than as a colour change. A shade darker than the grass and
-  // NOT in the rock's pen: it is the edge of the turf, not a crack, and at the
-  // caveInk weight it read as the mound having a lid.
+  // The globe's painted texture, distributed by cap AREA rather than canvas
+  // row. That keeps marks from bunching at the summit once this sheet wraps a
+  // dome. Drawing seam copies makes the first and last texture columns meet
+  // without a clipped tick or flower.
+  if (meadow) {
+    const capTheta = (baseY / H) * (Math.PI / 2);
+    const cosEdge = Math.cos(capTheta);
+    const scatterCap = (count, draw) => {
+      for (let i = 0; i < count; i++) {
+        const th = Math.acos(1 - rand() * (1 - cosEdge));
+        const by = (th / (Math.PI / 2)) * H;
+        const bx = rand() * W;
+        const xs = Math.min(5, 1 / Math.max(0.08, Math.sin(th)));
+        for (const wrap of [-W, 0, W]) draw(bx + wrap, by, xs);
+      }
+    };
+    g.save();
+    g.clip();
+    scatterCap(240, (bx, by, xs) => {
+      fieldTick(g, rand, bx, by, 0.72, xs, meadow.tick);
+    });
+    scatterCap(64, (bx, by, xs) => {
+      fieldBloom(
+        g, rand, bx, by, meadow.bloomScale * 0.72, xs,
+        meadow.bloom[Math.floor(rand() * meadow.bloom.length)],
+      );
+    });
+    g.restore();
+  }
+
+  // The deeper green underside remains an overhang cue, not an outline around
+  // every blade. The individual field marks stay uninked, exactly as they do
+  // on the globe.
   g.beginPath();
   g.moveTo(0, baseY);
   traceFringe();
@@ -4314,23 +4419,6 @@ export function paintCaveSkin() {
   g.lineCap = 'round';
   g.stroke();
 
-  // ...and blades in the turf itself, thinning out toward the apex where the
-  // ring has shrunk and anything drawn at a constant width smears.
-  g.lineWidth = 2.4;
-  for (let i = 0; i < 160; i++) {
-    const bx = rand() * W;
-    const by = baseY * (0.14 + rand() * 0.84);
-    const bh = H * (0.014 + rand() * 0.022);
-    const xs = Math.min(2.4, 1 / Math.sin(Math.max(0.08, theta(by))));
-    g.save();
-    g.translate(bx, by);
-    g.scale(xs, 1);
-    g.beginPath();
-    g.moveTo(0, 0);
-    g.quadraticCurveTo((rand() - 0.5) * bh, -bh * 0.6, (rand() - 0.5) * bh * 1.6, -bh);
-    g.stroke();
-    g.restore();
-  }
   return c;
 }
 

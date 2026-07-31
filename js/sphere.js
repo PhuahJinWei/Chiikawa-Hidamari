@@ -978,12 +978,6 @@ export function orientBillboard(obj, worldPos, normal, camera, standoff = 0, alo
   // line of sight. And with the blend shut, up IS the normal — so nothing you
   // do with the look pitch can lean a card you are stood beside.
   //
-  // Two places still reach it. Whoever is in the middle of the far view, where
-  // the camera is straight overhead and centre and base agree to within a few
-  // degrees; and the ground cover your eye genuinely sits over, whose centre is
-  // down at your shins. Both get the same rescue for UP — but not, below, for
-  // the lift.
-  //
   // The dot is SIGNED, not absolute, and the sign is doing real work. Geometry
   // says edge-on is symmetric — straight below a card's centre reads down its
   // length just as straight above does — but on a planet the negative side
@@ -995,21 +989,44 @@ export function orientBillboard(obj, worldPos, normal, camera, standoff = 0, alo
   _mid.copy(camera.position).sub(worldPos).addScaledVector(normal, -standoff);
   if (_mid.lengthSq() > 1e-12) _mid.normalize();
   else _mid.copy(_ray);
-  const blend = ramp(normal.dot(_mid));
+  const over = ramp(normal.dot(_mid));
 
-  // The lift is gated on the view axis AS WELL as the ray, because being over a
-  // thing is not the same as looking down it. Cross the planet at a middling
-  // altitude and the foreground is full of cards whose rays run down their
-  // normals while the view axis passes obliquely overhead: ray-keyed alone,
-  // each of those flattened AND lifted — at that height the lift is a fifth of
-  // the whole reach, the card is units wide, and its edges parallax against the
-  // grass while its shadow stays down on the surface. A whole foreground of
-  // paper hovering over its own shadows. Gated, those cards recline about their
-  // anchored base and stay grounded; the lift survives only where the view axis
-  // itself runs down the normal, which is the far view over the disc centre —
-  // the one place the card genuinely lies in the tangent grass and needs pushing
-  // clear. There the two ramps agree and nothing changes.
-  const liftBlend = blend * ramp(Math.abs(normal.dot(_view)));
+  // ...AND GATED ON THE VIEW AXIS, because being over a thing is not the same
+  // as looking down it — the sentence the lift's gate was already built on, now
+  // holding up the whole rescue rather than half of it.
+  //
+  // The centre ray answers "where am I", and for anything SHORT that is the
+  // wrong question on foot. A bush's centre is at your shins and a friend's at
+  // your chest, so walking right up to either put your eye over the centre and
+  // ran the ray up the normal — the blend opened on proximity alone, and the
+  // card lay down in front of you while your gaze was level: bushes reclining
+  // as you approached, and a friend you stood beside flat on the grass. The
+  // cast are not even solid, so standing IN one opened it fully. All of it
+  // position, none of it looking.
+  //
+  // The view axis answers "am I actually looking down this card's normal",
+  // which is the only situation the rescue exists for. On foot it cannot say
+  // yes: the pitch clamp stops the gaze at 0.95 radians below level and this
+  // ramp does not open until 1.04, so the flatten is structurally impossible
+  // while you are stood on the ground — the same margin, doing for the card's
+  // posture what it always did for the lift. In the far view over the disc
+  // centre the view runs straight down the normal, the gate is wide open, and
+  // nothing there changes. Between the two it fades on the zoom's own blend,
+  // so there is no mode and no pop.
+  //
+  // What is given up is the rescue for ground cover you stand over WHILE its
+  // ray is steep and your gaze is not: a flower at your feet now foreshortens
+  // honestly at the bottom of the frame instead of lying back to face you. At
+  // the clamp's steepest that is a squash, never a sliver — and a squashed
+  // tuft in the last band of the frame is the right trade against every bush
+  // and friend on the planet falling over whenever you walked up to them.
+  const blend = over * ramp(Math.abs(normal.dot(_view)));
+
+  // The lift rides the same blend — it always carried this gate (the flatten
+  // without it left a foreground of paper hovering over its own shadows at
+  // middling altitudes), and now that the blend itself is gated there is no
+  // second factor left to multiply in.
+  const liftBlend = blend;
 
   _up.copy(normal);
   if (blend > 0) {
@@ -1077,11 +1094,12 @@ export function orientBillboard(obj, worldPos, normal, camera, standoff = 0, alo
   // On foot the gate makes the lift structurally impossible, not merely capped:
   // the pitch clamp stops the view axis at 0.95 below level, and the ramp does
   // not open until 1.04 — so nothing you can do standing on the ground lifts a
-  // card. That margin is load-bearing: steepen minLookPitch past -1.04 and the
-  // lift comes back on foot. The reach/6 cap stays anyway, as the guard against
-  // exactly that — it stops a big prop's standoff being pushed through the
-  // camera along a two-unit ray, and in the far view, where the standoff is a
-  // twentieth of the reach, it never binds.
+  // card. That margin is load-bearing TWICE OVER now that the whole blend rides
+  // the gate: steepen minLookPitch past -1.04 and both the lift and the
+  // lie-down come back on foot. The reach/6 cap stays anyway, as the guard
+  // against exactly that — it stops a big prop's standoff being pushed through
+  // the camera along a two-unit ray, and in the far view, where the standoff is
+  // a twentieth of the reach, it never binds.
   if (standoff > 0 && liftBlend > 0) {
     obj.position.copy(_ray).multiplyScalar(Math.min(standoff * liftBlend, reach / 6));
   } else {

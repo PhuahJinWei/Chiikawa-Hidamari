@@ -284,6 +284,21 @@ const chiikawa = {
     { t: 'たのしかった…! だいじに もってたよ…', expr: 'happy' },
     { t: 'うん…、かえすね…', expr: 'normal' },
   ],
+  // Sitting down beside you, because you sat still long enough — see the
+  // joinsit mode in household.js.
+  //
+  // NOTHING IS ASKED OF YOU in any of these, and that is the rule for the whole
+  // bucket rather than a property of the lines that happen to be in it. Every
+  // other thing anybody says here is an answer to something you did; this is
+  // the one they start themselves, and a question would turn it back into a
+  // thing you have to attend to. They are quiet, they are already settling, and
+  // the correct next move is nothing.
+  sitTogether: [
+    { t: 'となり、いい…?', expr: 'happy' },
+    { t: 'わたしも…、すわろ…', expr: 'happy' },
+    { t: 'ここ、きもちいいね…', expr: 'happy' },
+    { t: 'えへへ…', expr: 'happy' },
+  ],
 };
 
 const hachiware = {
@@ -513,6 +528,14 @@ const hachiware = {
     { t: 'たのしかったよ〜! また かしてね!', expr: 'happy' },
     { t: 'うん、かえすね! だいじに してたよ!', expr: 'happy' },
   ],
+  // See the note on Chiikawa's. Hachiware settles in the way Hachiware does —
+  // pleased with the spot, and with an opinion about it.
+  sitTogether: [
+    { t: 'ぼくも まぜて〜!', expr: 'happy' },
+    { t: 'ここ、いい ばしょだねぇ', expr: 'happy' },
+    { t: 'よいしょ…っと', expr: 'happy' },
+    { t: 'なんにも しない じかんって、いいよね', expr: 'happy' },
+  ],
 };
 
 const usagi = {
@@ -713,6 +736,14 @@ const usagi = {
     { t: 'ウラ! （さしだした）', expr: 'happy' },
     { t: 'ヤ〜ハ! ウラ!', expr: 'happy' },
     { t: 'プルルル… （そっと おいた）', expr: 'normal' },
+  ],
+  // See the note on Chiikawa's. Usagi sits down without asking and without
+  // words, which is the most Usagi way to accept an invitation nobody made.
+  sitTogether: [
+    { t: 'ウラ… （すとん）', expr: 'happy' },
+    { t: 'ヤハ〜', expr: 'happy' },
+    { t: 'フンフン♪', expr: 'happy' },
+    { t: 'プルルル…', expr: 'normal' },
   ],
 };
 

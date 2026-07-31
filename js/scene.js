@@ -31,7 +31,7 @@ import {
   IMG, TREE_VARIANTS, FLOWER_VARIANTS,
   MUSHROOM_VARIANTS, SKY_DISC_ART, WORLD_SNOW, TUNE_VARIANTS,
 } from './assets.js';
-import { LOOK, PHASES } from './daylight.js';
+import { LOOK, PHASES, clockRate } from './daylight.js';
 import { PLATEAU, restoreGLSL, RESTORE_APPLY } from './light-model.js';
 import { RENDER_SPAN } from './character.js';
 import {
@@ -60,8 +60,14 @@ import { Hand } from './hand.js';
 // a taller canvas would want its own height, and width follows the drawing.
 //
 // Only the larger props carry a shadow — on something a few pixels across it is
-// a second draw call for nothing — and `small` ones are dropped entirely once
-// you climb far enough that they would be sub-pixel anyway.
+// a second draw call for nothing.
+//
+// `small` used to sit beside `shadow` on every row, and it is gone from all of
+// them. It fed one reader, the altitude cull in update(), which dropped every
+// bush and stump past 2.2 radii; that cull has been removed and the note where
+// it ran says why. The flags went with it rather than staying as data nobody
+// reads — a field that still describes the world truthfully but drives nothing
+// is the kind of thing a later change wires back up by accident.
 //
 // Ground cover is not here; grass and flowers are merged geometry and take
 // their size at the buildGroundCover call below.
@@ -78,12 +84,12 @@ const SPRITE_SIZE = {
   // it never darkened a blade of grass; the only place it could ever be seen was
   // through the door and the windows, lying on the room's floor, in lawn green,
   // wearing the outdoor hour while the room wore its own.
-  house: { h: 3.0, shadow: false, small: false },
+  house: { h: 3.0, shadow: false },
   // Hachiware's mound, and the biggest thing standing on the planet. No shadow,
   // for the same reason the house has none: its disc would be cut from its own
   // width, so it would lie entirely inside the building and never darken a
   // blade of grass anybody could see.
-  cave: { h: 4.0, shadow: false, small: false },
+  cave: { h: 4.0, shadow: false },
   // BUILT, and therefore measured here rather than off a drawing.
   //
   // `aspect` is width over height and `drawn` is how much of that width the ink
@@ -105,18 +111,18 @@ const SPRITE_SIZE = {
   // numbers are the only record of the drawings' shape that the app keeps. The
   // files themselves are in `asset/images/legacy/` if they ever need
   // re-measuring.
-  tree1: { h: 3.8, shadow: true, small: false, aspect: 0.7919911, drawn: 0.66292135 },
-  tree2: { h: 3.8, shadow: true, small: false, aspect: 0.7919911, drawn: 0.70084270 },
-  tree3: { h: 3.8, shadow: true, small: false, aspect: 0.7919911, drawn: 0.72050562 },
+  tree1: { h: 3.8, shadow: true, aspect: 0.7919911, drawn: 0.66292135 },
+  tree2: { h: 3.8, shadow: true, aspect: 0.7919911, drawn: 0.70084270 },
+  tree3: { h: 3.8, shadow: true, aspect: 0.7919911, drawn: 0.72050562 },
   // Drawn art. A bush was never built — every bush on the planet is still its
   // drawing on a card — so these two keep reading their own pixels.
-  bush1: { h: 0.72, shadow: false, small: true },
-  bush2: { h: 0.70, shadow: false, small: true },
-  stump: { h: 0.60, shadow: true, small: true, aspect: 2.52592593, drawn: 0.96480938 },
+  bush1: { h: 0.72, shadow: false },
+  bush2: { h: 0.70, shadow: false },
+  stump: { h: 0.60, shadow: true, aspect: 2.52592593, drawn: 0.96480938 },
   // Giant beside the cast but still smaller than the anime's two-Usagi-tall
   // version. Built at 2.85, it stands about 1.4 Usagis high; the coupe's bowl
   // supplies the 1.11 width-to-height ratio.
-  puddingcup: { h: 2.85, shadow: true, small: false, aspect: 1.11, drawn: 1.0 },
+  puddingcup: { h: 2.85, shadow: true, aspect: 1.11, drawn: 1.0 },
 };
 
 // Trees, bushes and stumps only — the small stuff is merged ground cover. Every
@@ -161,6 +167,38 @@ const GOLDEN_ANGLE = 2.3999632297;
 // Shortening SCENERY_COUNT instead would have been worse again: the spiral is a
 // function of how many points it is asked for, so every prop would have moved.
 const PROP_TYPES = ['tree', 'bush1', null, 'bush2', 'stump'];
+
+// ...and most of the stump slot's spots are holes as well.
+//
+// A fifth of the scatter is a lot of stump. Nine of them stood on the planet
+// against eight trees, which is a felled wood rather than the occasional cut
+// trunk — and a stump reads as an event, the one place out here somebody has
+// been at work. Nine of anything is not an event.
+//
+// THINNED PER SPOT rather than by editing the list above, and that is the whole
+// reason this is a separate number. A slot is `i % PROP_TYPES.length`, so
+// changing the list's LENGTH re-deals every prop on the planet — the note above
+// says why the rock was left as a hole for exactly that reason, and lengthening
+// the list to make one entry rarer would move every tree, bush and blade of
+// grass to thin one kind. Skipping some of the stump slot's own turns moves
+// nothing: the spots that survive are the spots they always were, and the rest
+// are grass, which is what a hole in this spiral has always meant.
+//
+// EVERY OTHER TURN, which takes the planet from nine stumps to four.
+//
+// Three was tried first and is too few: it leaves TWO on the whole world, and
+// two is not rare, it is absent. Rarity here is not free, because a stump is the
+// only thing out of doors with a top — it is the one perch a set-down piece can
+// topple off (see putDownUnique), and the one place 「いっておいで」 can send a
+// friend that is not somebody's house. Both of those want a stump to be a thing
+// you come across, not a thing you would have to go looking for.
+//
+// The four that remain are spread rather than sampled from one stretch of the
+// spiral: consecutive points are a golden angle apart, so every other one is
+// still a spiral. Measured, the closest pair is 5.7 units apart and the widest
+// gap 14.2, on a planet whose horizon is under 5 — so no two are ever in sight
+// of each other, which is what makes each one read as its own small event.
+const STUMP_SPACING = 2;
 
 // Which entry in a biome's `grows` each slot answers to. Two bush drawings are
 // ONE KIND of thing to a biome — "are there bushes here" is not a question a
@@ -887,7 +925,32 @@ const BURY_BY = 0.34;
 // ...and how much of the same snow settles on a tree. See litBySun: a tree
 // catches it on its upper surfaces and stays a tree, where the ground simply
 // becomes snow.
-const TREE_FROST = 0.66;
+//
+// TWO NUMBERS, because it was one and one was the bug. A single flat 0.66 took
+// every fragment of a lathe two thirds of the way to the snow colour — trunk,
+// canopy, the underside of a branch and the shaded north face alike — and a
+// thing whitened evenly from all directions does not read as having snow ON it.
+// It reads as BLEACHED, which is what "objects are too white in winter" was
+// describing.
+//
+// So the mix is weighted by how far up a surface faces, which the geometry
+// already knows: a tree stands with its own +Y on the planet's normal (see where
+// `shell.quaternion` is set from `item.dir`), so the OBJECT-space normal's y is
+// exactly its upness, and it costs one varying to carry. Nothing has to be told
+// where the planet is, and it survives the world group turning under the camera.
+//
+// `TREE_FROST` is what an upward face takes and it is HIGHER than the flat value
+// was — snow lying on a branch really is nearly white. `TREE_FROST_UNDER` is
+// what a downward one takes, and it is deliberately not zero: the ground under a
+// tree in winter is a white sheet throwing light back up, so an underside is
+// cooled rather than left in summer green. The old failure this guards against
+// is on the record — nine fully summer canopies over a buried meadow read as a
+// different picture pasted over the top.
+//
+// What it buys for nothing: a stump's cut face points straight up, so it now
+// wears a white cap without a drawing or a special case.
+const TREE_FROST = 0.80;
+const TREE_FROST_UNDER = 0.16;
 
 // How far clear of a walker's own berth an outdoor bed has to lie, in units.
 // See sleepSpotFor, and the three hundredths of a unit that kept Usagi awake
@@ -1277,6 +1340,11 @@ function scatter(radius, keepOut) {
     // since a spot with no prop on it has no berth to keep and no lake to avoid.
     const slot = PROP_TYPES[i % PROP_TYPES.length];
     if (!slot) continue;
+    // ...and most of the stump slot's own turns are holes too — see
+    // STUMP_SPACING. `turn` is which time round this slot has come up, the same
+    // count the variant picker below uses to rotate the tree drawings.
+    const turn = Math.floor(i / PROP_TYPES.length);
+    if (slot === 'stump' && turn % STUMP_SPACING) continue;
 
     let clear = true;
     for (const h of homes) {
@@ -1315,9 +1383,7 @@ function scatter(radius, keepOut) {
     // Only the larger props are billboards; grass and flowers come from the
     // merged ground cover instead.
     const variants = PROP_VARIANTS[slot];
-    const type = variants
-      ? variants[Math.floor(i / PROP_TYPES.length) % variants.length]
-      : slot;
+    const type = variants ? variants[turn % variants.length] : slot;
     out.push({ dir, type, s: 0.72 + ((i * 37) % 58) / 100 });
   }
   return out;
@@ -1636,6 +1702,10 @@ export class Globe {
     // stands in the weather.
     this.field = new Snowfield(CONFIG.globe.radius);
     this.snowMap = { value: this.field.texture };
+    // Which lamps are currently eating the snow under them, as a pool the
+    // weather update writes over rather than a list it builds — see the loop in
+    // updateRain, which runs every frame of every winter night.
+    this._warmSpots = [];
     // ...and how far under the meadow currently is, so the walk that buries it
     // can be skipped on the frames where the answer has not moved. -1 rather
     // than 0 so the very first call always runs and the meadow starts out
@@ -2590,25 +2660,46 @@ export class Globe {
     // moved, it is a bush with snow lying on top and its flowers gone under,
     // which no mix reaches. See WORLD_SNOW in assets.js and _winter below.
     //
-    // FROSTED AND NOT COVERED — `uSnow * TREE_FROST` rather than the full
-    // value. A tree is a vertical thing with leaves that shed; it catches snow
-    // on its upper surfaces and stays a tree. Taking it the whole way to the
-    // ground colour makes a white lollipop, which is the thing this world has
-    // trees for the opposite of. Two thirds is the point where they read as
-    // having snow ON them rather than as being made of it.
+    // FROSTED AND NOT COVERED — never the full value, because a tree is a
+    // vertical thing with leaves that shed. It catches snow on its upper
+    // surfaces and stays a tree; taken the whole way to the ground colour it is
+    // a white lollipop, which is the thing this world has trees for the opposite
+    // of.
+    //
+    // WHICH SURFACES, and not just how much. This was one flat number over every
+    // fragment and that is what made the winter trees read as bleached — see
+    // TREE_FROST above for the whole of that reasoning and for why the underside
+    // still takes a little. `normal.y` is object space, which on a tree stood up
+    // by `setFromUnitVectors(UP, item.dir)` is upness on its own hillside, so
+    // this needs nothing from the world matrix and cannot be thrown off by the
+    // planet turning.
+    //
+    // The smoothstep runs from just below level to well up rather than across
+    // the whole range: a face angled only slightly up should already be holding
+    // snow, and the last stretch toward straight-up is where a lathe has almost
+    // no area anyway. Starting at -0.1 rather than 0 keeps a hard terminator off
+    // the exact silhouette edge, where a canopy's normals sweep through level.
     const litBySun = (material) => {
       material.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, this.sunUniforms);
         shader.uniforms.uSnow = this.snowAt;
         shader.uniforms.uSnowTint = this.snowTint;
-        shader.vertexShader = `varying vec3 vLampN;\n${shader.vertexShader}`
-          .replace('#include <project_vertex>',
-            'vLampN = mat3( modelMatrix ) * normal;\n#include <project_vertex>');
+        shader.vertexShader = `varying vec3 vLampN;
+varying float vSnowUp;
+${shader.vertexShader}`
+          .replace('#include <project_vertex>', `vLampN = mat3( modelMatrix ) * normal;
+           vSnowUp = normal.y;
+           #include <project_vertex>`);
         shader.fragmentShader = `${SUN_DECL}uniform float uSnow;
 uniform vec3 uSnowTint;
+varying float vSnowUp;
 ${shader.fragmentShader}`
           .replace('#include <map_fragment>', `#include <map_fragment>
-        diffuseColor.rgb = mix( diffuseColor.rgb, uSnowTint, uSnow * ${TREE_FROST.toFixed(2)} );`)
+        float snowLay = mix(
+          ${TREE_FROST_UNDER.toFixed(2)}, ${TREE_FROST.toFixed(2)},
+          smoothstep( -0.10, 0.75, vSnowUp )
+        );
+        diffuseColor.rgb = mix( diffuseColor.rgb, uSnowTint, uSnow * snowLay );`)
           .replace('#include <opaque_fragment>', SUN_ADD);
       };
     };
@@ -3455,7 +3546,7 @@ ${shader.fragmentShader}`
       this.sprites.push({
         anchor, holder, mesh, lit, shell, retired: !!shell,
         trunk: shell ? trunk : null, treeH: shell ? h : 0,
-        normal: item.dir, small: size.small,
+        normal: item.dir,
         type: item.type,
         horizon: reach,
         standoff: h / 2,
@@ -3500,7 +3591,10 @@ ${shader.fragmentShader}`
     // The painted patches of shade under the furniture, kept with the opacity
     // each was BUILT at so dimming them is a multiply — see _syncRoomShade.
     this.interiorShade = [];
-    this.seats = [];
+    // `this.seats = []` stood here — where a guest could sit, filled from
+    // `f.seat` in the furniture tables. Neither room ever flagged one, so it was
+    // empty for its whole life and nobody indoors ever sat down; sitting is in
+    // place now and claims nothing. See _standThemUp in household.js.
     // Furniture that is not where it was put — see nudgeLoose. Empty unless
     // something in CONFIG.interior.furniture asks to be an `item`.
     this.loose = [];
@@ -3841,17 +3935,9 @@ ${shader.fragmentShader}`
 
         // ...AND GRASS GROWS ON THE GRASS.
         //
-        // The crown was turf that had been PAINTED — a scalloped green band in
-        // the skin with blades drawn into it — while every other green thing on
-        // this planet is nine real blades in a clump that bends in the wind. Up
-        // close that reads as a photograph of a lawn laid over the rock: the
-        // meadow around your feet moves and the hilltop does not.
-        //
-        // The painting stays. It is what gives the fringe its scalloped overhang
-        // and its underline, which is the "cut into a hill" cue, and it is what
-        // the blades are standing IN rather than instead of — the same
-        // arrangement the meadow has, where drawn ground cover and built tufts
-        // are both there.
+        // The painted crown now carries the same ticks and tiny blossoms as the
+        // globe's meadow. These dimensional blade clumps are its second layer,
+        // matching the real grass that stands above the field texture.
         //
         // AS MANY AS THE MEADOW WOULD PUT HERE, worked out from area rather than
         // chosen, so this follows BLADE_TUFTS instead of quietly disagreeing
@@ -4709,16 +4795,15 @@ ${shader.fragmentShader}`
           }
         }
 
-        // Somewhere to sit. `top` comes back from the builder, so a redrawn
-        // or resized piece moves its own seat without a number following it.
-        // Somewhere to sit, tagged with whose room it is in: a guest walking
-        // home should be offered a cushion in the house they are walking to,
-        // and the seat list is shared across both.
-        if (f.seat) this.seats.push({ dir, y: built.top, taken: null, home: rec });
+        // A `f.seat` piece used to register a place to sit here, with the height
+        // its builder reported. Nothing was ever flagged in either furniture
+        // table, so the list this fed was empty for its whole life — and sitting
+        // is in place now, which needs no list at all. See _standThemUp in
+        // household.js for the whole of what replaced it.
 
-        // ...and the one piece that is not nailed down. It keeps its own copy
-        // of where it is, because `dir` above is shared with the seat list and
-        // a piece that moved would drag a cushion's position with it.
+        // The one piece that is not nailed down. It keeps its own copy of where
+        // it is, because `dir` above is shared and a piece that moved would drag
+        // that shared position with it.
         //
         // `place` is a closure rather than data, so the mover below needs to
         // know nothing about bearings, tangents or the shell's rotation — all
@@ -5067,7 +5152,9 @@ ${shader.fragmentShader}`
     // level — lower on screen than the cave in front of it, and completely
     // hidden by it. The mound is the cave's own shell now; see CONFIG.cave.
 
-    this.smallProps = this.sprites.filter((s) => s.small).map((s) => s.anchor);
+    // `smallProps` stood here — every bush and stump anchor, gathered so the
+    // altitude cull in update() could hide the lot in one pass. There is no such
+    // cull any more; see the note where it ran.
     this.litProps = this.sprites.filter((s) => s.lit);
 
     // Seed the lamp positions before anything can read them. update() refreshes
@@ -7007,9 +7094,54 @@ ${shader.fragmentShader}`
       if (deep !== this.shell.visible) this.shell.visible = deep;
       if (deep) this.shell.material.displacementScale = cover * CONFIG.weather.depth;
     }
+    // LIGHT EATS SNOW, and the whole of deciding where is one loop over the
+    // lamp arrays — see `thaw` in snowfield.js for what it does with the answer.
+    //
+    // The shader's own lamp list rather than any of the several JS-side ones,
+    // and that is what makes this three lines instead of a special case per kind
+    // of light. Every emitter in the world lands in those arrays, and the ground
+    // shader already reads exactly this product to decide what light reaches the
+    // grass: `uLampK` is how hard the lamp is burning and `1 - uLampIn` is how
+    // much of it is on THIS side of a wall. So the melt inherits, for free, every
+    // rule the lighting already has — a bulb switched off stops melting, a house
+    // with nobody home never starts, and a lantern carried out through the front
+    // door begins thinning the snow the moment it is outside and stops when it
+    // goes back in, because that is what `uLampIn` already says about it.
+    //
+    // `uLampAt` is written a frame later than this, in `update`. That staleness
+    // is why the guard below is worth having rather than something to fix: an
+    // unbuilt slot is still at the origin, and normalising the origin is a NaN
+    // straight into the map. One frame of lag on a four-minute melt is not.
+    const flow = dtMs * clockRate();
+    if (this.field.laid && this.lampUniforms) {
+      const U = this.lampUniforms;
+      const n = U.uLampK.value.length;
+      // Filled into a pool rather than rebuilt, because this runs every frame of
+      // every winter night. One slot per lamp, made once and written over.
+      const pool = this._warmSpots;
+      let live = 0;
+      for (let i = 0; i < n; i++) {
+        const k = U.uLampK.value[i] * (1 - U.uLampIn.value[i]);
+        if (k < 0.05) continue;
+        _lightDir.copy(U.uLampAt.value[i]).sub(this.world.position);
+        if (_lightDir.lengthSq() < 1e-6) continue;
+        if (!pool[live]) pool[live] = { key: 0, dir: new THREE.Vector3(), r: 0, k: 0 };
+        const spot = pool[live++];
+        spot.key = i;
+        spot.dir.copy(_lightDir).normalize();
+        spot.r = U.uLampInner.value[i] + U.uLampReach.value[i] * CONFIG.weather.thawReach;
+        spot.k = k;
+      }
+      this.field.thaw(pool, flow, live);
+    }
+
     // The field's own clock: filling trodden prints back in while it snows, and
     // pushing the map to the GPU at most a few times a second. Both are no-ops
     // on a planet with no snow on it.
+    //
+    // Wall time on purpose, where the thaw above takes `flow` — see the note on
+    // `update` in snowfield.js for the day this took world time and the map
+    // saturated flat white under a fast-day snowfall.
     this.field.update(dtMs, this.wx.flakes || 0);
     this.rain.update(dtMs, {
       ...opts, tint: this.tint, grade: this.wx, camera: this.camera,
@@ -9638,15 +9770,34 @@ ${shader.fragmentShader}`
       }
     }
 
-    // Climb far enough and the little props stop being worth a draw call each.
-    // The altitude is a fraction of the radius for the same reason the far-view
-    // altitudes are: what makes a stump sub-pixel is how far out you are compared
-    // to the size of the planet, not an absolute height above it.
-    const showSmall = this.camera.position.length() < g.radius * 2.2;
-    if (showSmall !== this._showSmall) {
-      this._showSmall = showSmall;
-      for (const a of this.smallProps) a.visible = showSmall;
-    }
+    // THE SMALL-PROP CULL IS GONE. It read:
+    //
+    //   const showSmall = this.camera.position.length() < g.radius * 2.2;
+    //
+    // and hid every bush and stump on the planet past 2.2 radii, on the stated
+    // grounds that "the little props stop being worth a draw call each". Three
+    // things were wrong with it, and only the first is about performance:
+    //
+    //   THEY ARE NOT SUB-PIXEL OUT THERE. The claim the threshold rested on is
+    //   simply not true of this planet — at sky altitude a 0.72-unit bush still
+    //   covers a couple of dozen pixels on a phone. It was plainly visible right
+    //   up to the frame it vanished in.
+    //
+    //   THE CUTOFF SAT BELOW THE VIEWS IT WAS PROTECTING. Orbit is 3.0 radii,
+    //   the そらへ button 3.7, full zoom 4.1 — every one of them past 2.2. So the
+    //   line was never crossed at rest, only in transit, and what it bought was a
+    //   pop of thirty-three things leaving at once in the middle of a climb.
+    //
+    //   IT EMPTIED THE MAP. The far view IS this app's map, which is why it is
+    //   the one place the name chips are left off. Three quarters of the scatter
+    //   is small — 33 of 44 props, twelve of each bush and nine stumps — so the
+    //   map showed eleven things standing on a world that has forty-four.
+    //
+    // What it cost to remove is honest and worth writing down: about fifty draw
+    // calls, in the frame that already has the most, since the far view has no
+    // horizon to hide the near hemisphere behind. If a phone ever struggles, the
+    // knob is SCENERY_COUNT — fewer things everywhere — rather than the same
+    // things blinking out at a line nobody can see.
 
     // Every card squares to your view and leans away from the planet's centre
     // — on a sphere each one has its own idea of which way is up — and sinks
@@ -9709,8 +9860,12 @@ ${shader.fragmentShader}`
     // Nothing fades: the depth buffer hides whatever the curve has swallowed,
     // so props sink behind the horizon rather than dissolving. This is only a
     // cull, kept generous so it never clips something still on screen.
+    // ...and EVERY sprite is asked, bushes and stumps included. This loop used to
+    // skip them whenever the cull above had them hidden, which was right while
+    // something else owned their visibility and is wrong now that nothing does:
+    // skipped, a small prop keeps whatever `seen` it was last given, and the
+    // horizon would stop swallowing it.
     for (const s of this.sprites) {
-      if (s.small && !showSmall) continue;
       const away = Math.acos(clampUnit(s.normal.dot(this._camDir)));
       const seen = away < camReach + s.horizon + 0.10;
       if (seen !== s.seen) {

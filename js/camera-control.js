@@ -251,9 +251,33 @@ export class PlanetCamera {
     this.lookPitch = c.restLookPitch; this.lookPitchT = c.restLookPitch;
     this.alt = c.eyeHeight; this.altT = c.eyeHeight;
 
-    this.gyroHeading = 0;
-    this.gyroPitch = 0;
-    this.gyroBase = null;
+    // THE DEVICE TILT IS GONE, and with it `gyroHeading`, `gyroPitch` and
+    // `gyroBase`. It was a bounded parallax — the phone's own lean nudging the
+    // view by up to seventeen degrees, faded out as you left the ground — and
+    // what it cost was out of all proportion to a garnish nobody could name:
+    //
+    //   A PERMISSION PROMPT AT THE FRONT DOOR. iOS only hands tilt over from
+    //   inside a real user gesture, so `enableGyro` rode the はじめる tap and the
+    //   first thing between a new player and the meadow was a system dialog
+    //   asking for Motion & Orientation Access. That is the worst possible
+    //   trade: the app's opening beat, spent on an effect most people would
+    //   never consciously notice.
+    //
+    //   A BASELINE NOBODY COULD SET. Square was wherever the phone happened to
+    //   be pointing at the first orientation event, and the only thing that ever
+    //   recentred it was a resize. Start the app with the phone flat on a table,
+    //   pick it up, and your neutral gaze was pitched off by the difference for
+    //   the rest of the session.
+    //
+    //   TWO BUGS OF ITS OWN, both fixed and both recorded here because they say
+    //   what the term really was: a second, invisible answer to "which way am I
+    //   looking". The stick read the frame while the camera read the frame plus
+    //   the tilt, so walking crabbed up to seventeen degrees off screen-forward;
+    //   the interaction focus had the same disagreement, and picked a target the
+    //   camera was not showing. Every future reader of that question had to
+    //   remember this existed.
+    //
+    // What is left is one answer: `forward`, which is what `facing` returns.
 
     this.focus = null;
     this.lastTouch = 0;
@@ -293,6 +317,20 @@ export class PlanetCamera {
     // walk above and by the sprint button, which will not arm while it is set.
     this.leash = false;
 
+    // SAT DOWN. Read by `eyeAlt` for the lowered eye, by `_walk` for the beat
+    // it costs to get up, and by body.js for which sheet you are drawn in.
+    //
+    // No seat, no spot, no claim: you sit where you are standing, and the rig
+    // has already guaranteed that wherever that is, it is somewhere legal —
+    // out of the water, off the walls, clear of the trunks. Anywhere you can
+    // stand is somewhere you can sit, which is the entire placement rule.
+    this.seated = false;
+    // How much of getting up is left, in milliseconds — see camera.sitRiseMs.
+    // A countdown rather than a deadline, because the rig is stepped by the
+    // frame's own clock and a deadline set on `performance.now()` would never
+    // arrive under the stepped harness.
+    this._rising = 0;
+
     // THE SELFIE VIEW — see CONFIG.player.selfie*.
     //
     // `selfieOn` is the switch and `selfie` is how far the lens has swung round,
@@ -315,23 +353,44 @@ export class PlanetCamera {
     // How far back the lens has been ASKED to sit, before the world gets its
     // say — see selfieZoom and the march.
     this.selfieWant = CONFIG.player.selfieDist;
-    // ...and how far ROUND you it has been asked to sit, in radians, positive
-    // being toward your right. This is the whole of "move the camera": a lens
-    // that always stays the same distance away and always points back at you
-    // has exactly one place left to go, which is sideways.
+    // WHERE THE LENS IS POINTED, which is the half of a camera this view did not
+    // have for a while and is the reason it felt caged.
     //
-    // A BEARING RATHER THAN A SIDESTEP, and the difference matters. Offsetting
-    // the lens along a screen axis would change its distance too — the corner of
-    // a box is further from the middle than the edge is — so a pan would
-    // silently undo the zoom. Swinging it round an arc cannot.
+    // Every other control here moves the LENS — the tilt slides it up its arc,
+    // the zoom in and out, turning swings it round — and then the camera looked
+    // at the same fixed point on your chest whatever any of them had done. The
+    // measured consequence: swing the old bearing pan its full 30 degrees each
+    // way and the avatar sat at screen centre the whole time (NDC x = -0.01).
+    // Every photograph was a passport photo with a rotating background, and the
+    // three framings anybody actually reaches for — you on the thirds line, you
+    // low with sky above, the low hero shot looking up past you — were not
+    // merely hard, they were unreachable.
     //
-    // No vertical twin, deliberately. The lens already rises and falls with the
-    // one-finger drag (see `lift`), and a second height control would be two
-    // knobs fighting over one number with no way for either to show what the
-    // other had done.
-    this.selfieSide = 0;
+    // So the two-finger drag stopped moving the lens and started moving the
+    // FRAME. `selfieShift` slides the aim sideways and `selfieAimY` sets how
+    // high up you it sits. What the old bearing pan did is not lost: turning
+    // your body already swings the lens round you, unbounded, and did so before
+    // the pan existed — which is exactly why a bounded second control that
+    // produced the same picture was the redundant one to spend.
+    //
+    // SIDEWAYS IS A FRACTION OF THE DISTANCE, not a length. A world offset that
+    // reads as a third of the frame at arm's length is off the edge of the
+    // picture when the lens is pulled in to 2.2 — measured, the half-frame at
+    // that range is 0.615 units. Scaling with `back` makes the control mean the
+    // same thing at every zoom, which is what a framing control has to do.
+    this.selfieShift = 0;
+    // ...and the height it aims at, absolute rather than an offset, because
+    // "at his feet" and "over his head" are facts about the body rather than
+    // about how far away the camera is.
+    this.selfieAimY = CONFIG.player.selfieAim;
+    // ...and how high it has been asked to fly, as the pitch term the lift is
+    // worked out from. Its own value rather than `lookPitch`, which is where
+    // this number used to come from and could not do the job — see the clamp in
+    // applyDrag and the range in CONFIG.
+    this.selfieTilt = 0;
     // What the WORLD added to that, easing, when the bearing you asked for was
-    // full of tree — see _selfieDodge. Kept apart from `selfieSide` so that
+    // full of tree — see _selfieDodge. Its own field, and the only thing left on
+    // this channel now that the user's half of it became the framing, so that
     // stepping out from behind the tree returns the lens to the framing you
     // chose rather than to wherever it was pushed.
     this.selfieAuto = 0;
@@ -382,7 +441,6 @@ export class PlanetCamera {
     this._look = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
     this._viewDir = new THREE.Vector3();
-    this._onOrient = this._onOrient.bind(this);
   }
 
   // Where the eye sits when you are stood up on whatever is under you. It was
@@ -396,7 +454,16 @@ export class PlanetCamera {
   // hop is the exact bug the old separate hop channel existed to avoid. `stand`
   // is the surface you belong to, and it does not move while you are in the air
   // above it.
-  get eyeAlt() { return this.body.stand + CONFIG.camera.eyeHeight; }
+  // ...AND SITTING IS SIMPLY A LOWER PLACE TO BE STANDING, which is the whole
+  // trick and the reason sitting needed almost no new machinery. Every question
+  // the rig asks about being landed goes through this one getter — the pinch's
+  // bank, the walk gate, the fall, `isFirstPerson` itself — so dropping the eye
+  // here sits you down as far as all of them are concerned, and not one of them
+  // had to be taught a new state. See camera.sitDrop.
+  get eyeAlt() {
+    const c = CONFIG.camera;
+    return this.body.stand + c.eyeHeight - (this.seated ? c.sitDrop : 0);
+  }
 
   // Strictly: both feet down. Not "close to the ground" — walking and
   // head-turning only exist here, and everywhere else is the globe view.
@@ -410,6 +477,36 @@ export class PlanetCamera {
   // the instant it is pressed instead of waiting out the climb.
   get goingUp() { return this.altT > CONFIG.camera.eyeHeight * 3; }
 
+  // ------------------------------------------------------------- sitting down
+  //
+  // Sit where you stand, or get back up. Both write TARGETS — `altT` and
+  // `lookPitchT` — which the update loop already eases, so the camera sinks and
+  // rises rather than cutting, and the gesture costs no animation of its own.
+  //
+  // Refused off the ground for the reason the selfie is: there is nothing to sit
+  // on up there, and `isFirstPerson` is the app's word for having somewhere to
+  // put your feet.
+  sit() {
+    if (this.seated || !this.isFirstPerson) return false;
+    this.seated = true;
+    // Read AFTER the flag, because `eyeAlt` is what the flag changes.
+    this.altT = this.eyeAlt;
+    this.lookPitchT = CONFIG.camera.sitLookPitch;
+    // A run does not survive sitting down. It stands itself down when movement
+    // ends, and this is movement ending in the most complete way available.
+    this.sprintOn = false;
+    return true;
+  }
+
+  standUp() {
+    if (!this.seated) return false;
+    this.seated = false;
+    this._rising = CONFIG.camera.sitRiseMs;
+    this.altT = this.eyeAlt;
+    this.lookPitchT = CONFIG.camera.restLookPitch;
+    return true;
+  }
+
   // Turn round and look at yourself, or turn back. Refused off the ground,
   // where the far view owns the camera and there is no body to look at anyway.
   setSelfie(on) {
@@ -422,8 +519,10 @@ export class PlanetCamera {
     // the app remembering something the user set for one photograph.
     if (want) {
       this.selfieWant = CONFIG.player.selfieDist;
-      this.selfieSide = 0;
+      this.selfieShift = 0;
+      this.selfieAimY = CONFIG.player.selfieAim;
       this.selfieAuto = 0;
+      this.selfieTilt = 0;
     }
     // ...and the stick is dropped on the spot rather than on the next tick, so
     // turning the camera round mid-stride cannot leave a throttle running
@@ -446,23 +545,32 @@ export class PlanetCamera {
     this.selfieWant = clamp(this.selfieWant * factor, p.selfieMin, p.selfieMax);
   }
 
-  // Slide the lens round you. `dx` is in screen-ish units — pixels of drag or a
-  // frame's worth of held key — and the sign is the one a hand expects: dragging
-  // right carries the camera right, so the world behind you swings left, exactly
-  // as it does when you turn a real one.
+  // MOVE THE FRAMING, in pixels of drag or a frame's worth of held key.
   //
-  // CLAMPED TO A FIXED ARC, which is the "fixed area" this was asked for. Past
-  // about a third of a turn the lens is filming your ear, and past a half it is
-  // behind you — a back view in a world where every card turns to face the lens,
-  // which is the one shot this art cannot make. See the note at the top of the
-  // selfie.
-  selfiePan(dx) {
+  // THE PICTURE FOLLOWS YOUR FINGERS, which is the opposite sign from a
+  // viewfinder pan and the right one here. You are not aiming a camera at a
+  // subject out in the world; you are placing YOURSELF in a picture you are
+  // looking at, and the gesture for that is the one you use to drag a photograph
+  // — push right and you go right. Aiming the other way round is what a camera
+  // operator does, and this is not one.
+  //
+  // CLAMPED TO A BOX, which is the "fixed area" this was always meant to be: far
+  // enough to put yourself on a thirds line or leave a head of sky, never far
+  // enough to lose yourself out of your own photograph.
+  selfieFrame(dx, dy) {
     const p = CONFIG.player;
-    if (!dx) return;
-    this.selfieSide = clamp(
-      this.selfieSide + dx * p.selfiePanSens,
-      -p.selfieSideMax, p.selfieSideMax,
-    );
+    if (dx) {
+      this.selfieShift = clamp(
+        this.selfieShift - dx * p.selfieShiftSens,
+        -p.selfieShiftMax, p.selfieShiftMax,
+      );
+    }
+    if (dy) {
+      this.selfieAimY = clamp(
+        this.selfieAimY + dy * p.selfieAimSens,
+        p.selfieAimLow, p.selfieAimHigh,
+      );
+    }
   }
 
   toggleSelfie() { return this.setSelfie(!this.selfieOn); }
@@ -478,7 +586,34 @@ export class PlanetCamera {
       // Turning on the spot: a rotation about your own up, so it post-multiplies
       // and leaves where you stand alone. Rotating about the frame's own up axis
       // is what "turn your head" means, and it needs no anchor vector to do it.
+      //
+      // TURNING STILL TURNS YOU in the selfie — that is what swings the lens
+      // round, and it is the same gesture meaning the same thing.
       this.frameT.multiply(_q.setFromAxisAngle(REF_UP, dx * c.headingSens));
+      // ...BUT THE VERTICAL BELONGS TO THE LENS while it is turned round.
+      //
+      // The lift used to be worked out from `lookPitch`, which is the WALKING
+      // gaze, and that gaze is clamped to (-0.95, +0.30) for a reason that has
+      // nothing to do with photographs: on a planet whose horizon sits thirty
+      // degrees BELOW your eye, down is where the world is and up is nothing but
+      // sky, so the range is asymmetric on purpose. Borrowed by the selfie it
+      // capped the lens at 1.9 + 0.30 x 1.5 = 2.35 units — barely over the head
+      // of a 2.02-unit Momonga, 20.6 degrees of elevation, against a `selfieTop`
+      // of 3.6 that needed a pitch of 1.13 and could never be reached. The high
+      // angle is the most-used shot there is and the app simply could not make
+      // one. Measured before the split: 0.85 to 2.35, and no further.
+      //
+      // So the selfie keeps its own tilt, with its own range, exactly as it
+      // already keeps its own zoom and its own bearing. `lookPitchT` is left
+      // alone while the lens is round, which also means turning back finds the
+      // walking gaze where you left it rather than wherever the camera wandered.
+      if (this.selfieOn) {
+        this.selfieTilt = clamp(
+          this.selfieTilt + dy * c.lookPitchSens,
+          CONFIG.player.selfieTiltMin, CONFIG.player.selfieTiltMax,
+        );
+        return;
+      }
       this.lookPitchT = clamp(
         this.lookPitchT + dy * c.lookPitchSens,
         c.minLookPitch, c.maxLookPitch,
@@ -532,6 +667,11 @@ export class PlanetCamera {
 
   zoomBy(mult) {
     const c = CONFIG.camera;
+
+    // You cannot fly sitting down. Standing first also lifts the eye back to
+    // where the bank below measures from, so a pinch begun while seated is
+    // judged against the same landed altitude as any other.
+    if (this.seated) this.standUp();
 
     // Taking off is deliberate, and being deliberate has to be ACCUMULATED.
     //
@@ -620,10 +760,6 @@ export class PlanetCamera {
     setFrame(this.frameT, _wAim, dir);
   }
 
-  // Which way you are looking, as opposed to which way the frame faces: the
-  // gyro is a bounded offset on top, faded out as you leave the ground. Both the
-  // camera and the walk direction come through here, which is the point — they
-  // used to disagree by exactly this term.
   // The two poses, mixed by `selfie`. Writes `_pos` and `_look` in place, so
   // the roll and the lookAt below take it without knowing anything happened.
   //
@@ -644,7 +780,7 @@ export class PlanetCamera {
     // flies — and that is what decides which of the things on the ground it has
     // to care about at all. See _selfieReach.
     let lift = clamp(
-      p.selfieHigh + this.lookPitch * p.selfieSwing,
+      p.selfieHigh + this.selfieTilt * p.selfieSwing,
       p.selfieLow, p.selfieTop,
     );
     // ...and never through the plaster. `selfieTop` is 3.6 against a room whose
@@ -662,8 +798,10 @@ export class PlanetCamera {
     // have asked the camera to sit. `_T` is that heading and is already computed
     // above, so a swipe that turns you also swings the lens round you — an orbit
     // for free, and one that agrees with the direction the stick walks.
+    // Straight out in front of you now, with only the world's own dodge added —
+    // the user's half of this channel became the framing above, and turning your
+    // body is the unbounded version of what it used to do.
     this._bear.copy(this._T);
-    if (this.selfieSide) this._bear.applyAxisAngle(A, this.selfieSide);
 
     // ...and then the world's own opinion about that bearing, eased in so the
     // lens slides round a trunk rather than jumping round it.
@@ -714,7 +852,19 @@ export class PlanetCamera {
       if (_selfieAimDir.lengthSq() < 1e-9) _selfieAimDir.copy(A);
       else _selfieAimDir.normalize();
     }
-    _selfieLook.copy(_selfieAimDir).multiplyScalar(floor + p.selfieAim);
+    // ...AT WHATEVER HEIGHT UP YOU THE FRAMING ASKED FOR, and then shifted along
+    // the frame's own sideways.
+    //
+    // `_axis` is A x the bearing, so it is the tangent perpendicular to the line
+    // between you and the lens — the picture's own left-and-right, at every
+    // heading, for free. Adding a multiple of it to the look-at point slides the
+    // whole frame across you; a look-at target is just a point, so it costs one
+    // addScaledVector and needs no second rotation and no second basis.
+    //
+    // Scaled by `back` so a shift means the same fraction of the picture however
+    // near or far the lens has been pulled — see selfieShift.
+    _selfieLook.copy(_selfieAimDir).multiplyScalar(floor + this.selfieAimY)
+      .addScaledVector(this._axis, this.selfieShift * back);
 
     this._pos.lerp(_selfiePos, k);
     this._look.lerp(_selfieLook, k);
@@ -826,20 +976,17 @@ export class PlanetCamera {
     return bestAng;
   }
 
-  _viewTangent(out) {
-    const yaw = this.gyroHeading * (1 - this.w);
-    out.copy(this.forward);
-    return yaw === 0 ? out : out.applyAxisAngle(this.anchor, -yaw);
-  }
-
-  // The same answer, for anything outside this class that has to agree with the
-  // camera about what is in front of you — which the interaction focus in
-  // main.js does, since "am I facing that" is a question about what is on the
-  // player's screen. `forward` is the wrong one to read from out there: with the
-  // gyro live it differs from the view by exactly the offset above, and a focus
-  // picked off the frame while the camera showed something else would be the
-  // same disagreement this method was written to end.
-  facing(out) { return this._viewTangent(out); }
+  // WHICH WAY YOU ARE LOOKING, and the one place anything asks.
+  //
+  // `_viewTangent` stood here and this was a wrapper over it. The two differed
+  // by the device tilt, and with that gone they are the same vector, so there is
+  // one method rather than two — but it is still a method rather than everybody
+  // reaching for `forward` themselves, and deliberately so. Three callers
+  // outside this class ask it (the interaction focus, the walk, leading a friend
+  // by the hand), and every one of them is really asking "what is on the
+  // player's screen". That has been the same as the frame's bearing before and
+  // may not be again; when it is not, this is the single line that has to know.
+  facing(out) { return out.copy(this.forward); }
 
   // The camera is yours alone: walking never turns it. This app is about
   // looking at somebody, and sidestepping to frame them better only to have
@@ -866,14 +1013,42 @@ export class PlanetCamera {
     let driveT = 0;
     const mag = Math.hypot(this.move.x, this.move.y);
 
+    // GET UP FIRST, and only then go. A push on the stick while you are sitting
+    // spends itself standing you up, and the walk starts from the next one.
+    //
+    // The beat is the point rather than a cost of the implementation. Sitting
+    // down is a thing you did deliberately and it should take a moment to undo,
+    // the way it takes a moment to do — a body that slid straight from a seated
+    // drawing into a walk would read as the pose never having meant anything.
+    // The camera is already rising through the same frames, so the beat is
+    // filled rather than dead.
+    //
+    // `goto` is cleared with it: a walk-to that arrived while you were seated
+    // has been overtaken by you standing up on purpose.
+    if (this.seated) {
+      if (mag > 0.001) { this.standUp(); this.goto = null; }
+      this.drive += (0 - this.drive) * (1 - Math.exp(-dtMs / p.accelMs));
+      return;
+    }
+    // ...and the beat it takes, which is what makes standing up a thing that
+    // happens rather than a flag that flips. Without it the frame after the flag
+    // was already walking, in the same unbroken push — measured at 2cm of travel
+    // with the seated drawing still on screen. See camera.sitRiseMs.
+    if (this._rising > 0) {
+      this._rising -= dtMs;
+      this.drive += (0 - this.drive) * (1 - Math.exp(-dtMs / p.accelMs));
+      return;
+    }
+
     if (mag > 0.001) {
       this.goto = null;
-      // Read against where you are LOOKING, gyro included. The view tangent
-      // carries the tilt offset and the walk direction did not, so with the
-      // phone held off-square the stick pushed you up to gyroShare — 0.3 radians,
-      // seventeen degrees — away from straight ahead. Stick hard forward, and you
-      // crabbed sideways at any latitude. Same term, same place, no disagreement.
-      this._viewTangent(this._wF);
+      // Read against where you are LOOKING, which is the same question the
+      // camera answers a few lines further down and is asked here through the
+      // same method for that reason. It was two answers once — the device tilt
+      // rode the camera's and not the stick's, and hard forward crabbed you
+      // sideways by as much as seventeen degrees. One answer cannot disagree
+      // with itself, which is the whole of why `facing` exists.
+      this.facing(this._wF);
       this._wE.crossVectors(this._wF, A);            // east of where you look
       this._wD.copy(this._wF).multiplyScalar(-this.move.y)
         .addScaledVector(this._wE, this.move.x);
@@ -1144,12 +1319,17 @@ export class PlanetCamera {
   // before would still be sitting there waiting to launch you.
   goToSky() {
     this._lift = 1;
+    this.seated = false;
     this.altT = CONFIG.camera.skyAlt;
   }
 
   goToGround() {
     const c = CONFIG.camera;
     this._lift = 1;
+    // Landing is landing on your feet. Set directly rather than through
+    // standUp, whose whole job is writing the two targets this method is about
+    // to write itself.
+    this.seated = false;
     // Onto whatever is under where you are, which after a flight is not
     // necessarily what you took off from.
     this._standOn(this.anchor);
@@ -1254,8 +1434,12 @@ export class PlanetCamera {
 
     // Stand there, face them. This was always vector work that converted to
     // lat/lon and a bearing on the last three lines; now it just stops.
+    //
+    // STAND, and the word is meant literally: going somewhere is getting up.
+    // Cleared before `eyeAlt` is read, since that is what it changes.
     setFrame(this.frameT, spot, to);
     this._lift = 1;
+    this.seated = false;
     this._standOn(spot);
     this.altT = this.eyeAlt;
     this.lookPitchT = c.faceLookPitch;
@@ -1344,6 +1528,11 @@ export class PlanetCamera {
     // are already in the air. Both refusals still hold; they are just asked by
     // whichever of the two can actually answer.
     if (!this.isFirstPerson) return false;
+    // Sitting spends the press getting up, exactly as a push on the stick does.
+    // False, because nothing hopped — and the hop's answer is what the cast
+    // read to decide whether to bounce back at you. A friend answering a jump
+    // that was really you standing up would be waving at nothing.
+    if (this.seated) { this.standUp(); return false; }
     return this.body.hop();
   }
 
@@ -1400,6 +1589,7 @@ export class PlanetCamera {
     keepClear(spot);
     setFrame(this.frameT, spot, facing);
     this._lift = 1;
+    this.seated = false;
     this._standOn(spot);
     this.altT = this.eyeAlt;
     this.lookPitchT = c.restLookPitch;
@@ -1442,6 +1632,9 @@ export class PlanetCamera {
       this.alt = this.altT;
     }
     this._dash = 0;
+    // Getting up is a debt of the same kind — settle mid-rise and the rest of
+    // it would be spent refusing the first steps of whoever took the camera.
+    this._rising = 0;
     this.travelDir.copy(this.forward);
     // The walking lens is a debt like any other. Left kicked in, the doorway
     // would carry a wider camera through the threshold and the room on the far
@@ -1450,34 +1643,14 @@ export class PlanetCamera {
     this._setFov(CONFIG.camera.fov);
   }
 
-  // iOS only hands over tilt from inside a real user gesture.
-  async enableGyro() {
-    const DOE = window.DeviceOrientationEvent;
-    if (!DOE) return false;
-    try {
-      if (typeof DOE.requestPermission === 'function') {
-        const res = await DOE.requestPermission();
-        if (res !== 'granted') return false;
-      }
-      window.addEventListener('deviceorientation', this._onOrient, true);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  _onOrient(e) {
-    if (e.beta === null || e.gamma === null) return;
-    if (!this.gyroBase) this.gyroBase = { beta: e.beta, gamma: e.gamma };
-    const c = CONFIG.camera;
-    // A bounded offset, never accumulated — otherwise holding the phone at an
-    // angle would slowly spin you on the spot.
-    const lim = c.gyroShare;
-    this.gyroHeading = clamp((e.gamma - this.gyroBase.gamma) * c.gyroSens, -lim, lim);
-    this.gyroPitch = clamp((e.beta - this.gyroBase.beta) * c.gyroSens, -lim * 0.6, lim * 0.6);
-  }
-
-  recentreGyro() { this.gyroBase = null; }
+  // `enableGyro`, `_onOrient` and `recentreGyro` stood here. The reasoning for
+  // their removal is with the fields they wrote, at the top of the constructor.
+  //
+  // Nothing replaces them, and that is the point: this class no longer asks the
+  // browser for a sensor, no longer holds a permission that can be refused, and
+  // no longer has a second opinion about where you are looking. The one thing
+  // outside it that has to change with them is the start gate in main.js, which
+  // was carrying the iOS gesture requirement.
 
   update(dtMs, now) {
     const c = CONFIG.camera;
@@ -1563,7 +1736,7 @@ export class PlanetCamera {
     const height = R + this.alt + bob + this.body.lift;
 
     const A = this.anchor;
-    this._viewTangent(this._T);
+    this.facing(this._T);
 
     // Swing back off the overhead line as we rise, or the far view would be
     // straight down at our own feet instead of a three-quarter of the planet.
@@ -1571,7 +1744,7 @@ export class PlanetCamera {
     this._pos.copy(A).applyAxisAngle(this._axis, -c.tiltBack * w).multiplyScalar(height);
 
     // Look target runs from a point out at the horizon to the planet's centre.
-    const pitch = clamp(this.lookPitch + this.gyroPitch * (1 - w), c.minLookPitch, c.maxLookPitch);
+    const pitch = clamp(this.lookPitch, c.minLookPitch, c.maxLookPitch);
     this._fwd.copy(this._T).multiplyScalar(Math.cos(pitch)).addScaledVector(A, Math.sin(pitch));
     this._look.copy(A).multiplyScalar(height).addScaledVector(this._fwd, c.lookAhead);
     this._look.lerp(ORIGIN, w);

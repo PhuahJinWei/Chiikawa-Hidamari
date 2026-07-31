@@ -77,7 +77,8 @@ import { activePhase } from './daylight.js';
 // of a front sends somebody out of their own front door and straight back in.
 import { isSheltering, snowPlayable, rainbowOut, pondsFrozen } from './weather.js';
 import {
-  keepOffSolids, inBuilding, inLake, lakeReach, dirFromLatLon, underRoof, inSolid,
+  keepOffSolids, keepOutside, inBuilding, inLake, lakeReach, dirFromLatLon,
+  underRoof, inSolid,
 } from './sphere.js';
 
 // The one hour nobody is up for.
@@ -219,6 +220,15 @@ const PASTIMES = [
 const PASTIME_FOR = {};
 for (const p of PASTIMES) PASTIME_FOR[p.who] = p;
 
+// HOW LONG SOMEBODY WHO WANTED THE STAGE AND FOUND IT TAKEN WAITS before asking
+// again. Not zero, and that is the whole point of the number: a queue that let
+// the next act begin the moment the last one bowed would turn "both at once"
+// into "one straight after the other", which is the same machine wearing a
+// different costume and just as plainly a rota. A minute or two of ordinary
+// wandering in between is what makes each one its own occasion.
+const PASTIME_QUEUE_MIN = 60 * 1000;
+const PASTIME_QUEUE_MAX = 150 * 1000;
+
 // ------------------------------------------------------------ BEING LED
 //
 // How far to one side of you a friend walks while you are holding their hand,
@@ -314,6 +324,24 @@ const MODES = [
     enter: (hh, bot, s, t) => hh._gatherEnter(bot, s, t),
     tick: (hh, bot, s, t) => hh._gatherTick(bot, s, t),
     exit: (hh, bot, s, t) => hh._gatherExit(bot, s, t),
+  },
+  {
+    // COMING TO SIT WITH YOU — see household.joinSettleMs.
+    //
+    // ABOVE THE HOBBY, and that placement is the app's own rule about this
+    // world rather than a preference: a person beats a pastime everywhere on
+    // this planet. Hachiware puts the guitar down to come and sit with you, and
+    // picks it up again afterwards, without either of those being written
+    // anywhere — they are two rows of a sorted list.
+    //
+    // Below the weather, the hour and the hand for the same reason everything
+    // else is: rain ends it, midnight ends it, and taking somebody's hand is a
+    // more direct answer to the same wish.
+    key: 'joinsit',
+    wants: (hh, bot, s, w) => hh._wantsJoin(bot, s, w),
+    enter: (hh, bot, s, t) => hh._joinEnter(bot, s, t),
+    tick: (hh, bot, s, t, w) => hh._joinTick(bot, s, t, w),
+    exit: (hh, bot, s, t) => hh._joinExit(bot, s, t),
   },
   {
     // A HOBBY — see PASTIMES. Above the visit and below everything else, which
@@ -416,7 +444,11 @@ export class Household {
         route: null,     // waypoints still to walk, first is current errand
         legs: 0,         // how many were left when progress was last seen
         litUp: null,     // the lights they switched off on their way to bed
-        seat: null,      // the seat they are holding, or null
+        // `seat: null` stood here — which cushion this one was holding. Sitting
+        // is in place now and claims nothing, so there is nothing to remember.
+        // When they may next come and sit with you — see joinCooldownMs. Zero
+        // is "any time", which is where everybody starts.
+        joinAfter: 0,
         until: 0,        // when a stay ends
         giveUpAt: 0,
         // WHOSE DOOR. Matched on the `owner` written beside each home in
@@ -624,22 +656,25 @@ export class Household {
     ];
   }
 
-  // A seat nobody is holding, or null. Guests take one where they can, which
-  // is most of why the room reads as somewhere they live: three characters
-  // stood to attention on a floor is a waiting room, one of them sat down is
-  // a home.
+  // ON THEIR FEET, whatever they were on. Called by every path that is about to
+  // walk somebody, because a body cannot walk sitting down — see `perched`,
+  // which is what the wander checks.
   //
-  // In THIS home, which is what stops somebody walking across the planet to sit
-  // on a cushion in a room they were not going to. The seat list is shared
-  // across both interiors — every seat knows which home it is in, and this is
-  // the one reader that has to care.
-  _freeSeat(pl) {
-    return this.globe.seats.find((s) => !s.taken && s.home === pl.home) || null;
-  }
-
-  _releaseSeat(bot, s) {
-    if (s.seat) s.seat.taken = null;
-    s.seat = null;
+  // `_freeSeat` and `_releaseSeat` stood here, and their story is worth keeping
+  // rather than deleting silently. Guests used to look for a free CUSHION on
+  // arriving, claim it so two of them could not take the same one, and give it
+  // back on the way out. It was correct machinery for a room that had cushions
+  // in it, and neither room ever did: `globe.seats` was empty from the day the
+  // furniture tables were written, so `_freeSeat` returned null every time and
+  // nobody in this world has ever sat down indoors.
+  //
+  // What replaced it is the rule the player's own verb follows — sit where you
+  // stopped. It needs no seat list, no claim and no release, because two friends
+  // already do not STAND in the same place: the meets stop them at conversational
+  // distance and the berths keep them apart, and sitting where you stopped
+  // inherits all of that spacing for nothing. What is left of the old pair is
+  // the one line that still had a job.
+  _standThemUp(bot) {
     bot.ch.standUp();
   }
 
@@ -654,6 +689,17 @@ export class Household {
     const h = CONFIG.household;
     const pl = s.place;
     const head = s.route[0];
+    // ON THEIR FEET BEFORE THEY GO ANYWHERE, and this is the one place it can be
+    // said once for every mode. A body cannot walk sitting down — the wander is
+    // switched off for anybody `perched` — so an errand handed to somebody
+    // sitting on the grass would set a destination they could not walk to, and
+    // the mode would time out waiting for a walk that was never going to start.
+    //
+    // It has to be HERE rather than where each route is planned, because routes
+    // are planned in five places and re-planned on every stall. This is the one
+    // funnel they all pass through, and standing somebody already standing up is
+    // free — see Character.standUp, which returns immediately unless perched.
+    if (ch.perched) ch.standUp();
     ch.errand = ch.errand || head.clone();
     ch.errand.copy(head);
     // How near counts as arrived depends on WHERE the waypoint is, not on how
@@ -1046,25 +1092,14 @@ export class Household {
       // rather than waiting out a full interval after a walk that already ended
       // in standing still.
       s.potterAt = 0;
-      // Sit down in the one they walked to. Somebody waiting out a shower
-      // sitting down is the whole of what makes the room read as shelter rather
-      // than as three people standing in a box — and it is the same cushion the
-      // same guest would have taken on an ordinary visit, so nothing new is
-      // needed.
+      // Down where they stopped. Somebody waiting out a shower sitting down is
+      // the whole of what makes the room read as shelter rather than as three
+      // people standing in a box.
       //
-      // Claimed back in _aimAtShelter, so by here it is usually already theirs
-      // and this only has to sit them in it. The second look is for the case
-      // where every seat was taken when they set off and one has since been
-      // given up — no reason to stand for the rest of a storm beside an empty
-      // cushion. Whoever holds one keeps it; nothing here can take it away.
-      if (!s.seat) {
-        const seat = this._freeSeat(s.place);
-        if (seat) {
-          seat.taken = ch;
-          s.seat = seat;
-        }
-      }
-      if (s.seat) ch.sitAt(s.seat.dir, s.seat.y);
+      // No seat to find and none to claim — see _standThemUp. Their walk ended at
+      // their own standing spot, one each, so sitting there puts them exactly
+      // where the room already spaced them.
+      ch.sitHere();
       return;
     }
     if (s.route.length !== s.legs) {
@@ -1113,29 +1148,17 @@ export class Household {
     // AT the cave for as long as he is in it.
     s.place = pl;
     if (!pl) { s.route = null; return; }
-    // THE SEAT IS TAKEN BEFORE THE WALK, which is the ordinary visit's rule and
-    // was the whole of what went wrong here.
-    //
-    // This planned every shelterer to `spots[0]` and went looking for a cushion
-    // only once they arrived. One number, for everybody, in both houses — so
-    // the walk itself aimed all of them at the same point on the floor and they
+    // THEIR OWN CORNER, DECIDED BEFORE THE WALK. This planned every shelterer
+    // to `spots[0]` once — one number, for everybody, in both houses — so the
+    // walk itself aimed all of them at the same point on the floor and they
     // finished the storm standing in each other. Usagi barging into Chiikawa's
     // made it plain, because that is the case with two bodies in one room.
     //
-    // Claimed here instead, so the seat IS the destination and two people
-    // cannot be given the same one. Guarded on not already holding it: this
-    // runs again on every stall (see _shelterTick), and re-claiming would hand
-    // out a second cushion each time somebody was slow through the door.
-    if (!s.seat) {
-      const seat = this._freeSeat(pl);
-      if (seat) {
-        seat.taken = ch;
-        s.seat = seat;
-      }
-    }
-    const dest = s.seat
-      ? s.seat.dir.clone()
-      : this._standSpot(bot, pl, new THREE.Vector3());
+    // `_standSpot` is keyed off their place in the cast rather than off what is
+    // free, so two people can never be sent to the same one and there is nothing
+    // to claim or release — which is also why this survives being re-run on
+    // every stall without handing anybody a second anything.
+    const dest = this._standSpot(bot, pl, new THREE.Vector3());
     s.route = ch.dir.dot(pl.dir) > Math.cos(pl.building.r)
       ? [dest]
       : this._routeIn(pl, dest, ch.dir);
@@ -1195,13 +1218,16 @@ export class Household {
   // means the visit's own leaving code overwrites it without having to know
   // this exists.
   //
-  // NOBODY GETS UP OFF A CUSHION TO DO IT. A seat is the one place indoors that
-  // is already somewhere to be, and standing up to pace would undo the whole
-  // reason a guest takes one.
+  // NOBODY GETS UP TO DO IT. Sitting down is already somewhere to be, and
+  // standing up to pace would undo the whole reason they sat.
+  //
+  // Asked of the BODY rather than of a seat record, which is what the change to
+  // sit-in-place left behind: `perched` is true for a sitting friend and for one
+  // up on a pudding, and both of them are somewhere they chose to be.
   _potter(bot, s, tMs, pl) {
     const ch = bot.ch;
     if (!pl) return;
-    if (s.seat) {
+    if (ch.perched) {
       ch.hold('rest', tMs + 1500);
       return;
     }
@@ -1269,7 +1295,7 @@ export class Household {
     const pl = s.place;
     ch.hurrying = false;
     s.hide = null;
-    this._releaseSeat(bot, s);
+    this._standThemUp(bot);
     ch.errand = null;
     ch.walking = false;
     s.route = null;
@@ -1556,6 +1582,24 @@ export class Household {
   // much of their attention you are owed, and they do it in one place.
   update(dtMs, tMs, indoors) {
     if (!this.places.length) return;
+    // THE FIRST HOBBY IS NOT DUE AT THE DOOR.
+    //
+    // `pastimeAt` began life unset, and `_wantsPastime` reads unset as "ready
+    // now" — so the opening move of every session, measured, was BOTH of them
+    // setting off for the pudding and the stump at second 0 and performing
+    // together by second 1.4. A rare occasion that greets you on the doorstep
+    // every time you arrive is not an occasion, it is a screensaver.
+    //
+    // Seeded lazily rather than in the constructor because that is where the
+    // clock is; one independent draw each, so they do not merely start late,
+    // they start at DIFFERENT times.
+    if (!this._pastimeSeeded) {
+      this._pastimeSeeded = true;
+      for (const b of this.bots) {
+        const p = PASTIME_FOR[b.spec.key];
+        if (p) this.state.get(b).pastimeAt = tMs + between(p.gapMin, p.gapMax);
+      }
+    }
     const h = CONFIG.household;
     const bedtime = activePhase() === BEDTIME;
     // ...and whether anybody sensible would be indoors. Asked once for the
@@ -1903,6 +1947,129 @@ export class Household {
     return true;
   }
 
+  // ------------------------------------------------- coming to sit with you
+  //
+  // See household.joinSettleMs for what this is and why it is the one behaviour
+  // in the app that begins at their end rather than at yours.
+  //
+  // HOW LONG YOU HAVE BEEN SITTING, on the household's own clock. The rig knows
+  // that you ARE sitting and nothing more, and it could not usefully know more:
+  // `sit()` is called from a pointer handler, which runs on `performance.now()`,
+  // while every mode here runs on the frame clock. A moment stamped on one and
+  // compared against the other is the ONE CLOCK trap this codebase has been
+  // caught by twice, so the stamp is taken here, from the clock that will read
+  // it.
+  _youSatFor(tMs) {
+    if (!this.rig.seated) { this._youSatAt = 0; return 0; }
+    if (!this._youSatAt) this._youSatAt = tMs;
+    return tMs - this._youSatAt;
+  }
+
+  // Whether they feel like coming over — and, once they are there, whether they
+  // are still willing to stay. Both from here, because `wants` is asked every
+  // frame: a mode that stopped wanting to run would be exited on the spot, so
+  // the conditions to KEEP sitting have to be the looser half of this.
+  _wantsJoin(bot, s, world) {
+    const h = CONFIG.household;
+    const ch = bot.ch;
+    // Nobody to sit with until main.js has wired the rig, and a household
+    // without one is simply one where this never happens — the same guard
+    // `social` gets a few lines up, for the same reason.
+    if (!this.rig) return false;
+    // The invitation itself. It ends the moment you stand, which is what makes
+    // getting up the way to say the moment is over — no dismissal, no button.
+    if (this._youSatFor(world.tMs) < h.joinSettleMs) return false;
+    // Not from the far side of the planet, and not through a wall: sitting in
+    // your house does not summon somebody in from the meadow, because the walk
+    // in is a route this mode does not plan. Both of you under the same sky, or
+    // both under the same roof.
+    if (!!underRoof(ch.dir) !== !!underRoof(this.rig.anchor)) return false;
+    if (ch.dir.angleTo(this.rig.anchor) * CONFIG.globe.radius > h.joinArc) return false;
+    // Already sitting with you: keep going until the stay runs out. Asked
+    // BEFORE the cooldown, or somebody would be thrown out of a sitting by the
+    // clock that is only meant to space out the next one.
+    if (s.mode === 'joinsit') return s.step !== 'done';
+    if (world.tMs < (s.joinAfter || 0)) return false;
+    // Somebody already off their feet is having their own moment — a hobby, a
+    // rest on the grass — and this must not reach in and take it. They will be
+    // asked again when they get up, which is what the wander's own sits do.
+    if (ch.perched || ch.hurrying) return false;
+    return true;
+  }
+
+  _joinEnter(bot, s, tMs) {
+    const h = CONFIG.household;
+    const ch = bot.ch;
+    ch.standUp();
+    // ONE BEARING EACH, by their place in the cast — the same trick `_standSpot`
+    // uses indoors and for the same reason. Two friends deciding where to sit by
+    // asking what is free would both be told the same patch of grass; an index
+    // nobody shares cannot collide and needs nothing released.
+    const i = Math.max(0, this.bots.indexOf(bot));
+    const at = h.joinBearings[i % h.joinBearings.length];
+    s.route = [this._besideYou(at, h.joinBesideArc, new THREE.Vector3())];
+    s.step = 'coming';
+    s.giveUpAt = tMs + h.headingMax;
+  }
+
+  // A spot beside where you are sitting, at a bearing off your own facing.
+  //
+  // Off YOUR FACING rather than off a fixed compass direction, so they arrive
+  // in shot: whichever way you are looking when they set out is the way the
+  // arc opens, and the selfie that made you sit down in the first place has
+  // them in it.
+  _besideYou(bearing, units, out) {
+    const A = this.rig.anchor;
+    this.rig.facing(_tan);
+    _tan.applyAxisAngle(A, bearing);
+    const arc = units / CONFIG.globe.radius;
+    out.copy(A).multiplyScalar(Math.cos(arc)).addScaledVector(_tan, Math.sin(arc)).normalize();
+    // Through the same fence every destination in this world goes through, so
+    // the spot beside you is never in a wall, a trunk or a pond. Somebody
+    // sitting at the water's edge does not get company standing in the lake.
+    keepOutside(out, CONFIG.wander.wallKeep);
+    keepOffSolids(out, CONFIG.wander.wallKeep);
+    return out;
+  }
+
+  _joinTick(bot, s, tMs, world) {
+    const h = CONFIG.household;
+    const ch = bot.ch;
+    if (s.step === 'coming') {
+      // A walk that cannot be made is not worth insisting on — they simply do
+      // not come, and ordinary life picks them up again.
+      if (tMs > s.giveUpAt) { s.step = 'done'; return; }
+      if (!this._walkRoute(s, ch, tMs)) return;
+      // Arrived. Down onto the grass beside you, and a word about it.
+      ch.sitHere();
+      s.until = tMs + h.joinStayMax;
+      s.step = 'sitting';
+      if (this.social) this.social.sitDown(bot, tMs);
+      return;
+    }
+    if (s.step === 'sitting') {
+      // Held, so the wander cannot take them off mid-sit — the same pin the
+      // visit uses indoors. `perched` already stops the walk; this stops the
+      // rest of ordinary life from deciding they are idle.
+      ch.hold('rest', tMs + 1500);
+      if (tMs > s.until) s.step = 'done';
+    }
+  }
+
+  // Standing up is the whole of it, and it happens for every reason at once:
+  // you got up, it started raining, midnight came, they ran out of stay. The
+  // dispatcher calls this on all of them, so none of those needed writing.
+  _joinExit(bot, s, tMs) {
+    bot.ch.standUp();
+    bot.ch.release('rest');
+    s.route = null;
+    s.step = 'away';
+    s.joinAfter = tMs + CONFIG.household.joinCooldownMs;
+    // Back to ordinary life without an instant errand: they have just been
+    // sitting with you, and setting straight off for home would undo it.
+    s.due = tMs + between(CONFIG.household.gapMin, CONFIG.household.gapMax);
+  }
+
   // ------------------------------------------------------------- the hobbies
 
   // Whether they feel like it — and, once they are at it, whether they are
@@ -1921,9 +2088,40 @@ export class Household {
     if (!bot.ch.pastimeTex) return false;
     if (s.mode === 'pastime') return s.step !== 'done';
     if (world.tMs < (s.pastimeAt || 0)) return false;
+    // ONE PERFORMER AT A TIME, which is what stops the two of them going off
+    // together — and it does a second job the seed above cannot.
+    //
+    // Shelter, bedtime and a gathering all outrank a hobby, so a shower that
+    // catches both cooldowns expired releases BOTH of them on the frame it
+    // stops, and they set off in step however well staggered they started.
+    // Every world event that pauses everybody is a metronome click. This is what
+    // absorbs them: the first to ask gets the stage, and the other genuinely
+    // re-staggers rather than merely being delayed by a frame.
+    //
+    // WRITTEN ONCE PER REFUSAL, not once per frame. The push lands only on a
+    // frame that got this far, and getting this far means the cooldown had
+    // already expired — so the next frame is caught by the line above and this
+    // cannot run away at sixty times a second.
+    if (this._onStage(bot)) {
+      s.pastimeAt = world.tMs + between(PASTIME_QUEUE_MIN, PASTIME_QUEUE_MAX);
+      return false;
+    }
     // ...and the prop has to exist on this planet. A scatter that happened to
     // place no stumps is a world with no songs in it, rather than a crash.
     return !!this.globe.perchSite(p.site, bot.ch.dir);
+  }
+
+  // Is anybody else claiming the stage? THE WHOLE MODE, not just `busy`: the
+  // walk there is a claim on it too, and a check that only saw the performing
+  // half would let the second one set off while the first was still on its way,
+  // which arrives at exactly the picture this exists to prevent.
+  _onStage(except) {
+    for (const b of this.bots) {
+      if (b === except) continue;
+      const o = this.state.get(b);
+      if (o && o.mode === 'pastime') return true;
+    }
+    return false;
   }
 
   _pastimeEnter(bot, s, tMs) {
@@ -2169,7 +2367,7 @@ export class Household {
   // interrupted. None of them do now.
   _visitExit(bot, s) {
     const ch = bot.ch;
-    this._releaseSeat(bot, s);
+    this._standThemUp(bot);
     ch.errand = null;
     ch.walking = false;
     s.route = null;
@@ -2210,17 +2408,33 @@ export class Household {
         s.due = tMs + 12000;
         return;
       }
+      // NOR WHILE THEY ARE SAT DOWN, which is the one guard sitting had to add
+      // here rather than anywhere else.
+      //
+      // Every route goes through `_walkRoute`, which stands somebody up before
+      // it walks them — correct, and on its own it meant an errand handed out a
+      // second after somebody sat on the grass yanked them straight back to
+      // their feet. Measured: a sit that lasted 0.3 seconds, which is precisely
+      // the flicker the whole timed-sit design exists to prevent.
+      //
+      // So an ordinary visit WAITS. Somebody sitting is already doing something,
+      // and going home is never urgent — it is the one errand in this file with
+      // no deadline behind it. Checked again when they get up, which is at most
+      // `wander.sitMax` away.
+      //
+      // Bedtime and the shelter are deliberately NOT gated this way: those have
+      // a reason to interrupt, and `_walkRoute` standing somebody up is exactly
+      // what should happen when the rain starts.
+      if (ch.perched) {
+        s.due = tMs + 4000;
+        return;
+      }
       // Sit if a seat is free, stand at a spot if not — decided now, and the
       // seat held from now, so nobody crosses the planet for a cushion that
       // was taken while they walked.
-      s.seat = this._freeSeat(pl);
-      if (s.seat) {
-        s.seat.taken = ch;
-        s.route = this._routeIn(pl, s.seat.dir, ch.dir);
-      } else {
-        // Their own corner, not everybody's — see _standSpot.
-        s.route = this._routeIn(pl, this._standSpot(bot, pl, _spot), ch.dir);
-      }
+      // Their own corner, not everybody's — see _standSpot. They sit down in it
+      // when they get there.
+      s.route = this._routeIn(pl, this._standSpot(bot, pl, _spot), ch.dir);
       s.step = 'going';
       s.giveUpAt = tMs + h.headingMax;
       return;
@@ -2237,7 +2451,7 @@ export class Household {
         // out is a gap their random strolls rarely thread.
       if (tMs > s.giveUpAt) {
         const inside = ch.dir.dot(pl.dir) > Math.cos(pl.building.r);
-        this._releaseSeat(bot, s);
+        this._standThemUp(bot);
         if (inside) {
           s.route = this._routeOut(pl);
           s.step = 'leaving';
@@ -2251,8 +2465,10 @@ export class Household {
         return;
       }
       if (!this._walkRoute(s, ch, tMs)) return;
-      // Arrived. Down onto the cushion, or settled at the spot.
-      if (s.seat) ch.sitAt(s.seat.dir, s.seat.y);
+      // Arrived. Down where they stopped — see sitHere. Somebody home and
+      // sitting is the difference between a room they own and a room they are
+      // standing in.
+      ch.sitHere();
       s.step = 'home';
       s.potterAt = 0;
       s.until = tMs + between(h.stayMin, h.stayMax);
@@ -2271,7 +2487,7 @@ export class Household {
       // `_routeOut` overwrites the route anyway; clearing the errand is what
       // stops the old waypoint riding along into the walk home.
       ch.errand = null;
-      this._releaseSeat(bot, s);
+      this._standThemUp(bot);
       s.route = this._routeOut(pl);
       s.step = 'leaving';
       s.giveUpAt = tMs + h.headingMax;

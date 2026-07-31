@@ -1342,60 +1342,216 @@ html, body {
      slot's ring is drawn OUTSIDE its border box, so on any slot in the first or
      last column, or the top or bottom row, the ring was being sliced off.
 
-     Seven against the ring's four, rather than the five that just clears it:
-     the margin here is the only thing standing between a ring and a haircut, and
-     it should not need revisiting the next time one of these grows by a pixel. */
-  padding: 7px;
-  margin: -7px;
+     Thirteen against the picked ring's six plus its drop, rather than the seven
+     that cleared the ring this replaced: the margin here is the only thing
+     standing between a ring and a haircut, and it should not need revisiting the
+     next time one of these grows by a pixel. The card's own padding is 0.9rem,
+     so this is very nearly all the room there is — a bigger ring than this needs
+     a bigger card, not a bigger number here. */
+  padding: 13px;
+  margin: -13px;
 }
 
-.sheet-cap {
+/* ---- THE DETAIL PANEL, which is what a tap on a slot is now FOR.
+
+   It replaced a dimmed caption line and a row of buttons that only existed while
+   a tile was in the air. The two were one idea half-built: there was already a
+   place under the grid where the pack talks to you, and it spent almost all of
+   its life either blank or repeating the name of the thing your own finger was
+   resting on.
+
+   Drawn as a WELL rather than as more card — a tinted recess with the grid
+   sitting above it — because the panel is a different kind of surface from the
+   slots. The grid is a container; this is a readout, and a faint step down is
+   the cheapest way to say so without another border. */
+.detail {
   flex: none;
-  /* Held whether or not there is anything to SAY, so the card does not change
-     height as this line comes and goes with what is in your hand. The 図鑑 has
-     no line at all, and that is the one case where the room should go rather
-     than be held — see :empty below. */
-  min-height: 1.2rem;
-  margin: 0.8rem 0.2rem 0.1rem;
-  font-size: 0.76rem;
-  font-weight: 500;
-  line-height: 1.2;
-  text-align: center;
-  opacity: 0.75;
-}
-
-/* Hidden for the 図鑑, which has no line to say — and by an attribute rather
-   than by `:empty`, which is what this was. `:empty` collapsed the row whenever
-   the PACK had nothing to say either, so the card jumped thirty pixels every
-   time you picked something up and shrank again when you put it down. Reserving
-   the space is the whole point of the min-height above; letting it vanish on
-   emptiness quietly undid it. */
-.sheet-cap[hidden] { display: none; }
-
-/* ---- the drop row, which exists only while a slot is lifted */
-
-.sheet-act {
-  flex: none;
-  display: none;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 0.55rem;
+  /* NEVER CHANGES HEIGHT. The card used to grow and shrink as the drop row came
+     and went, which moved the grid under a thumb that was still reading it.
+     A picked item with its verbs is the tallest state and this is measured off
+     it — 58px of tile against a text column of two name lines, the numbers and
+     two note lines, plus a 40px row of buttons. Every other state is centred in
+     the same box, and the counter's buttons are 40px for this reason too: the
+     question has to be exactly as tall as the verbs it replaces. */
+  min-height: 156px;
+  margin-top: 0.7rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 18px;
+  background: rgba(91, 76, 68, 0.055);
 }
 
-.sheet-card.is-moving .sheet-act { display: flex; }
+/* The 図鑑 has nothing to put in it, and this is the one place where the room
+   should genuinely go rather than be held: a record has no verbs. */
+.detail[hidden] { display: none; }
 
-.sheet-count {
+/* FOUR STATES, ONE BOX. Everything is off by default and each state names what
+   it wants, so no two can be up at once by accident — which is the failure the
+   old row had, where "asking" was inferred from whether a count was visible. */
+.detail-hint,
+.detail-item,
+.detail-act,
+.detail-count { display: none; }
+
+.detail.is-rest .detail-hint { display: block; }
+
+.detail.is-picked .detail-item,
+.detail.is-asking .detail-item,
+.detail.is-dragging .detail-item { display: flex; }
+
+.detail.is-picked .detail-act,
+.detail.is-dragging .detail-act { display: flex; }
+
+.detail.is-asking .detail-count { display: flex; }
+
+/* Nothing in your hand and nothing tapped. Centred in the well rather than
+   pinned to the top, so the panel reads as resting rather than as loading. */
+.detail-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* ---- what you tapped */
+
+.detail-item {
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+/* The drawing at a size worth looking at. The slot shows it at about 70px and
+   crops to a rounded square; here it gets a frame in its own family colour, so
+   the panel and the tile you tapped are visibly the same object. */
+.detail-tile {
+  flex: none;
+  width: 58px;
+  height: 58px;
+  border: 3px solid var(--fam, rgba(91, 76, 68, 0.35));
+  border-radius: 15px;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.detail-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* `min-width: 0` is what lets the note wrap instead of pushing the family chip
+   off the end — a flex item's floor is its content width until it is told
+   otherwise, and a long line of kana is wide. */
+.detail-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* TWO LINES, ALWAYS, for the same reason the note holds two — see below. The
+   names in this app are DESCRIPTIONS, so they run long and unevenly:
+   「うすむらさきの おさかな」 wraps on a narrow phone and 「ほん」 never will, and
+   without a floor the panel changed height as you tapped along a row. */
+.detail-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.25;
+  min-height: 2.5em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.detail-sub {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 5px;
+  min-width: 0;
 }
 
-.sheet-count[hidden] { display: none; }
+/* Truncates rather than wraps, and the order of the sentence is what makes that
+   safe: the count comes first, so the part that can be lost is the tally rather
+   than the number you came to read. */
+.detail-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 500;
+  opacity: 0.68;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* So a stack going from 9 to 10 does not reflow the line. */
+  font-variant-numeric: tabular-nums;
+}
 
+/* The one line you could not have got from looking at the tile. Two lines is
+   the ceiling: past that the panel is a page, and the note is flavour rather
+   than something anybody needs to finish reading. */
+.detail-note {
+  margin-top: 2px;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  opacity: 0.85;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  /* TWO LINES WHETHER OR NOT IT NEEDS TWO, which is the other half of the
+     no-jumping rule above. Clamping the ceiling is not enough on its own: a
+     one-line note and a two-line note are a 14px difference, so tapping along a
+     row of tiles made the panel breathe and shifted the verbs under your thumb.
+     The clamp stops it growing; this stops it shrinking. */
+  min-height: 2.7em;
+}
+
+/* WHICH FAMILY, as a ring in the family's own colour with ink inside it.
+   Filled chips were the first try and two of the four fail on contrast — white
+   on the uniques' yellow is 1.9:1 — so the colour does the identifying and the
+   app's own ink does the reading. */
+.detail-fam {
+  flex: none;
+  padding: 2px 7px;
+  border: 2px solid var(--fam, rgba(91, 76, 68, 0.35));
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* The same four colours the slot borders wear — see the note there. Set on the
+   panel so the frame and the chip cannot disagree about what family this is. */
+.detail[data-cat='common']  { --fam: #969BA0; }
+.detail[data-cat='fish']    { --fam: #78AFD7; }
+.detail[data-cat='unique']  { --fam: #E4B937; }
+.detail[data-cat='special'] { --fam: #7855AA; }
+
+/* ---- the verbs */
+
+.detail-act,
+.detail-count {
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.act-btn,
 .count-step,
 .count-all,
-.sheet-drop {
+.count-go {
   --ring-w: 3px;
   font-family: inherit;
   font-weight: 700;
@@ -1404,16 +1560,115 @@ html, body {
   border: none;
   box-shadow: var(--shell-flat);
   cursor: pointer;
-  transition: transform 0.12s ease, background 0.15s ease;
+  transition: transform 0.12s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
+.act-btn:active,
 .count-step:active,
 .count-all:active,
-.sheet-drop:active { transform: scale(0.92); }
+.count-go:active { transform: scale(0.94); }
+
+.act-btn {
+  flex: 1 1 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0 0.7rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+}
+
+/* Taking a thing in hand is the reason you opened the bag, so it wears the
+   app's live shell and the bin does not. A destructive verb should never be the
+   loudest thing on a panel. */
+#act-hold {
+  background: var(--accent);
+  box-shadow: var(--shell-flat-live);
+}
+
+.act-glyph {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: width 0.18s ease, height 0.18s ease;
+}
+
+/* ONE BUTTON, TWO GLYPHS. すてる and おく are not the same act — see the note in
+   index.html — and the drawing is the half that carries it. A rubbish bin under
+   a bear would be a promise to destroy something the game will actually set
+   down in the grass for you. */
+.act-bin[data-verb='bin'] .glyph-put { display: none; }
+.act-bin[data-verb='put'] .glyph-bin { display: none; }
+
+/* The lid comes off when the bin is about to be used. Hinged at its left end
+   rather than its middle, which is where a lid you have lifted actually pivots.
+   `transform-box: view-box` is what makes the origin below mean viewBox units
+   instead of the group's own tight bounding box. */
+.bin-lid {
+  transform-box: view-box;
+  transform-origin: 5px 7.4px;
+  transition: transform 0.2s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+/* ---- and the same button as a place to let go of a tile */
+
+/* Bigger while something is in the air, because then it is a TARGET rather than
+   a control. The hold verb stands down for the stretch — there is nothing it
+   could mean while the tile is already off the grid — and the bin takes the
+   whole row, which roughly doubles it: about 180px of pill becomes 366px.
+
+   IT GROWS SIDEWAYS ONLY, and that is deliberate. Eighteen pixels of extra
+   height was the first version and it was wrong: the panel sets the card's
+   height, the card is centred, so the bin getting taller shifted the entire
+   grid up nine pixels at the exact moment a tile left it — a drop target that
+   moves the things you might drop onto instead. Width is free; height is not. */
+.detail.is-dragging #act-hold { display: none; }
+
+/* AND THE BIN MOVES OUT FROM UNDER THE FINGER. Centred content was the obvious
+   thing and it is invisible in practice: the ghost tile is drawn centred on the
+   pointer, so aiming at the middle of the bar — which is what anybody does —
+   parks a 63px tile exactly over the glyph and the word. The one moment the bin
+   most needs to be legible is the one moment it was covered up. Anchored left,
+   it stays readable wherever on the bar the finger actually is. */
+.detail.is-dragging .act-bin {
+  justify-content: flex-start;
+  padding-left: 1.05rem;
+  font-size: 0.86rem;
+}
+
+.detail.is-dragging .act-glyph {
+  width: 27px;
+  height: 27px;
+}
+
+/* ARMED. Ink-filled is this app's word for on, and it is the right one here
+   precisely because it is not the accent: letting go now is a commitment, not
+   the friendly primary action. */
+.act-bin.is-over {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+.act-bin.is-over .bin-lid { transform: rotate(-24deg) translateY(-1px); }
+
+/* Nowhere to put it down. See shakeDrop in main.js — a button that silently
+   does nothing reads as broken rather than as a refusal. */
+.act-bin.is-refused { animation: refuse-shake 0.36s ease; }
+
+/* ---- how many */
 
 .count-step {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
+  flex: none;
   padding: 0;
   border-radius: 50%;
   font-size: 1.05rem;
@@ -1422,7 +1677,7 @@ html, body {
 
 .count-n {
   min-width: 1.9rem;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   font-weight: 700;
   text-align: center;
   /* So stepping from 9 to 10 does not shove the buttons sideways. */
@@ -1430,36 +1685,24 @@ html, body {
 }
 
 .count-all {
-  height: 34px;
-  padding: 0 0.7rem;
-  border-radius: 17px;
-  font-size: 0.74rem;
+  flex: none;
+  height: 40px;
+  padding: 0 0.65rem;
+  border-radius: 20px;
+  font-size: 0.72rem;
 }
 
-/* Quiet while a tile is in the air, because then it is a PLACE TO LET GO of
-   something rather than something to press — the drag's own pointerup lands it
-   there, and a saturated slab inviting a press would be describing the wrong
-   gesture. */
-.sheet-drop {
-  height: 34px;
-  padding: 0 1.1rem;
-  border-radius: 17px;
-  font-size: 0.82rem;
-}
-
-/* ...and live once the row has become a question, because then it IS something
-   to press: the confirm for an amount. Keyed off the count row being visible,
-   which is the one thing that distinguishes the two states — see showRow, which
-   unhides it only when it is asking. */
-.sheet-count:not([hidden]) ~ .sheet-drop {
+/* The confirm, and the one moment the bin's verb becomes something to PRESS
+   rather than something to drop onto — so this is where the live shell goes. */
+.count-go {
+  flex: none;
+  height: 40px;
+  padding: 0 0.9rem;
+  border-radius: 20px;
+  font-size: 0.78rem;
   background: var(--accent);
-  color: var(--ink);
   box-shadow: var(--shell-flat-live);
 }
-
-/* Nowhere to put it down. See shakeDrop in main.js — a button that silently
-   does nothing reads as broken rather than as a refusal. */
-.sheet-drop.is-refused { animation: refuse-shake 0.36s ease; }
 
 @keyframes refuse-shake {
   0%, 100% { transform: translateX(0); }
@@ -1542,30 +1785,50 @@ html, body {
   display: block;
 }
 
-/* THE ONE IN YOUR HAND, and it used to be filled with solid ink — which is this
-   app's word for "on" everywhere else, and wrong here for one reason: every
-   other thing wearing it is TEXT, which flips to paper and stays legible. A
-   drawing cannot. The items are outlined in that same ink, so a filled slot ate
-   the very picture it was there to point at, and the one slot most worth
-   reading became the least readable thing on the card. A ring says it just as
-   plainly and leaves the drawing alone. */
-/* It has to work harder than it used to. When every other border was ink, pink
-   was the only colour in the grid and being coloured WAS the signal; among four
-   coloured families it is one more hue unless it is also heavier. So: a thicker
-   edge and a second, softer ring outside it — a doubled outline reads as
-   emphasis at any hue, which is what this needs to survive sitting on the
-   yellow of a unique. Ordered after the family rules so it wins the tie. */
-/* 4px and not 3.5: border widths are floored to whole pixels, so a half step
-   over the families' 3px is no step at all — measured, 3.5px computes to 3px
-   and the held slot came out wearing exactly the same weight as its neighbours.
-   The spread on the ring keeps fractions; the border does not. */
-.pack-slot.is-held,
-.pack-slot[data-cat].is-held {
-  border-color: var(--pink);
-  border-width: 4px;
-  background: rgba(246, 166, 182, 0.22);
-  box-shadow: 0 0 0 4px rgba(246, 166, 182, 0.5);
+/* TWO THINGS A SLOT CAN BE, and they are different facts that used to be one.
+   A tap now opens the panel below, so the grid has to say both which tile you
+   are LOOKING AT and which one is in your HAND, and a tile is often both.
+
+   THE PINK BORDER IS GONE. It recoloured the family edge to pink, washed the
+   tile in 22% pink, and hung a soft pink glow outside it — three signals for one
+   fact, and each of them fought something: the recolour destroyed the family
+   the border is there to name, the wash sat over a drawing and muddied it, and
+   the glow made a busy grid busier. It also had to keep escalating to stay
+   visible among four coloured families, which is the tell that a hue was doing
+   a job only weight can do.
+
+   So neither state uses a hue to shout with, and the family border is never
+   touched. They are RINGS OUTSIDE THE TILE, which is space nothing else is
+   using, and they compose: a slot that is both wears the accent hugging it and
+   the ink outside that. `--halo` is the composition — it is the inner ring's
+   colour, and it defaults to the card's own paper so that a picked-but-not-held
+   tile reads as a clean gap rather than as a second edge. */
+.pack-slot { --halo: var(--paper); }
+
+/* IN YOUR HAND: the accent, close in, with an ink hairline holding it. The
+   accent alone is pale by design (see --accent) and would go quiet against the
+   fish family's blue; the hairline is what makes it a ring rather than a tint,
+   at any hue underneath. */
+.pack-slot.is-held {
+  --halo: var(--accent);
+  box-shadow: 0 0 0 3px var(--halo), 0 0 0 4.5px rgba(91, 76, 68, 0.5);
 }
+
+/* THE ONE YOU ARE LOOKING AT: lifted off the grid and ringed in ink. Emphasis
+   by WEIGHT AND POSITION rather than by colour, which is what lets it sit on
+   any of the four families and on the held accent as well. Ordered after
+   is-held so a slot that is both keeps the lift and shows both rings. */
+.pack-slot.is-picked {
+  transform: translateY(-3px);
+  box-shadow:
+    0 0 0 3px var(--halo),
+    0 0 0 6px var(--ink),
+    0 5px 9px rgba(91, 76, 68, 0.26);
+}
+
+/* The press has to survive the lift, or the one tile you are most likely to
+   press again is the only one in the grid that does not answer. */
+.pack-slot.is-picked:active { transform: translateY(-3px) scale(0.93); }
 
 /* WHERE THE TILE CAME FROM, while it is in the air. Dashed, because for as long
    as the drag lasts this slot is effectively empty — and it is drawn as the
@@ -2154,8 +2417,110 @@ html, body {
    NOT THE TITLE CARD, which wore this class first and means something gentler
    by it: `.start.is-gone` is a 620ms fade-and-lift, and a blanket `display: none`
    would have cut that to a single frame. The exclusion is the whole reason this
-   selector is not just `.is-gone`. */
-.is-gone:not(.start) { display: none !important; }
+   selector is not just `.is-gone`.
+
+   ...AND NOT THE CAMERA BUTTON EITHER, for exactly the same reason, which is
+   why there are now two exclusions rather than one. See .ctl-fade below. */
+.is-gone:not(.start):not(.ctl-fade) { display: none !important; }
+
+/* COMING AND GOING, rather than blinking.
+   The camera button is not a control that is simply there: it arrives when a
+   camera reaches your hands and leaves when you put one down, and both used to
+   happen inside a single frame — a button that pops out of existence beside the
+   clock reads as a glitch rather than as something you did.
+
+   `display` is the hard part. It cannot be crossfaded, and it has to be `none`
+   at rest or an absent button would keep its space and hold the pose drawer
+   down the screen. `allow-discrete` is what resolves that: the box stays
+   displayed for the length of the transition and flips to `none` at the end, so
+   the exit gets to animate and the layout still closes up afterwards. The
+   entrance needs @starting-style for the mirror-image reason — an element
+   arriving from `display: none` has no previous value to move FROM, so without
+   it the fade-in would have nothing to fade from and would simply appear.
+
+   Browsers without either land on the old behaviour exactly: it appears, it
+   disappears, nothing breaks. That is the whole risk of using them. */
+.ctl-fade {
+  transition: opacity 0.2s ease, display 0.28s allow-discrete;
+}
+
+.ctl-fade.is-gone {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The pop is on the disc and the word rather than on the button, and that is
+   load-bearing: the button's own transform belongs to the press
+   (`.ctl-icon:active`), and an appear animation parked on the same property
+   would either be overridden by a press or slow one down to its own duration. */
+.ctl-fade .ctl-disc,
+.ctl-fade .ctl-cap {
+  transition: transform 0.3s cubic-bezier(0.22, 1.35, 0.36, 1), box-shadow 0.16s ease;
+}
+
+.ctl-fade.is-gone .ctl-disc,
+.ctl-fade.is-gone .ctl-cap { transform: scale(0.55); }
+
+@starting-style {
+  .ctl-fade:not(.is-gone) { opacity: 0; }
+  .ctl-fade:not(.is-gone) .ctl-disc,
+  .ctl-fade:not(.is-gone) .ctl-cap { transform: scale(0.55); }
+}
+
+/* ---- and the flip, which is the button's two states rather than its arrival
+
+   THE ROTATION IS ON AN INNER LAYER, not on the disc. Turning the disc itself
+   would be the obvious spelling and buys nothing: the disc is a circle with a
+   symmetrical inset ring, so a rotation about Y renders it pixel for pixel
+   identical to where it started. Only the GLYPH has a front and a back. Keeping
+   the disc still also leaves its transform free for the scale above, which the
+   two would otherwise be fighting over — one property, two jobs.
+
+   The perspective is what makes it read as an object turning rather than as a
+   drawing being squashed; without it the faces just narrow to nothing. */
+.flip-disc { perspective: 420px; }
+
+.flip-inner {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  transform-style: preserve-3d;
+  transition: transform 0.46s cubic-bezier(0.5, 0.04, 0.2, 1);
+}
+
+[aria-pressed='true'] .flip-inner { transform: rotateY(180deg); }
+
+/* Stacked on one grid cell so both faces sit in the same place, and each hidden
+   the moment it turns away — without `backface-visibility` you would see the
+   back face's mirror image through the front one for half the turn. */
+.flip-face {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+  backface-visibility: hidden;
+}
+
+.flip-back { transform: rotateY(180deg); }
+
+/* The word crosses over at the MIDPOINT of the turn — the delay is the whole
+   point of it. Swapped at the start, the new caption would sit under the old
+   face for a quarter of a second and the button would be telling you two
+   different things at once; swapped at the end it lags the picture. Halfway is
+   the moment the disc is edge-on and neither face is readable. */
+.flip-cap {
+  display: grid;
+  place-items: center;
+}
+
+.flip-cap > span {
+  grid-area: 1 / 1;
+  transition: opacity 0.14s ease 0.2s;
+}
+
+[aria-pressed='false'] .cap-back,
+[aria-pressed='true'] .cap-front { opacity: 0; }
 
 /* LOW AND CENTRED, AND BIG, AND RED.
 
@@ -2179,33 +2544,125 @@ html, body {
   left: 50%;
   bottom: max(calc(30px + env(safe-area-inset-bottom)), 5vh);
   transform: translateX(-50%);
-  width: 74px;
-  height: 74px;
+  width: 80px;
+  height: 80px;
   padding: 0;
-  border: 4px solid var(--face);
+  border: none;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.22);
+  background: none;
   display: grid;
   place-items: center;
   cursor: pointer;
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
   z-index: 6;
-  box-shadow: 0 3px 12px rgba(91, 76, 68, 0.28);
+}
+
+/* DRAWN, NOT MANUFACTURED.
+
+   The version this replaces was a phone camera's shutter copied straight: a
+   thin cream ring, a translucent fill and a hard saturated disc, all of it
+   perfectly circular. That was defensible on the grounds that everybody already
+   knows what it is — and it was the one object in this app that looked like it
+   came from a settings screen. Nothing else here is a machine part. Everything
+   else is DRAWN: thick soft ink, cream paper, shapes that are not quite round.
+
+   So it is drawn now, in the same pen as the pack's slots and the sheet's card,
+   and none of what made it legible is given up. It is still the biggest thing
+   on screen, still low and centred, still the only red. Those were the reasons
+   it worked; being machined was never one of them.
+
+   THE CIRCLES ARE NOT CIRCLES. Both radii are four uneven percentages rather
+   than 50%, which leaves each shape a fraction out of true — the wobble a hand
+   leaves and a compass cannot. It is well under a pixel of difference at any
+   one point on the edge and it is the single thing doing most of the work
+   here: a perfect circle reads as printed, a slightly wrong one as drawn. */
+.shot-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 52% 48% 50% 50% / 50% 52% 48% 50%;
+  background: var(--paper);
+  /* The ink is INSIDE the edge, which is this app's whole way of outlining a
+     filled shape — see --shell — and at 3.5px it is the weight the sheet's card
+     and the pack's slots wear. It also solves what the old cream ring could
+     not: ink separates from a white sky and a night one alike, where a rim of
+     the app's own cream went quiet against snow. */
+  box-shadow:
+    inset 0 0 0 3.5px var(--ink),
+    0 5px 13px rgba(91, 76, 68, 0.3);
+  transition: transform 0.12s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 
 .shot-btn::before {
   content: '';
+  /* Stacked in one grid cell with the shine below, and POSITIONED so both paint
+     above the ring. The ring is `position: absolute` and these are ordinary grid
+     items, so without this the ring wins the painting order and lays its own
+     fill over the red — the loudest thing on the screen, washed out by the
+     element drawn to sit behind it. */
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
   width: 56px;
   height: 56px;
-  border-radius: 50%;
-  background: #E8555F;
-  transition: transform 0.09s ease, background 0.09s ease;
+  border-radius: 50% 52% 48% 50% / 48% 50% 52% 50%;
+  /* Softened from #E8555F. That red was a recording light; this one is a colour
+     from the same box as the red mushroom, and against 3px of ink it carries
+     just as far while belonging to the drawing. */
+  background: #F26B76;
+  box-shadow: inset 0 0 0 3px var(--ink);
+  transition: transform 0.1s cubic-bezier(0.3, 1.4, 0.5, 1), background 0.1s ease;
 }
 
+/* THE SHINE, which is the mark that says "drawn" faster than anything else on
+   this button: every glossy thing in this world has one small off-centre
+   highlight sitting a little way in from the top left. */
+.shot-btn::after {
+  content: '';
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 2;
+  width: 15px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+  transform: translate(-12px, -13px) rotate(-26deg);
+  pointer-events: none;
+  transition: transform 0.1s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+
+/* THE PRESS SQUASHES RATHER THAN SCALES. A uniform shrink is what a web page
+   does; a drawn thing being pushed goes wider than it goes short, and the ring
+   gives a little in the same direction. Both halves move by different amounts —
+   the disc drops well inside a ring that only tightens — which is what makes it
+   read as mechanism rather than as a hover state. */
 .shot-btn:active::before {
-  transform: scale(0.86);
-  background: #C93F49;
+  transform: scale(0.92, 0.84);
+  background: #DE5561;
+}
+
+.shot-btn:active::after {
+  transform: translate(-11px, -11px) rotate(-26deg) scale(0.86);
+}
+
+.shot-btn:active .shot-ring { transform: scale(0.97, 0.94); }
+
+/* The fade wants a scale, and this is the one element in the app whose transform
+   is already carrying its layout — `translateX(-50%)` is what centres it. Any
+   scale here has to be written WITH that or the button leaps a half-width
+   sideways on its way out. */
+.shot-btn.is-gone { transform: translateX(-50%) scale(0.6); }
+
+.ctl-fade.shot-btn {
+  transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.22, 1.35, 0.36, 1),
+              display 0.28s allow-discrete;
+}
+
+@starting-style {
+  .ctl-fade.shot-btn:not(.is-gone) {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.6);
+  }
 }
 
 /* The pose drawer, under the camera in the left column. The panel is absolute
@@ -2254,31 +2711,81 @@ html, body {
               visibility 0s;
 }
 
-/* The same small pill the weather picker uses — this is a row of choices where
-   exactly one is live, which is the shape that already has a treatment. */
+/* A FACE AND A WORD, where it used to be a word on its own. See faceIcon in
+   main.js for why: these are the drawings the avatar actually wears, and the
+   picker's whole question is what your face will do in the picture.
+
+   The row grew from 30px to 44px to carry one, which is the real cost and worth
+   it — five rows of 44 is still a short list against the edge of the screen,
+   and it is now a list you can read at a glance instead of one you have to
+   translate. */
 .pose-pick {
-  height: 30px;
-  min-width: 46px;
-  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  min-width: 140px;
+  padding: 0 14px 0 5px;
   text-align: left;
   border: none;
-  border-radius: 15px;
+  border-radius: 22px;
   background: transparent;
   color: var(--ink);
   font-family: inherit;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.1s ease, background 0.14s ease;
+  transition: transform 0.1s ease, background 0.14s ease, box-shadow 0.14s ease;
 }
 
-.pose-pick:active { transform: scale(0.92); }
+.pose-pick:active { transform: scale(0.94); }
 
 .pose-pick.is-on {
   background: var(--accent);
   box-shadow: var(--shell-flat-live);
 }
+
+/* The cut-out head, on the app's paper so a drawing with transparent corners
+   still reads as a token rather than as pixels floating on a pill. The inner
+   ring is a hairline: anything heavier and five of them stacked would be a
+   column of targets rather than a column of faces. */
+.pose-face,
+.pose-auto {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 2px rgba(91, 76, 68, 0.16);
+}
+
+.pose-face { object-fit: cover; }
+
+.pose-auto {
+  padding: 6px;
+  fill: none;
+  stroke: var(--ring);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+
+/* ---- and the same pair on the collapsed button, at the size its disc allows */
+
+.pose-disc { overflow: hidden; }
+
+.pose-disc .pose-face,
+.pose-disc .pose-auto {
+  width: 38px;
+  height: 38px;
+  background: none;
+  box-shadow: none;
+}
+
+.pose-disc .pose-auto { padding: 7px; }
+
+.pose-face[hidden],
+.pose-auto[hidden] { display: none; }
 
 /* ONE FRAME OF WHITE. It covers everything including the HUD, because a shutter
    is about the whole screen rather than about the picture — and it must not

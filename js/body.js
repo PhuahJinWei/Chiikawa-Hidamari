@@ -243,10 +243,33 @@ export class TowedBody {
     // so a body still condensing into view cannot be caught halfway up in
     // mid-air, and one on the ground is always on its feet — which is also what
     // a mirror or a still pool will want to reflect.
+    // ...ON WHATEVER IS UNDER YOU, which this did not pass and so the body was
+    // drawn at the planet's own surface however high the walker was standing.
+    //
+    // FADED OUT WITH THE DEPARTURE, and that is the one care in it. `stand` is
+    // the height of the surface the WALKER is on, and the walker is at your
+    // anchor; on the ground the leash above is zero so the body is at that
+    // anchor too and the number is exactly right. Airborne, the body is towed
+    // and lags behind, and the surface it took off from says nothing about the
+    // ground beneath it now — a body that kept the height of a table it left
+    // would float a table's worth above the meadow. At `fade` 1 this contributes
+    // nothing, which is precisely the behaviour that was already there, so the
+    // far view cannot regress.
+    // WHICH OF THE THREE BODIES YOU ARE, and the order is the order of
+    // authority. The glide wins when it is on, because it is a fact about the
+    // air and it can only be on while you are in it. Sitting wins otherwise,
+    // because it is a thing you asked for. Standing is what is left.
+    //
+    // Sitting cannot be true at the same time as the glide — the rig refuses to
+    // take off seated and stands you up on the way — so the order between them
+    // is belt and braces rather than a live contest.
+    const posture = (fade > 0 && this.glide > 0.5) ? 'fly'
+      : (rig.seated ? 'sit' : 'stand');
     you.standAt(dir, dtMs, {
-      walking: this.moving,
+      walking: this.moving && posture !== 'sit',
       lift: GLIDE_LIFT * this.glide * fade,
-      posture: fade > 0 && this.glide > 0.5 ? 'fly' : 'stand',
+      stand: rig.body.stand * (1 - fade),
+      posture,
     });
     you.fade = shown;
     you.root.visible = shown > 0.004;

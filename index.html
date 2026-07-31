@@ -172,7 +172,7 @@
     </div>
   </div>
 
-  <!-- じぶんを みる — the lens swung round to look back at you.
+  <!-- カメラ — the lens swung round to look back at you.
 
        IT IS NOT HERE UNTIL YOU OWN A CAMERA. The compact camera resting in
        Hachiware's cave is the feature: pick it up (or carry it in the pouch)
@@ -190,15 +190,50 @@
 
        A CAMERA, not an eye or a person: the shot is the point, and a lens with
        a shutter says "this is a picture of you" where a silhouette would only
-       say "you". The disc is the body and the small circle its glass. -->
-  <button id="selfie-toggle" class="ctl-icon is-gone" type="button">
-    <span class="ctl-disc">
-      <svg id="selfie-glyph" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M3.6 8.2h3.1l1.5-2h7.6l1.5 2h3.1v10.4H3.6Z"/>
-        <circle cx="12" cy="13.2" r="3.4"/>
-      </svg>
+       say "you". The disc is the body and the small circle its glass.
+
+       IT TURNS OVER, because that is what the thing itself does. This is the one
+       control in the app whose two states are a physical act — a lens swung
+       round to face the other way — and a caption that merely swapped words was
+       describing that instead of showing it. So the disc has two faces on a Y
+       axis: カメラ with the camera on the front, もどる with a turning-back arrow
+       on the back, and pressing it rotates one into the other. The word changes
+       at the halfway point, when the face it belongs to is edge-on and neither
+       is readable, so the two never disagree on screen.
+
+       Both faces live in the markup rather than being swapped by script. A flip
+       needs both sides present at once — that is the whole of what makes it a
+       flip rather than a substitution — and it also takes the caption off the
+       render loop, which was writing a string every frame to change it twice a
+       session. -->
+  <button id="selfie-toggle" class="ctl-icon ctl-fade is-gone" type="button"
+          aria-pressed="false">
+    <span class="ctl-disc flip-disc">
+      <span class="flip-inner">
+        <span class="flip-face flip-front">
+          <!-- The camera itself: body, the raised hump over the viewfinder, and
+               the glass. -->
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M2.9 8.4h3.4l1.4-2.2h8.6l1.4 2.2h3.4v9.9a1 1 0 0 1-1 1H3.9a1 1 0 0 1-1-1Z"/>
+            <circle cx="12" cy="13.3" r="3.3"/>
+            <path d="M18.4 11h1.1"/>
+          </svg>
+        </span>
+        <span class="flip-face flip-back">
+          <!-- An arrow that comes round and points back the way you came. Not a
+               second camera and not an eye: this face is not about the tool, it
+               is about undoing the thing the other face did. -->
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.4 19.1v-5.4a4.5 4.5 0 0 0-4.5-4.5H7.1"/>
+            <path d="M10.4 5.7 6.4 9.2l4 3.5"/>
+          </svg>
+        </span>
+      </span>
     </span>
-    <span id="selfie-cap" class="ctl-cap">じぶんを みる</span>
+    <span class="ctl-cap flip-cap">
+      <span class="cap-front">カメラ</span>
+      <span class="cap-back">もどる</span>
+    </span>
   </button>
 
   <!-- THE POSES, and they are a drawer now rather than a row.
@@ -213,16 +248,26 @@
        is chosen, so the collapsed state still answers the question the row
        answered by being visible. Same grammar as the sky chip two above it: a
        reading you can press, with the choices behind it. -->
-  <div id="pose-wrap" class="pose-wrap is-gone">
+  <div id="pose-wrap" class="pose-wrap ctl-fade is-gone">
     <button id="pose-toggle" class="ctl-icon" type="button" aria-expanded="false">
-      <span class="ctl-disc">
-        <!-- A little face — the only glyph in this corner that is not an object,
-             because it is the only control here about YOU. -->
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="8.6"/>
-          <path d="M8.6 14.4c.9 1.1 2 1.7 3.4 1.7s2.5-.6 3.4-1.7"/>
-          <path d="M9.2 9.6v.6"/>
-          <path d="M14.8 9.6v.6"/>
+      <!-- YOUR OWN FACE, not a drawing of a face.
+
+           This was a generic smiley in the app's line pen, and it was the wrong
+           thing twice over: it is the only picture in the HUD that had to stand
+           for something already drawn, and a smiley is nobody in particular
+           where the thing being chosen is very specifically YOU. The four sheets
+           exist — see PLAYER in cast.js — so the button wears the face it is
+           set to and the drawer offers the real ones. Nothing here has to be
+           guessed from a word.
+
+           Both children live here and paintPoses shows one: 「おまかせ」 is the
+           app choosing, which is not a face at all, so it gets a mark instead
+           of one rather than borrowing the resting sheet and claiming to be it. -->
+      <span class="ctl-disc pose-disc">
+        <img id="pose-face" class="pose-face" alt="">
+        <svg id="pose-auto" class="pose-auto" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4.1l1.5 4.2 4.2 1.5-4.2 1.5L12 15.5l-1.5-4.2L6.3 9.8l4.2-1.5Z"/>
+          <path d="M18.1 14.5l.75 2.05 2.05.75-2.05.75-.75 2.05-.75-2.05-2.05-.75 2.05-.75Z"/>
         </svg>
       </span>
       <span id="pose-cap" class="ctl-cap">おまかせ</span>
@@ -341,31 +386,94 @@
 
     <div id="sheet-body" class="sheet-body"></div>
 
-    <!-- The one line under it all, doing three jobs: it names what is in your
-         hand, it teaches the long press, and it is what an empty pack says
-         instead of sixteen silent dashed holes. -->
-    <p id="sheet-cap" class="sheet-cap"></p>
+    <!-- WHAT YOU TAPPED, AND WHAT YOU CAN DO WITH IT.
+         This was one dimmed caption line plus a row of buttons that existed only
+         while a tile was in the air. Both were the same idea half-built: there
+         was a place under the grid where the pack talks to you, and it spent
+         almost all of its life either blank or saying the name of the thing your
+         own finger was on.
 
-    <!-- GETTING RID OF SOMETHING, and it only exists while a slot is lifted.
-         The long press already means "this one, now where" — so the answer is
-         either another slot, or this row: one more destination rather than a
-         second gesture and a button sitting there in the resting state.
+         So a tap is now a QUESTION rather than an action. It picks a slot and
+         this panel answers it — the drawing at a size you can actually see, what
+         the thing is called, how many you have, and one line you could not have
+         got from looking at the tile. The verbs come with the answer, which is
+         where they belong: you decide to put something down AFTER you have
+         looked at it, not before.
 
-         The verb depends on what is lifted, because the two endings are not the
-         same act. A stackable is let go of and gone (there is more grass). A
-         unique is SET DOWN — there is one bear, and its answer is the same
-         loose-furniture placement 「おく」 has always used, so it lands at your
-         feet where you can see it rather than ceasing to exist. The count only
-         appears for the first, since there is never more than one of the
-         second. -->
-    <div id="sheet-act" class="sheet-act">
-      <div id="sheet-count" class="sheet-count">
+         It never leaves and never changes height. The card used to grow and
+         shrink as the row came and went, and a panel that moves under your thumb
+         while you are reading it is worse than one that is sometimes empty. -->
+    <div id="sheet-detail" class="detail">
+      <!-- The resting line, and the one an empty pack shows: sixteen silent
+           dashed holes and no words is a panel that looks broken rather than one
+           that looks empty. -->
+      <p id="detail-hint" class="detail-hint"></p>
+
+      <div id="detail-item" class="detail-item">
+        <span class="detail-tile"><img id="detail-img" alt=""></span>
+        <span class="detail-text">
+          <span id="detail-name" class="detail-name"></span>
+          <!-- The family and the numbers share a row so the NAME gets the full
+               width of the column. Standing the chip beside the name instead
+               cost about seventy pixels there, which is the difference between
+               「うすむらさきの おさかな」 fitting on one line and not. -->
+          <span class="detail-sub">
+            <span id="detail-fam" class="detail-fam"></span>
+            <span id="detail-meta" class="detail-meta"></span>
+          </span>
+          <span id="detail-note" class="detail-note"></span>
+        </span>
+      </div>
+
+      <!-- THE TWO VERBS.
+           Taking a thing in hand is what the grid's tap used to mean on its own,
+           and it reads better as a button that says so than as a tap that has to
+           be learned.
+
+           The second is not one verb but two, because the two endings are not the
+           same act and never were. A stackable is LET GO OF and gone — there is
+           more grass. A unique is SET DOWN: there is one bear, and its answer is
+           the loose-furniture placement 「おく」 has always used, so it lands at
+           your feet where you can walk over and pick it up again. Same button,
+           two glyphs, and the glyph is the half that matters — a rubbish bin
+           drawn under a bear would be a promise to destroy it. -->
+      <div id="detail-act" class="detail-act">
+        <button id="act-hold" class="act-btn" type="button"></button>
+        <!-- ALSO THE DROP TARGET. Dragging a tile onto this is the shortcut past
+             the panel, and it is deliberately the same object you would press:
+             one bin on screen rather than a button and a separate landing zone
+             that have to be kept looking like the same idea. -->
+        <button id="act-bin" class="act-btn act-bin" type="button" data-verb="bin">
+          <svg class="act-glyph" viewBox="0 0 24 24" aria-hidden="true">
+            <g class="glyph-bin">
+              <g class="bin-lid">
+                <path d="M9.6 4.6h4.8"/>
+                <path d="M4.6 7.4h14.8"/>
+              </g>
+              <path d="M6.9 7.4l.9 11.9a1.9 1.9 0 0 0 1.9 1.8h4.6a1.9 1.9 0 0 0 1.9-1.8l.9-11.9"/>
+              <path d="M10.3 11v6.4M13.7 11v6.4"/>
+            </g>
+            <g class="glyph-put">
+              <path d="M12 4v9.4"/>
+              <path d="M8.2 9.8 12 13.6l3.8-3.8"/>
+              <path d="M4.8 19.4h14.4"/>
+            </g>
+          </svg>
+          <span id="act-bin-label"></span>
+        </button>
+      </div>
+
+      <!-- HOW MANY, and only ever for a stack of more than one — there is never
+           more than one of a unique, and one of something is not an amount worth
+           asking about. It replaces the verbs rather than joining them, because
+           while it is up there is exactly one question on the table. -->
+      <div id="detail-count" class="detail-count">
         <button class="count-step" type="button" data-step="-1" aria-label="へらす">−</button>
         <span id="count-n" class="count-n">1</span>
         <button class="count-step" type="button" data-step="1" aria-label="ふやす">＋</button>
         <button id="count-all" class="count-all" type="button">ぜんぶ</button>
+        <button id="count-go" class="count-go" type="button">すてる</button>
       </div>
-      <button id="sheet-drop" class="sheet-drop" type="button"></button>
     </div>
   </div>
 </div>
@@ -464,8 +572,22 @@
      word, and 「とる」 under it would only say what the shape already says.
 
      It only exists while the lens is turned round. A shutter in a view with no
-     camera in it would be a promise about a picture nobody could compose. -->
-<button id="shot-btn" class="shot-btn is-gone" type="button">
+     camera in it would be a promise about a picture nobody could compose.
+
+     AND IT IS DRAWN RATHER THAN MANUFACTURED. It used to be a phone camera's
+     shutter copied straight — thin cream ring, translucent fill, a hard
+     saturated disc, every edge perfectly round — which was defensible on the
+     grounds that everybody knows what it is, and made it the one object in this
+     app that looked like it came from a settings screen. It wears the same ink
+     the pack's slots and the sheet's card do now, its circles are a fraction out
+     of true, and it has the small off-centre shine every glossy thing in this
+     world has. See .shot-ring in the stylesheet.
+
+     The ring is a child rather than the button's own border because the press
+     moves the two halves by different amounts, and one element cannot do two
+     things to one transform. -->
+<button id="shot-btn" class="shot-btn ctl-fade is-gone" type="button">
+  <span class="shot-ring"></span>
   <span class="sr-only">しゃしんを とる</span>
 </button>
 

@@ -398,6 +398,9 @@ export class Character {
       : (dressedAtAll ? null : this.sitTex);
     this.posture = 'stand';
     this.seatY = 0;
+    // When a timed sit is due to end, on the frame clock — see sitFor. Zero for
+    // a sit somebody else owns the end of, which is what the household's are.
+    this.sitUntil = 0;
 
     // A posture brings its OWN plane, because a posture is a different body.
     //
@@ -438,6 +441,19 @@ export class Character {
     };
 
     this.pose = { stand: measure(bodyCanvas) };
+    // SITTING IS A DIFFERENT BODY, so it is measured like one — see POSTURES in
+    // cast.js. The sit sheets are drawn shorter and rather wider than the
+    // standing ones, which is what sitting down looks like, and hanging one on
+    // the standing plane would stretch it back up into a squashed creature
+    // standing in a hole. The plane, the foot offset and the head height all
+    // come off this drawing's own pixels.
+    //
+    // Measuring it is also what retires `interior.sitSink` for anybody who has
+    // one: the sink exists to fake a seated pose by burying a standing card, and
+    // _animate applies it only while `sitTex` is missing.
+    if (sheets.sit) {
+      this.pose.sit = measure(cachedCanvas(`sheet|${sheets.sit.src}`, () => paintSheet(sheets.sit)));
+    }
     if (sheets.fly) {
       this.flyTex = sheetTex(sheets.fly);
       this.pose.fly = measure(cachedCanvas(`sheet|${sheets.fly.src}`, () => paintSheet(sheets.fly)));
@@ -1498,6 +1514,24 @@ export class Character {
       // what is gone is the standing about.
       if (!this.hurrying) {
         this.hold('rest', tMs + cfg.restMin + Math.random() * (cfg.restMax - cfg.restMin));
+        // ...AND SOME RESTS ARE A PROPER SIT DOWN. See wander.sitChance.
+        //
+        // A stroll that ends in standing about is a pause; one that ends with
+        // somebody sitting on the grass is a rest, and the difference is the
+        // whole of what this world is for. The sit outlasts the rest hold by a
+        // long way — it has its own clock (see sitFor) and the wander is
+        // switched off for its whole length — so this is not "pause, then
+        // continue", it is "stopped here for a while".
+        //
+        // Only out of doors. Indoors belongs to the household, which has its own
+        // reasons for sitting somebody down and its own moment to stand them up;
+        // a stroll-rest sit taken in a room would be a second owner for the same
+        // body. `errand` catches the other half — somebody on their way
+        // somewhere has a reason not to stop, and the walk home is made of legs
+        // that each end in one of these rests.
+        if (!this.errand && !underRoof(this.dir) && Math.random() < cfg.sitChance) {
+          this.sitFor(tMs + cfg.sitMin + Math.random() * (cfg.sitMax - cfg.sitMin));
+        }
       }
     } else {
       _axis.crossVectors(this.dir, this.target);
@@ -1526,12 +1560,26 @@ export class Character {
   // root, which is what moved, so without the compensation it would climb with
   // the body and the two would never separate: a glider with its shadow stuck
   // to its feet is just a standing character drawn higher up.
-  standAt(dir, dtMs, { walking = false, lift = 0, posture = 'stand' } = {}) {
+  // `stand` is the height of the SURFACE holding this body up — the top of a
+  // stump, a table, the doorstep — and `lift` is how far off that surface the
+  // body is drawn. Two numbers rather than one because the shadow belongs to the
+  // first and not the second: it lands on the thing you are standing on, and
+  // only the lift is a gap between you and it.
+  //
+  // `stand` DEFAULTED TO NOTHING FOR A LONG TIME and nobody could see it. The
+  // player's drawn body was the only one that ever gets it, and it was drawn at
+  // the planet's own radius whatever it was stood on — so climbing a stump moved
+  // the eye up and left the body behind at grass level, sunk into the thing it
+  // was supposed to be on top of. Invisible while a body was only ever seen from
+  // the sky, and the first thing you notice once a selfie puts it in front of
+  // you. The cast never hit this because a perched character goes through
+  // `perchAt`, which has always taken its height.
+  standAt(dir, dtMs, { walking = false, lift = 0, stand = 0, posture = 'stand' } = {}) {
     this.dir.copy(dir).normalize();
     if (walking) this.walkPhase += dtMs;
     this.walking = walking;
     this._setPosture(posture);
-    this._sync(CONFIG.globe.radius + lift);
+    this._sync(CONFIG.globe.radius + stand + lift);
     // Back DOWN THE NORMAL, not down the holder's own y.
     //
     // root carries position only and is never rotated, so a child's position is
@@ -1551,6 +1599,37 @@ export class Character {
   // sheet or the sink doing the rest.
   sitAt(dir, y) { this.perchAt(dir, y, 'sit'); }
 
+  // SIT DOWN WHERE YOU ARE, which is now the only way anybody sits.
+  //
+  // There are no cushions and no floor spots: the world has one law for
+  // sitting, and it is the same one the player's own verb follows — wherever
+  // you stopped is somewhere you may sit, because whatever walked you there
+  // already refused every illegal place on the way. The wander's own path
+  // trimming does that job for the cast exactly as the rig does it for you.
+  //
+  // `y` is 0 rather than a seat height, so the ground shadow stays where it
+  // belongs — see the note in perchAt.
+  sitHere() {
+    this.perchAt(this.dir, 0, 'sit');
+    // Open-ended: whoever sat them down owns standing them up. The household
+    // does this — a guest sits for as long as the visit lasts.
+    this.sitUntil = 0;
+  }
+
+  // ...and the same with a clock on it, for a sit nobody is going to come back
+  // and end: a rest on the grass, a conversation with a friend.
+  //
+  // SITTING IS NEVER A FLICKER, and this is where that is guaranteed. The
+  // shortest sit in the world is still seconds long, because a body that drops
+  // and pops back up reads as a glitch rather than as somebody having a sit
+  // down. Callers pass the moment to get up at, on the frame clock the wander
+  // already runs on — see the check in update(), which is the one thing that
+  // ever stands them back up.
+  sitFor(untilMs) {
+    this.perchAt(this.dir, 0, 'sit');
+    this.sitUntil = untilMs;
+  }
+
   // The same thing one step more general: stand them on top of something at
   // height `y`, wearing whichever posture that thing calls for. A cushion takes
   // `sit`; a pudding and a stump take the hobby drawing.
@@ -1561,10 +1640,16 @@ export class Character {
     this._setPosture(posture);
     this.seatY = y;
     this._sync(CONFIG.globe.radius + y);
-    // No ground shadow while they are off the ground. The seat casts its own,
-    // and a second one directly under a character who is not standing on the
-    // floor reads as them hovering.
-    this.shadowHolder.visible = false;
+    // No ground shadow while they are OFF the ground. Whatever they are up on
+    // casts its own, and a second one directly under a character standing on a
+    // stump reads as them hovering over it.
+    //
+    // ...but sitting on the floor is not being off the ground, and that case
+    // arrived with sit-anywhere: there are no cushions to perch on, so `y` is 0
+    // and the shadow belongs exactly where it always was. Without the test a
+    // friend sat on the grass lost hers, which does not read as sitting — it
+    // reads as being pasted on.
+    this.shadowHolder.visible = y <= 1e-4;
   }
 
   // DOWN OFF IT AND ONTO SOMEWHERE ELSE, in one movement.
@@ -1587,6 +1672,7 @@ export class Character {
     if (!this.perched) return;
     this._setPosture('stand');
     this.seatY = 0;
+    this.sitUntil = 0;
     // Off the seat and onto whatever the floor is at their feet. Standing up is
     // an arrival like any other: they are placed on it, not dropped from the
     // height the cushion held them at.
@@ -1610,6 +1696,15 @@ export class Character {
     // and a stroll taken from a cushion would be a stroll through the seat.
     // Driven, there is none either: the rig already stood the body somewhere
     // this frame — see standAt. Asleep, obviously none.
+    // A TIMED SIT ENDING, which is the one thing that stands somebody back up
+    // without being told to. Checked before the wander rather than inside it,
+    // because the wander is exactly what being seated switches off — a sit that
+    // waited for its own turn to end would wait forever.
+    //
+    // Only sits with a clock on them: `sitUntil` is 0 for the household's, whose
+    // ending belongs to the visit rather than to a timer. See sitFor.
+    if (this.sitUntil && tMs > this.sitUntil && this.perched) this.standUp();
+
     if (!this.perched && !this.driven && !this.asleep) {
       this._wander(dtMs, tMs, watcher);
       // The vertical, AFTER the walk, because it asks what is under where they
