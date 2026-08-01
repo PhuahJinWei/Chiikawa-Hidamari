@@ -7383,6 +7383,10 @@ ${shader.fragmentShader}`
         c.mesh.material.map = on ? c.winter : c.summer;
         c.mesh.material.needsUpdate = true;
       }
+      // Their coats and the scenery already change on this edge. Their contact
+      // shadows belong to the same receiving surface: cool on laid snow, green
+      // again when grass returns, while anybody indoors keeps the room tone.
+      for (const ch of this.cast) this._castShadow(ch);
       // A FRESH FIELD, laid once as the snow starts and wiped once as the last
       // of it goes. See snowfield.js — this is the only place either happens.
       //
@@ -8443,6 +8447,14 @@ ${shader.fragmentShader}`
     if (ch.lightSide) ch.lightSide.value = this.insideAmount(ch.dir);
   }
 
+  // Which surface is directly under a character. A doorway already supplies a
+  // continuous inside fraction for lighting; its midpoint is the honest place
+  // to hand the contact shadow from the outdoor receiver to the indoor one.
+  // Snow never reaches under a roof, so room wins before the winter test.
+  _castShadow(ch, inside = this.insideAmount(ch.dir)) {
+    ch.setShadowSurface(inside >= 0.5 ? 'room' : (this._wintered ? 'snow' : 'grass'));
+  }
+
   // WHICH ROOF a surface direction is under, or null — the one question that
   // separates indoors from out, asked by the tinting here and by the controls
   // in main.js. There is no stage flag and no mode: being inside is where you
@@ -9235,6 +9247,7 @@ ${shader.fragmentShader}`
     // Which side that is right now, before a single frame has been drawn. A
     // guest who spawns indoors should already be wearing the room's lamps.
     this._castSide(ch);
+    this._castShadow(ch);
     // Whatever tint the world is currently wearing, including mid-fade — a
     // character joining during a transition should not arrive at full noon.
     if (this.phase) ch.lightDark.value.copy(this.tintCastOut);
@@ -9933,6 +9946,7 @@ ${shader.fragmentShader}`
       if (Math.abs(inside - (ch._wasInside || 0)) < 0.004
         && ch._wasInside !== undefined) continue;
       ch._wasInside = inside;
+      this._castShadow(ch, inside);
       _cC.copy(this.tintCastOut).lerp(this.tintCast, inside);
       for (const m of ch.tintables) m.color.copy(_cC);
       // Which set of lamps they read, moving on the same crossing and by the

@@ -1326,14 +1326,16 @@ export function paintBed(g, W, H, widen, wrap, spec) {
 }
 const _bedDir = new THREE.Vector3();
 
-// What a shadow is made of. Two tones, because a shadow is the colour of the
-// surface it falls on with the light taken out of it, and this planet has two
-// surfaces anything stands on. The green is the grass; the second is the room,
-// whose floor is a pale grey and whose rug is a cream, and where one stamp of
-// lawn-green under every stick of furniture read as a patch of garden that had
-// got in under the roof.
+// What a shadow is made of. Three tones, because a shadow is the colour of the
+// surface it falls on with the light taken out of it, and this planet has three
+// broad receiving surfaces. The green is the grass; the second is the room,
+// whose floor is a pale grey and whose rug is a cream; the third is laid snow,
+// where green reads as grass showing through rather than shade. One stamp of
+// lawn-green under every character indoors or in winter reads as a patch of
+// garden that moved with them.
 const SHADOW_GRASS = [74, 104, 64];
 export const SHADOW_ROOM = [92, 84, 80];
+export const SHADOW_SNOW = [78, 88, 104];
 
 // A soft contact shadow, and SOFT is the whole of the design.
 //

@@ -19,7 +19,9 @@ import {
   inBuilding, keepOutside, groundCap, SHADOW_LIFT,
   inSolid, keepOffSolids, underRoof,
 } from './sphere.js';
-import { paintSheet, sheetBounds, paintShadow, EXPRESSIONS } from './art.js';
+import {
+  paintSheet, sheetBounds, paintShadow, SHADOW_ROOM, SHADOW_SNOW, EXPRESSIONS,
+} from './art.js';
 import { IMG } from './assets.js';
 import { WATER_STENCIL } from './water.js';
 // Asked of the director for the same reason the hour is: one place decides. A
@@ -293,13 +295,23 @@ export class Character {
     const drawnW = (bounds.maxX - bounds.minX + 1) * this.px2world;
     this.shadowHolder = new THREE.Group();
     this.root.add(this.shadowHolder);
+    // THREE RECEIVERS, ONE SHAPE. The alpha falloff is identical; only the
+    // colour baked under it changes so shade remains a darkened version of the
+    // surface it is lying on. Scene chooses among them as the character crosses
+    // a doorway or the snow cover turns over.
+    this._shadowMaps = {
+      grass: cachedTex('shadow-grass', paintShadow),
+      room: cachedTex('shadow-room', () => paintShadow(SHADOW_ROOM)),
+      snow: cachedTex('shadow-snow', () => paintShadow(SHADOW_SNOW)),
+    };
+    this.shadowSurface = 'grass';
     this.shadow = new THREE.Mesh(
       // A cap of the planet, not a disc laid across it: at this size a flat one
       // stands its rim a further hundredth clear of the grass than its middle,
       // and a camera at knee height sees exactly that gap. groundCap carries the
       // lift and the lie-down that used to be set on the mesh here.
       groundCap(CONFIG.globe.radius, drawnW * 0.9, drawnW * 0.9, SHADOW_LIFT),
-      spriteMaterial(cachedTex('shadow', paintShadow)),
+      spriteMaterial(this._shadowMaps.grass),
     );
     // Biased toward the camera as well as lifted: a decal this close to a
     // curved surface tears into it otherwise.
@@ -676,6 +688,18 @@ export class Character {
 
   get tintables() {
     return [this.bodyMesh.material, this.shadow.material];
+  }
+
+  // The colour of the ground shadow is a property of what RECEIVES it, not of
+  // the character. Maps are shared across the cast and swapping one non-null
+  // map for another needs no material rebuild; the scene's existing hour and
+  // lamp tint continues to multiply the chosen drawing afterwards.
+  setShadowSurface(surface) {
+    if (surface === this.shadowSurface) return;
+    const map = this._shadowMaps[surface];
+    if (!map) return;
+    this.shadowSurface = surface;
+    this.shadow.material.map = map;
   }
 
   // Whether they are standing close enough to water to be in it, and what the
