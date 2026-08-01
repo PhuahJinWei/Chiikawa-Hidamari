@@ -7333,7 +7333,7 @@ ${shader.fragmentShader}`
         spot.r = U.uLampInner.value[i] + U.uLampReach.value[i] * CONFIG.weather.thawReach;
         spot.k = k;
       }
-      this.field.thaw(pool, flow, live);
+      this.field.thaw(pool, flow, live, dtMs, this.wx.flakes || 0);
     }
 
     // The field's own clock: filling trodden prints back in while it snows, and

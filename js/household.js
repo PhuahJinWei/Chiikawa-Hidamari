@@ -317,6 +317,18 @@ const MODES = [
     exit: (hh, bot, s, t) => hh._heldExit(bot, s, t),
   },
   {
+    // A pastime the player explicitly sent them to. Unlike the idle-tier
+    // pastime below, this is a durable command: gathering, joining somebody
+    // sitting, and another performer's claim on the stage cannot consume it.
+    // Bedtime and shelter remain above it deliberately, so the world can still
+    // make them refuse and go indoors.
+    key: 'directedPastime',
+    wants: (hh, bot, s) => hh._wantsDirectedPastime(bot, s),
+    enter: (hh, bot, s, t) => hh._pastimeEnter(bot, s, t),
+    tick: (hh, bot, s, t, w) => hh._pastimeTick(bot, s, t, w),
+    exit: (hh, bot, s, t) => hh._pastimeExit(bot, s, t),
+  },
+  {
     // Out into the snow, or out to look at a rainbow. `snowDone` is how one
     // character bows out of an occasion without ending it for the others.
     key: 'gather',
@@ -508,6 +520,11 @@ export class Household {
         // should not wait out a full interval after a walk that already ended
         // in standing still.
         potterAt: 0,
+        // A player-approved pastime and the exact prop that was offered when
+        // the button was pressed. This survives the hand-release frame so it
+        // cannot be mistaken for an ordinary expired pastime cooldown.
+        directedPastime: null,
+        pastimeSite: null,
         // ...and whether there is a drawing of them asleep at all. Asked of the
         // scene, which built the cards and is therefore the only thing that
         // knows: a character whose sleep sheet has not been drawn has no entry,
@@ -1781,6 +1798,10 @@ export class Household {
     for (const bot of this.bots) {
       const s = this.state.get(bot);
       if (!s.place) continue;
+      // Refusal is a cancellation, not a pause. Do this before mode selection
+      // because a just-issued command may still be in `held`; in that case its
+      // own exit has not yet had a chance to clear anything.
+      if (wet || (bedtime && s.sleeps)) s.directedPastime = null;
       const want = MODES.find((m) => m.wants(this, bot, s, world));
       if (want.key !== s.mode) {
         const had = MODE_BY_KEY[s.mode];
@@ -1877,7 +1898,8 @@ export class Household {
     const s = this.state.get(bot);
     // `busy` is the whole of being at it — the mode has three steps and the
     // other two are the walk there and the frame it ends on.
-    return !!s && s.mode === 'pastime' && s.step === 'busy';
+    return !!s && (s.mode === 'pastime' || s.mode === 'directedPastime')
+      && s.step === 'busy';
   }
 
   // ...and the same question asked of a Character, which is what the focus and
@@ -1908,16 +1930,17 @@ export class Household {
     return near < LEAD_LURE ? { pastime: p, site } : null;
   }
 
-  // ...and the press itself: let go, clear their cooldown, and off they run.
-  // The cooldown clears because being walked here by a friend is not a turn to
-  // be rationed — the rarity the gap protects is the SELF-started kind.
+  // ...and the press itself: remember the accepted prop, let go, and off they
+  // run. This command has its own mode instead of impersonating an expired
+  // autonomous cooldown, so lower-priority plans and stage arbitration cannot
+  // consume it before the next frame.
   sendToPlay(tMs) {
     const bot = this.hand;
     const offer = this.canSendToPlay();
     if (!bot || !offer) return false;
     const p = offer.pastime;
     const s = this.state.get(bot);
-    s.pastimeAt = 0;
+    s.directedPastime = offer;
     this.letGo();
     if (this.social && bot.dlg.has(p.bucket) && this.social.canChatter(bot.ch)) {
       this.social.speak(bot, p.bucket, tMs);
@@ -2251,6 +2274,10 @@ export class Household {
     // with no sleep sheet gets: they simply never lie down.
     if (!bot.ch.pastimeTex) return false;
     if (s.mode === 'pastime') return s.step !== 'done';
+    // Let the directed mode exit first. Its exit writes the fresh autonomous
+    // cooldown; selecting this mode from the old cooldown on the same frame
+    // would turn one player command into two consecutive performances.
+    if (s.mode === 'directedPastime') return false;
     if (world.tMs < (s.pastimeAt || 0)) return false;
     // ONE PERFORMER AT A TIME, which is what stops the two of them going off
     // together — and it does a second job the seed above cannot.
@@ -2275,6 +2302,16 @@ export class Household {
     return !!this.globe.perchSite(p.site, bot.ch.dir);
   }
 
+  // A player command stays wanted until it completes or a higher-priority
+  // world action cancels it at the scheduler boundary above. In particular it
+  // does not ask the autonomous cooldown or the shared-stage gate.
+  _wantsDirectedPastime(bot, s) {
+    if (!s.directedPastime) return false;
+    if (!bot.ch.pastimeTex) return false;
+    if (s.mode === 'directedPastime') return s.step !== 'done';
+    return true;
+  }
+
   // Is anybody else claiming the stage? THE WHOLE MODE, not just `busy`: the
   // walk there is a claim on it too, and a check that only saw the performing
   // half would let the second one set off while the first was still on its way,
@@ -2283,15 +2320,17 @@ export class Household {
     for (const b of this.bots) {
       if (b === except) continue;
       const o = this.state.get(b);
-      if (o && o.mode === 'pastime') return true;
+      if (o && (o.mode === 'pastime' || o.mode === 'directedPastime')) return true;
     }
     return false;
   }
 
   _pastimeEnter(bot, s, tMs) {
     const ch = bot.ch;
-    const p = PASTIME_FOR[bot.spec.key];
+    const directed = s.mode === 'directedPastime' ? s.directedPastime : null;
+    const p = directed ? directed.pastime : PASTIME_FOR[bot.spec.key];
     s.pastime = p;
+    s.pastimeSite = directed ? directed.site : null;
     s.step = 'walking';
     // `hurrying` for the WALK only, exactly as the gathering does it and for
     // the same measured reason: without it you standing anywhere near them
@@ -2365,7 +2404,7 @@ export class Household {
     }
 
     if (this._walkRoute(s, ch, tMs)) {
-      const site = this.globe.perchSite(p.site, ch.dir);
+      const site = s.pastimeSite || this.globe.perchSite(p.site, ch.dir);
       if (!site) { s.step = 'done'; return; }
       // UP THEY GO. `perchAt` is the cushion machinery one step generalised —
       // stand them on top of a thing at its own height, wearing the drawing
@@ -2426,7 +2465,7 @@ export class Household {
   _aimAtPastime(bot, s, tMs) {
     const ch = bot.ch;
     const p = s.pastime;
-    const site = this.globe.perchSite(p.site, ch.dir);
+    const site = s.pastimeSite || this.globe.perchSite(p.site, ch.dir);
     if (!site) { s.route = null; s.step = 'done'; return; }
     const R = CONFIG.globe.radius;
     // On the bearing they are already coming from, so nobody walks round a
@@ -2488,6 +2527,8 @@ export class Household {
     }
     s.perch = null;
     s.pastime = null;
+    s.pastimeSite = null;
+    s.directedPastime = null;
     // ...and not again for a while. Written on the way out rather than at the
     // start, so a hobby cut short by rain still costs its full wait — otherwise
     // a passing shower would be followed by the same song beginning again.

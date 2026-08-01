@@ -136,6 +136,10 @@ export class TowedBody {
     this._prev = this.dir.clone();
 
     this.moving = false;
+    // Whether the visible body currently has feet on the surface. Camera mode
+    // cannot answer this in the far view: ordinary globe swipes still tow a
+    // walking Momonga, while only a genuine glide lifts them clear.
+    this.onFoot = true;
     this.overWater = false;
     // Latched (with the hysteresis above) and then eased, so `glide` is both the
     // decision and how far into it the body has got.
@@ -265,6 +269,7 @@ export class TowedBody {
     // is belt and braces rather than a live contest.
     const posture = (fade > 0 && this.glide > 0.5) ? 'fly'
       : (rig.seated ? 'sit' : 'stand');
+    this.onFoot = posture !== 'fly';
     you.standAt(dir, dtMs, {
       walking: this.moving && posture !== 'sit',
       lift: GLIDE_LIFT * this.glide * fade,

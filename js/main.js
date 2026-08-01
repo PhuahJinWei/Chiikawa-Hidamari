@@ -5127,17 +5127,10 @@ function frame(now) {
   // three of them — and the scene decides whether there is any snow to leave
   // them in, so there is no test here.
   //
-  // YOURS COMES FROM THE RIG AND ONLY ON FOOT. `rig.anchor` is where you are
-  // STOOD, which is what a footprint is about; the camera is somewhere else
-  // entirely once you rise, and a trail printed from the sky would be a line of
-  // prints scrawled across the world by nobody. Flying leaves nothing, which is
-  // both correct and the reason this is gated rather than clamped.
-  //
   // Theirs comes from the character's own dir, walking or not — a body that has
   // not moved covers no stride and so prints nothing, which is the same rule
   // handling standing still, sitting down and being asleep without knowing that
   // any of those exist.
-  if (rig.isFirstPerson) globe.tread('you', rig.anchor);
   for (const b of bots) globe.tread(b.spec.key, b.ch.dir);
 
   // COATS ON. Read off the cover rather than off the sky, which is what puts
@@ -5197,6 +5190,11 @@ function frame(now) {
   // your own head, and on your own patch of ground rather than under the camera
   // — the fade, the leash, the transit rules and the glide are all body.js's.
   body.update(dt, now, globe.camera);
+  // YOURS COMES FROM THE VISIBLE BODY, not the camera's landing anchor. They
+  // coincide on the ground and deliberately separate in globe view; using the
+  // anchor there either made tracks under an invisible point or, previously,
+  // disabled them outright. A true glide still leaves nothing.
+  if (body.onFoot) globe.tread('you', body.dir);
   // The anchor comes from the rig a few lines up, and has to: the sky is hung
   // off where you are stood, so it is stale by a frame if read any earlier.
   //
@@ -5457,7 +5455,11 @@ function frame(now) {
         // over your feet from putting the lantern back on the ground under you
         // on every frame.
         globe.carryLoose(loose);
-        globe.placeLoose(loose, rig.anchor);
+        // The visible carried copy rides on `you`, whose feet are `body.dir`.
+        // In globe view that deliberately lags behind the camera's landing
+        // anchor, so the hidden emitter must follow the body as well or its
+        // light and heat appear several units away from the lantern.
+        globe.placeLoose(loose, body.dir);
       }
     }
 

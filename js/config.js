@@ -3678,9 +3678,9 @@ export const CONFIG = {
     //
     // IT IS THE OPPOSITE END OF `fillRate` AND THAT IS THE FEATURE. Nothing
     // arbitrates between them; they are the same map written from two sides. A
-    // lamp opens its ring under a clear sky and a falling snow closes it, so the
-    // patch of grass by the lantern is a thing the weather takes back and gives
-    // again without either rule knowing the other exists.
+    // lamp opens its ring and keeps it open while burning; once switched off,
+    // falling snow closes it. The patch of grass is therefore maintained by
+    // heat rather than permanently erased from the snowfield.
     thawRate: 0.025,
 
     // How much of a lamp's own reach the melt covers. WELL INSIDE the light: a

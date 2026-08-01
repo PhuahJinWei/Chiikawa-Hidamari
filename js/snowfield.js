@@ -496,11 +496,10 @@ export class Snowfield {
   // own light for free. Walk into a lamp's ring in a deep winter and the ground
   // steps down, because the shell is displaced by this same map.
   //
-  // WHAT MAKES IT A CYCLE rather than a slow erasure is that nothing here fights
-  // `_fill`. A lamp opens its ring while the sky is clear; the next fall closes
-  // it, at `fillRate`, from the same map. So a lantern left burning through a
-  // still night clears a patch of grass by morning and the next snow buries it
-  // again, and neither had to know about the other.
+  // WHAT MAKES IT A CYCLE rather than a slow erasure is the switch. A burning
+  // lamp both opens its ring and keeps fresh flakes from winning there; switch
+  // it off and `_fill` closes that same ring from the same map. Thus a lantern
+  // can maintain a warm patch during a fall without making the patch permanent.
   //
   // ONE DEBT PER SPOT, and this is the file's own trap for the second time — see
   // `_fill` for the whole story. A dim lamp asked for its share of a single
@@ -508,16 +507,23 @@ export class Snowfield {
   // it would have gone on rounding it away forever. Each spot saves up
   // separately until its own next wash is worth drawing.
   //
-  // `flowMs` is WORLD time, like the fill it opposes. `count` is how many of
-  // `spots` are live this frame — the caller keeps a pool and writes over it
-  // rather than building a list a frame, so the array is longer than the answer.
-  thaw(spots, flowMs, count = spots.length) {
+  // `flowMs` is WORLD time. `fallMs` remains wall time, matching `_fill`: heat
+  // under an active lamp must cancel the fresh accumulation at that spot as
+  // well as melt what was already there, without making a hand-wound day erase
+  // every footprint on the planet. `count` is how many pooled spots are live.
+  thaw(spots, flowMs, count = spots.length, fallMs = 0, flakes = 0) {
     if (!this.laid || !count) return;
     const rate = CONFIG.weather.thawRate;
+    const falling = (fallMs / 1000) * flakes * CONFIG.weather.fillRate;
     const at = { x: 0, y: 0, stretch: 1 };
     for (let i = 0; i < count; i++) {
       const s = spots[i];
-      const owed = (this.warm.get(s.key) || 0) + ((flowMs / 1000) * s.k * rate);
+      // The second term is the lamp refusing the snow `_fill` is about to put
+      // back. Without it, active snowfall and lamp thaw settle at a deep-snow
+      // equilibrium: the lamp is working numerically but never exposes a
+      // visibly melted patch.
+      const owed = (this.warm.get(s.key) || 0)
+        + ((flowMs / 1000) * s.k * rate) + falling * s.k;
       if (owed < FILL_STEP) { this.warm.set(s.key, owed); continue; }
       this.warm.set(s.key, 0);
       this._at(s.dir, at);
