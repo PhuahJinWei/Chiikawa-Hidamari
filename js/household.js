@@ -1121,6 +1121,12 @@ export class Household {
     const ch = bot.ch;
     s.step = 'walking';
     ch.hurrying = true;
+    // INTERRUPT THE STROLL THAT WAS ALREADY IN FLIGHT. Writing a new `errand`
+    // is not enough: Character only picks an errand when `walking` is false,
+    // so without this somebody caught mid-stroll finishes that old target
+    // before they even turn toward shelter. Rain is the transition itself,
+    // not something queued behind the rest of their afternoon.
+    ch.walking = false;
     ch.release('rest');
     ch.release('talk');
     this._aimAtShelter(bot, s, tMs);
@@ -1492,6 +1498,10 @@ export class Household {
     const ch = bot.ch;
     s.step = 'walking';
     ch.hurrying = true;
+    // As with shelter, replace an active stroll NOW rather than merely putting
+    // bedtime behind it in the errand slot. The next Character update will aim
+    // at the first home waypoint from the spot where midnight caught them.
+    ch.walking = false;
     ch.release('rest');
     ch.release('talk');
     this._aimAtBed(bot, s, tMs);

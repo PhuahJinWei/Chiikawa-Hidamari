@@ -3106,7 +3106,10 @@ const FOCUS = {
   siteCone: 0.42,
   siteKeep: 0.72,
   waterKeep: 1.05,
-  meet: CONFIG.social.greetArc,
+  // Slightly outside the tuned arrival/greeting line so a visit is safely
+  // INSIDE the acquisition range rather than balanced on the same numeric
+  // boundary. See social.interactArc for the rounding and clearance case.
+  meet: CONFIG.social.interactArc,
   meetHold: CONFIG.social.greetArc + 1.1,
   // HOW MUCH HARDER IT IS TO TAKE THE FOCUS OFF SOMEBODY YOU ARE TALKING TO.
   // Replaces `beat` for a friend you have actually pressed a verb on — see

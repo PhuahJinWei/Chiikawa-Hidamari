@@ -1671,6 +1671,17 @@ export const CONFIG = {
     // the 「greet」 a tap earns and the 「greetBack」 this earns would both fire,
     // a few seconds apart, for one thing you did.
     greetArc: MEET_ARC,
+    // A VISIT MUST LAND INSIDE THE INTERACTION LINE, not exactly on its
+    // floating-point edge. The camera still stands at MEET_ARC because that is
+    // the tuned shot; this small outer band belongs only to acquiring the
+    // person-facing that supplies はなす and てをつなぐ. Reconstructing an
+    // arrival from sin/cos can put an exact 2.9 target a few ulps above 2.9,
+    // and keepClear may move it another fraction while clearing a nearby rim.
+    // With one shared boundary the visit could therefore finish visibly while
+    // its verbs never appeared. Fifteen centimetres is invisible as a social
+    // reach change, but is a real geometric margin rather than an epsilon that
+    // only papers over one of the two sources.
+    interactArc: MEET_ARC + 0.15,
     // ...and back outside this before walking up counts as new. The gap between
     // the two is hysteresis: with one radius doing both jobs, standing on the
     // boundary would greet you over and over. It is the gap that matters rather

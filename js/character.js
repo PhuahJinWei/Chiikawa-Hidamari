@@ -1498,7 +1498,14 @@ export class Character {
     }
 
     if (!this.walking) {
-      if (this.heldBy(tMs)) return;
+      // HURRYING OVERRIDES HOLDS WHILE STARTING A LEG TOO. The stoppedBy check
+      // above already let an urgent walk continue, but every waypoint ends by
+      // setting `walking` false. On the next frame this second gate used to
+      // honour the same noticed/visited/talk hold and leave somebody waiting at
+      // the waypoint — most visibly on the doorstep — before beginning the
+      // next leg. A deadline must cover the seams between legs as well as the
+      // legs themselves.
+      if (!this.hurrying && this.heldBy(tMs)) return;
       // NOBODY IN A HURRY WANDERS. A walk with a deadline always carries an
       // errand, so this is a guard rather than a case: if one ever arrived here
       // without one, a random stroll is the last thing it should become — that

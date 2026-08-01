@@ -2666,17 +2666,10 @@ html, body {
    perfect circles, crisp edges, a ring and a disc, no outline, no wobble. What
    changed is only the colour and the material.
 
-   THE RED IS GONE, and that was the real cost of the old drawing rather than
-   its shape. #E8555F is a recording light: it belonged to a device, and it was
-   the one colour in the app that came from outside this world. The disc is in
-   the same pink family as --accent and --pink now, so the button is of the
-   palette while still being the only saturated thing on a screen that is
-   otherwise meadow and sky.
-
-   It gives up being loud in the way a warning is loud. That is a real loss and
-   it is bought back by the ring: cream against pink is a stronger edge than
-   cream against red was, and the ink hairline outside it is what makes the
-   whole object hold together over a bright sky. */
+   RED AGAIN, because this control benefits from looking like the phone-camera
+   mechanism it copies rather than like another pastel HUD control. #E8555F is
+   saturated enough to be unmistakable without becoming a warning light, and
+   the cream ring plus ink hairline keep it legible against every sky. */
 .shot-ring {
   position: absolute;
   inset: 0;
@@ -2689,8 +2682,7 @@ html, body {
   background: rgba(253, 246, 234, 0.45);
   /* The ink hairline is what the cream cannot do for itself — see index.html. A
      white rim, which is what every other control here uses to hold itself off
-     the world, is no help against a sky that can BE white, and a pale pink
-     button needs it more than a red one ever did. */
+     the world, is no help against a sky that can BE white. */
   box-shadow:
     0 0 0 2.5px rgba(91, 76, 68, 0.36),
     0 4px 14px rgba(91, 76, 68, 0.3);
@@ -2709,25 +2701,10 @@ html, body {
   width: 58px;
   height: 58px;
   border-radius: 50%;
-  /* A soft top light, so the disc reads as a button with a body rather than as
-     a flat circle of colour. Two stops only: this is still the loudest thing on
-     the screen and a gradient with opinions would be too much.
-
-     THE BODY COLOUR IS PICKED AGAINST THE RING, not by eye. The first pass at
-     going pastel used #F0899C, which measures 2.23:1 against this button's own
-     cream ring — under the 3:1 that WCAG asks of a component boundary, and a
-     clear step down from the red it replaced at 3.32:1. Pale pink on cream is a
-     soft edge in a way pale pink on a meadow never was, and the ring is the edge
-     that matters because it is the one constant: the world behind changes every
-     hour, the ring does not.
-
-     #DE607D is the shallowest step back into the family that clears it — 3.22:1,
-     within a whisker of the red's own figure — and it is still unmistakably rose
-     rather than a red. The top stop is a highlight and sits lower at 2.19:1,
-     which is the same spread the red carried (2.68 against 3.32); a dome's
-     lightest point is not the thing carrying its edge. */
-  background: linear-gradient(180deg, #F08BA3 0%, #DE607D 66%);
-  box-shadow: inset 0 -2px 4px rgba(150, 70, 90, 0.22);
+  /* A restrained top light gives the red disc a physical surface without
+     weakening the familiar solid phone-shutter silhouette. */
+  background: linear-gradient(180deg, #F56C73 0%, #E8555F 66%);
+  box-shadow: inset 0 -2px 4px rgba(132, 37, 45, 0.25);
   transition: transform 0.09s ease, background 0.09s ease;
 }
 
@@ -2739,7 +2716,7 @@ html, body {
    colour was set on every press and never once seen. */
 .shot-btn:active::before {
   transform: scale(0.84);
-  background: linear-gradient(180deg, #DE7A92 0%, #C9506C 66%);
+  background: linear-gradient(180deg, #E25760 0%, #CD424D 66%);
 }
 
 .shot-btn:active .shot-ring { transform: scale(0.95); }
