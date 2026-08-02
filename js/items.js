@@ -349,7 +349,7 @@ export class Inventory {
     // Where each unique is, for the ones NOT in the pack. See unique().
     this.uniques = {};
     this._listeners = [];
-    this._saveArmed = false;
+    this._saveTimer = 0;
 
     // Load, forgivingly. A save from a version this code has never heard of, a
     // corrupt JSON, private mode with storage disabled — all of them land on
@@ -625,19 +625,32 @@ export class Inventory {
   // of the tick is both cheaper and atomic: no save can capture the middle of
   // a gift.
   _save() {
-    if (this._saveArmed) return;
-    this._saveArmed = true;
-    setTimeout(() => {
-      this._saveArmed = false;
-      try {
-        localStorage.setItem(KEY, JSON.stringify({
-          version: VERSION,
-          slots: this.slots,
-          caught: this.caught,
-          given: this.given,
-          held: this.held,
-        }));
-      } catch { /* private mode: the pack lives for the session */ }
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = 0;
+      this._write();
     }, 250);
+  }
+
+  // A native share sheet backgrounds the page and may let the OS discard it
+  // before a debounced write is allowed to run. Flush on that lifecycle edge so
+  // reopening cannot restore an item that was consumed, discarded or put away
+  // just before sharing.
+  flush() {
+    if (this._saveTimer) clearTimeout(this._saveTimer);
+    this._saveTimer = 0;
+    this._write();
+  }
+
+  _write() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        version: VERSION,
+        slots: this.slots,
+        caught: this.caught,
+        given: this.given,
+        held: this.held,
+      }));
+    } catch { /* private mode: the pack lives for the session */ }
   }
 }

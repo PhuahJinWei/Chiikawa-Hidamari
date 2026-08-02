@@ -3434,24 +3434,7 @@ export const CONFIG = {
     // in a row does not feel like it was ignored the first time. The clock's own
     // hourly changes use it too, though nobody is ever watching for those.
     fadeMs: 1500,
-    checkMs: 30000,      // how often the wall clock is re-read, while on じどう
-    // How long a full 24 hours takes once you have set the hour by hand.
-    //
-    // A chosen hour does not stop the day where you put it — the world goes on
-    // turning, just faster than the one outside. Pick よる and it is genuinely
-    // night, and stays night for a while, but walk far enough and you will see
-    // it get light. Freezing it was the alternative and it made the planet feel
-    // switched off: the one thing this place does on its own is change.
-    //
-    // Twelve minutes puts the phases at roughly morning 3 min, noon 2.5,
-    // evening 2, night 4.5 — long enough that an hour is somewhere you are
-    // rather than a slideshow, short enough that standing still is never
-    // standing still. This is the one number to turn if that balance is wrong.
-    fastDayMs: 12 * 60 * 1000,
-    // How often that hand-wound clock is re-read. It only has to be fine enough
-    // that a phase boundary is never visibly late, and at the rate above a
-    // quarter second of real time is half an hour of the day's.
-    fastCheckMs: 250,
+    checkMs: 30000,      // how often either normally paced clock is re-read
     // How long the release of a scrub takes to fall into its stop. Much shorter
     // than a fade, because it is finishing a movement your hand already made
     // rather than starting one — anything near fadeMs feels like the control
@@ -3465,10 +3448,9 @@ export const CONFIG = {
   // WHAT IS IN THE AIR, and how long it stays there. See weather.js, which
   // owns every decision these numbers are inputs to.
   //
-  // The hours here are HOURS OF THE WORLD, not real ones, which is what lets
-  // one set of numbers serve both clocks: on the wall clock a front takes an
-  // afternoon and on the hand-wound one it takes about half a minute, and it is
-  // the same front either way.
+  // The hours here are positions and spans on the world's clock. Automatic and
+  // manually shifted time advance at the same pace; only their current reading
+  // differs.
   weather: {
     // ------------------------------------------------------ how often it rains
     //
@@ -3836,10 +3818,9 @@ export const CONFIG = {
     slumpAt: 0.30,
     goneAt: 0.06,
 
-    // How long one weather takes to become the next, in world hours. A third of
-    // an hour is twenty real minutes of sky slowly going over, and about eight
-    // seconds under a dragged clock — the same fraction of a day in both cases,
-    // which is the whole reason this is measured in hours and not milliseconds.
+    // How long one weather takes to become the next, in clock hours. A third of
+    // an hour is twenty real minutes of sky slowly going over whichever clock
+    // supplied the current reading.
     rampHours: 0.34,
 
     // ...and how quickly the sky catches up with where it is heading, in real

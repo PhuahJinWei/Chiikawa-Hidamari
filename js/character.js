@@ -1048,8 +1048,21 @@ export class Character {
   // front of you a good minute after it had gone home. Nothing has to be eased
   // out of a pair of hands that cannot be seen: it is let go of on the spot, and
   // they come back over the horizon empty-handed, which is what they are.
-  dropPiece() {
+  dropPiece(immediate = false) {
     this._holdWant = 0;
+    // A lifecycle reconciliation is not visible choreography. If the page was
+    // frozen by a native share sheet, the old lowering animation may still own
+    // an object that inventory has since forgotten. Detach it outright before
+    // the first resumed frame can draw it again.
+    if (immediate) {
+      if (this._heldObj) this._letGo();
+      else {
+        this.holdGroup.visible = false;
+        this._holdScale = 0;
+        this.holdGroup.scale.setScalar(0);
+      }
+      return;
+    }
     if (this._heldObj && (!this._onScreen || this.fade <= 0.004)) this._letGo();
   }
 

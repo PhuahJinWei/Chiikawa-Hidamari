@@ -31,7 +31,7 @@ import {
   IMG, TREE_VARIANTS, FLOWER_VARIANTS,
   MUSHROOM_VARIANTS, SKY_DISC_ART, WORLD_SNOW, TUNE_VARIANTS,
 } from './assets.js';
-import { LOOK, PHASES, clockRate } from './daylight.js';
+import { LOOK, PHASES } from './daylight.js';
 import { PLATEAU, restoreGLSL, RESTORE_APPLY } from './light-model.js';
 import { RENDER_SPAN } from './character.js';
 import {
@@ -1165,10 +1165,9 @@ function skyDirFromTexel(px, py, texW, texH, out) {
 // end: the crossing is at `shellTuck / depth` of full field — 0.257 of 0.86,
 // so 30% of the way along — after which the sheet climbs to its full 0.22.
 //
-//   shore 1.6   the pond's edge, so the snow surfaces about half a unit out
-//               from the widest the rim wobbles to and is at field depth by a
-//               pace and a half. Generous on purpose: this is the rim you can
-//               stand next to, since a frozen pond is walkable.
+//   shore 0.5   the pond's edge. The shell is continuous beneath the water now,
+//               so this only has to make a natural shallow edge; it no longer
+//               has to bury a cut sheet's exposed rim.
 //   eaves 0.9   the foot of a wall. Tighter, because nobody stands inside a
 //               building's hole except on its floor, and a wide bare apron
 //               round each house would read as a lawn somebody had cleared.
@@ -1177,7 +1176,9 @@ function skyDirFromTexel(px, py, texW, texH, out) {
 // judgement rather than an oversight: those two are the SNOW's own shape and get
 // tuned by eye against the reference art. These are a repair to a seam in the
 // geometry, and they only mean anything next to the cut in snowShellGeo.
-const SHELL_HOLE = { shore: 1.6, eaves: 0.9 };
+const SHELL_HOLE = { shore: 0.5, eaves: 0.9 };
+const SHORE_MASK_STEPS = 12;
+const SHORE_MASK_COLS = 192;
 
 // THE SNOW ITSELF, as a second surface over the planet.
 //
@@ -1206,11 +1207,12 @@ const SHELL_HOLE = { shore: 1.6, eaves: 0.9 };
 // BED, with water drawn over the top — but a shell cannot: it would dome over
 // the water and put a white lid on both lakes.
 //
-// So the faces are simply removed at build. Static, decided once, and free
-// forever after — no per-vertex mask, no test in the shader, and no way for it
-// to come undone later. The seam it leaves at a pond's rim is not a seam to
-// hide either: snow banked at the shore dropping away to a lower, flatter
-// surface is exactly what a frozen pond in a snowfield looks like.
+// The mask now does the whole job at a pond: it sinks the continuous shell below
+// the water, then raises it across a narrow shoreline band. Cutting faces here
+// used to leave an exposed sheet edge, and hiding that edge required the broad
+// snow-free green ring this arrangement replaces. Buildings remain true holes
+// because their interiors are separate floors rather than another surface over
+// the planet.
 function snowShellGeo(R, seg) {
   const geo = new THREE.SphereGeometry(R, seg, seg / 2);
   const pos = geo.attributes.position;
@@ -1229,7 +1231,6 @@ function snowShellGeo(R, seg) {
     // half-faces round every pond, which is worse than a slightly generous
     // hole.
     mid.copy(a).add(b).add(c).normalize();
-    if (CONFIG.lakes.some((l) => inLake(mid, l, 0.02))) continue;
     // THE WHOLE FOOTPRINT and not the wall band — see underRoof, and the note
     // there about the bug this line was. `inBuilding` stood here, which lets
     // the room through as free floor, so the hole came out as a RING under the
@@ -7313,7 +7314,7 @@ ${shader.fragmentShader}`
     // is why the guard below is worth having rather than something to fix: an
     // unbuilt slot is still at the origin, and normalising the origin is a NaN
     // straight into the map. One frame of lag on a four-minute melt is not.
-    const flow = dtMs * clockRate();
+    const flow = dtMs;
     if (this.field.laid && this.lampUniforms) {
       const U = this.lampUniforms;
       const n = U.uLampK.value.length;
@@ -7340,9 +7341,8 @@ ${shader.fragmentShader}`
     // pushing the map to the GPU at most a few times a second. Both are no-ops
     // on a planet with no snow on it.
     //
-    // Wall time on purpose, where the thaw above takes `flow` — see the note on
-    // `update` in snowfield.js for the day this took world time and the map
-    // saturated flat white under a fast-day snowfall.
+    // The field and the thaw above now share wall time. See the note on `update`
+    // in snowfield.js for why footprint refill must stay on that same clock.
     this.field.update(dtMs, this.wx.flakes || 0);
     this.rain.update(dtMs, {
       ...opts, tint: this.tint, grade: this.wx, camera: this.camera,
@@ -7453,22 +7453,33 @@ ${shader.fragmentShader}`
       });
     }
 
-    // ...and the same for every lake, which is the one the player can stand
-    // INSIDE of — a frozen pond is walkable, so the shell's biggest hole is
-    // somewhere you go, below the rim, at exactly the grazing angle a sheet with
-    // no underside cannot survive.
-    //
-    // Sized off the widest the rim can wobble to (`rimHi`), not the mean, so the
-    // zeroed core covers the whole cut whatever the harmonics are doing at that
-    // bearing — the faces are removed against the exact wobbled rim and this is
-    // a smooth ellipse, so it has to be the generous one of the two.
+    // ...and the exact irregular shoreline of every lake. Nested rings make a
+    // narrow falloff in real ground distance, rather than the old smooth ellipse
+    // sized to the rim's widest possible wobble. That conservative ellipse was
+    // what painted the broad green moat in globe view, especially on the narrow
+    // axis where its one radial-gradient core overreached by another half unit.
     for (const l of CONFIG.lakes) {
+      const center = dirFromLatLon(l.lat, l.lon, new THREE.Vector3());
+      const east = new THREE.Vector3();
+      const north = new THREE.Vector3();
+      const away = new THREE.Vector3();
+      localFrame(center, east, north);
+      const rings = [];
+      for (let step = SHORE_MASK_STEPS; step >= 0; step--) {
+        const margin = (SHELL_HOLE.shore * step / SHORE_MASK_STEPS) / R;
+        const ring = [];
+        for (let i = 0; i < SHORE_MASK_COLS; i++) {
+          const theta = (i / SHORE_MASK_COLS) * Math.PI * 2;
+          away.copy(east).multiplyScalar(Math.cos(theta))
+            .addScaledVector(north, Math.sin(theta)).normalize();
+          const arc = lakeReach(l, away) + margin;
+          ring.push(center.clone().multiplyScalar(Math.cos(arc))
+            .addScaledVector(away, Math.sin(arc)).normalize());
+        }
+        rings.push(ring);
+      }
       out.push({
-        dir: dirFromLatLon(l.lat, l.lon, new THREE.Vector3()),
-        hole: true,
-        rx: l.rx * l.rimHi * R,
-        ry: l.ry * l.rimHi * R,
-        band: SHELL_HOLE.shore,
+        dir: center, hole: true, rings,
       });
     }
     return out;
@@ -9272,7 +9283,7 @@ ${shader.fragmentShader}`
     if (this._handDark) this._handDark.value.copy(this.tint);
   }
 
-  clearHand() { this.hand.clear(); }
+  clearHand(immediate = false) { this.hand.clear(immediate); }
 
   // A PORTRAIT OF A BUILT THING, for anywhere a drawing is wanted and there is
   // no drawing — which today is one place: the chip a unique shows in the pack.

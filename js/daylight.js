@@ -1,7 +1,7 @@
 // What time of day it looks like. Driven by the visitor's actual clock, so
 // dropping in after dinner is a different place from dropping in at lunch —
-// or, once an hour has been set by hand, by a clock of the same shape turning
-// faster. See the bottom of the file.
+// or, once an hour has been set by hand, by a normally paced clock shifted to
+// that chosen hour. See the bottom of the file.
 //
 // `tint` is the multiply colour for the unlit sprites. Without it the planet
 // would go dark at night while the characters stayed lit like cutouts pasted
@@ -22,8 +22,6 @@
 // It moves with `ambient` below, never alone. That one lights the ground and
 // this one lights everything standing on the ground, and a gap between them
 // reads immediately as props cut from a different picture than the hillside.
-
-import { CONFIG } from './config.js';
 
 // The night sky is #002944 at skyTop — the expanse you are actually looking at
 // — with the two stops below it lifting toward the horizon so that a flat
@@ -343,22 +341,23 @@ const PHASE_START = {
 // at lunchtime — a dark planet under a starfield, with nothing on screen to
 // connect any of it to a choice made days ago.
 //
-// Anything else is a clock wound by hand: the hour it was set to, and the real
+// Anything else is a clock shifted by hand: the hour it was set to, and the real
 // moment it was set at. Note what is NOT here — the phase you picked. Holding a
-// reading and a timestamp instead is what lets a chosen hour go on running
-// rather than stopping dead where you put it, and it costs nothing to keep: the
-// hour is worked out fresh whenever somebody asks, so there is no tick to drive
-// and a tab left in the background for an hour comes back to the right side of
-// the planet rather than to wherever a paused timer had got to.
+// reading and a timestamp instead is what lets a chosen hour go on running at
+// the ordinary pace rather than stopping dead where you put it. A manual clock
+// differs from the automatic one only in where it started, not in how quickly
+// time passes; a tab left in the background for an hour therefore comes back
+// one hour later rather than after several invented days.
 let hand = null;
 
-// A real day, in milliseconds. Named because two things divide by it and a
-// magic 86400000 in either would be a number you have to decode.
+// A real day, in milliseconds. Named so the manual clock's conversion does not
+// hide a magic 86400000.
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// The hand-wound hour, wrapped back into a day.
+// The hand-set hour, advanced at the same pace as the wall clock and wrapped
+// back into a day.
 function handHours() {
-  const turned = ((performance.now() - hand.since) / CONFIG.daylight.fastDayMs) * 24;
+  const turned = ((Date.now() - hand.since) / DAY_MS) * 24;
   return (hand.hour + turned) % 24;
 }
 
@@ -384,38 +383,15 @@ export function nowHours() {
 }
 
 // Whether the REAL clock is the one deciding — which is what the pill's dot
-// means, and still exactly what it meant before the hand-wound one started
-// running. A fast day is not an automatic one.
+// means. A manually shifted clock still advances normally; it simply no longer
+// takes its current reading from the device clock.
 export function isAuto() {
   return hand === null;
 }
 
-// HOW FAST WORLD TIME IS RUNNING against the wall clock, as a multiplier: 1 when
-// the real clock is keeping the hour, and 120 on a hand-wound day, which turns
-// twenty-four hours in twelve minutes.
-//
-// It exists because `nowHours` above was only half an answer. Anything asking
-// what time it is got dragged along with the scrubber; anything measuring how
-// long something TAKES was still counting wall milliseconds, and the two are the
-// same number right up until somebody sets the hour by hand.
-//
-// That split was a real bug rather than a tidiness point. The snow's melt is a
-// twenty-minute time constant, which on a fast day is a forty-HOUR one in world
-// terms — so winter ended on the schedule and the drifts stood through days of
-// summer sky, because the sky was sprinting and the thaw was not. Every clock
-// that measures a duration the schedule can outrun has to be scaled by this: see
-// the aftermath block in weather.js, which is all three of them.
-//
-// Worked out from `fastDayMs` rather than stated, so the one number that sets
-// how long a fast day takes goes on setting it — see handHours, which is the
-// same division.
-export function clockRate() {
-  return hand ? DAY_MS / CONFIG.daylight.fastDayMs : 1;
-}
-
 export function setPhaseOverride(phase) {
   hand = ORDER.includes(phase)
-    ? { hour: PHASE_START[phase], since: performance.now() }
+    ? { hour: PHASE_START[phase], since: Date.now() }
     : null;
   return activePhase();
 }

@@ -337,16 +337,12 @@ function slipOnIce(dtMs, now) {
 // ...and the choosing is Social.noticeBow, for the reason the thunder's is.
 
 // Hand the hour to a different clock. Always this rather than setPhaseOverride
-// directly, because the deadline the *previous* clock set has to be retired
-// with it: the two are read at very different rates, and a じどう check is
-// scheduled 30 seconds out. Pick an hour a moment after one of those was
-// booked and the fast day stood still for the rest of that wait — up to a whole
-// virtual hour of a world that had just been told to start moving, which is the
-// one moment anybody is watching for it. Measured at 7 frames of a 40-second
-// test day before this existed.
+// directly, because the deadline the previous clock booked belongs to its old
+// reading. Retiring it makes a newly selected phase authoritative on the very
+// next frame instead of waiting up to thirty seconds for the ordinary check.
 function setHour(next) {
   setPhaseOverride(next);
-  phaseCheckAt = 0;   // re-read on the very next frame, at the new rate
+  phaseCheckAt = 0;   // re-read on the very next frame
 }
 
 const raycaster = new THREE.Raycaster();
@@ -2661,7 +2657,7 @@ function paintZukan() {
 // globe's; the pill and panel are here; the inventory is what they agree on.
 // A unique in the hand shows as the piece itself and the pill turns into
 // 「おろす」 — you put a bear DOWN, you do not put a bear away.
-function syncPouch() {
+function syncPouch({ immediateEmpty = false } = {}) {
   if (inventory.heldUnique) {
     const art = ITEMS[inventory.heldUnique].art;
     if (!handMeshes[art]) handMeshes[art] = HAND_BUILDERS[art]();
@@ -2686,11 +2682,11 @@ function syncPouch() {
     if (AVATAR_CARDS.has(inventory.holding)) {
       you.holdPiece(carriedCard(inventory.holding), avatarCardGrip(inventory.holding));
     } else {
-      you.dropPiece();
+      you.dropPiece(immediateEmpty);
     }
   } else {
-    globe.clearHand();
-    you.dropPiece();
+    globe.clearHand(immediateEmpty);
+    you.dropPiece(immediateEmpty);
   }
   // ANYTHING STILL MARKED AS CARRIED THAT IS NOT IN THE HAND went somewhere
   // this function was not told about, and there is exactly one such somewhere:
@@ -2720,6 +2716,21 @@ function syncPouch() {
 
 inventory.onChange(syncPouch);
 syncPouch();
+
+// Native sharing hands control to another app. On mobile that can freeze this
+// page between two animation frames, or discard it altogether. Inventory is the
+// source of truth: persist it before the page can disappear, then rebuild both
+// visual hands when it returns. An empty hand is cleared immediately here
+// because a resume is not a put-away gesture anybody should watch.
+function flushPouch() { inventory.flush(); }
+function resumePouch() { syncPouch({ immediateEmpty: true }); }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushPouch();
+  else resumePouch();
+});
+window.addEventListener('pagehide', flushPouch);
+window.addEventListener('pageshow', resumePouch);
 
 // ONE CONTROL, ONE JOB. The pill used to be three verbs in one — もちもの to
 // open the bag, しまう to put a held card away, おろす to set a carried bear
@@ -2888,6 +2899,9 @@ onPress(photoShare, async () => {
     // Cancelled, or refused by the platform. Neither is an error worth saying
     // anything about — the sheet is still open and ほぞん is still there.
   }
+  // Some Web Share implementations do not emit a useful visibility edge.
+  // Reconcile at the API boundary as well, before the preview can be closed.
+  resumePouch();
 });
 
 // Whether the camera is already yours — the latch the unlock notice fires off.
@@ -5265,20 +5279,18 @@ function frame(now) {
       b.ch.setTalking(b.dlg.isTyping);
     }
 
-    // The hour moves whichever clock is keeping it — the real one, or the fast
-    // one that a hand-picked hour starts — so this asks either way now. It used
-    // to ask only on じどう, on the reasoning that nothing about waiting should
-    // take a chosen hour back off you; what it actually did was stop the world
-    // dead the moment you chose. The two rates differ because the questions do:
-    // a wall clock that changes phase four times a day is not worth re-reading
-    // as often as one that does it every couple of minutes.
+    // The hour moves whichever clock is keeping it — the device clock, or the
+    // normally paced offset clock that begins at a hand-picked hour — so this
+    // asks either way. It used to ask only on じどう, which stopped a chosen day
+    // dead forever. Both clocks now advance at the same rate and share the same
+    // inexpensive polling interval.
     //
     // Never mid-scrub. applyPhase drives the cross-fade, and a finger dragging
     // the sky directly is already saying what it should show; both at once and
     // the day fights the thumb holding it.
     if (!scrubbing && now > phaseCheckAt) {
       const d = CONFIG.daylight;
-      phaseCheckAt = now + (isAuto() ? d.checkMs : d.fastCheckMs);
+      phaseCheckAt = now + d.checkMs;
       applyPhase(activePhase());
     }
 

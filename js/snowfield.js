@@ -226,34 +226,32 @@ export class Snowfield {
   // GENUINELY ZERO across a whole region and only then climbs. So the gradient
   // holds full black out to `core` and ramps to nothing at the rim.
   //
-  // What it is for is the shell's cut edges — see snowShellGeo, which deletes
-  // every face over a lake and under a roof. Those holes had raw rims: the
-  // displaced sheet simply stopped, a fifth of a unit up, with no underside to
-  // it (one Lambert surface, front faces only) and no skirt closing the side. A
-  // sightline that got under the rim — from ON a frozen pond, or from inside a
-  // room looking out of the door — passed straight through the snow and out the
-  // far side, so the body of a drift was see-through and its far top edge hung
-  // in the air as a loose grey arc.
+  // What it is for today is the shell's cut edge under a roof. A lake no longer
+  // cuts the shell at all: its exact shoreline mask below sinks the continuous
+  // sheet beneath the water, which is what lets snow reach the bank without an
+  // exposed rim needing a broad bare-ground disguise.
   //
   // Zeroing the field around each hole fixes that without a triangle being
   // added, because the tuck already does the work: the shell sits at
   // `R - shellTuck + cover * depth * mask`, so a mask under `shellTuck / depth`
   // puts it UNDER THE TURF. Ramp the field to zero at the rim and the sheet has
   // dived below the ground before its edge arrives — there is no rim left to see
-  // beneath. And what it looks like is what it should: snow thinning away to
-  // bare shore, which is what the edge of a frozen pond actually does.
+  // beneath.
   _hole(px, py, rx, ry, core) {
     const g = this.g;
-    g.globalCompositeOperation = 'source-over';
+    g.globalCompositeOperation = 'darken';
     for (const dx of [-W, 0, W]) {
       const x = px + dx;
       if (x + rx < 0 || x - rx > W) continue;
       const grad = g.createRadialGradient(0, 0, 0, 0, 0, 1);
-      grad.addColorStop(0, 'rgba(0,0,0,1)');
+      grad.addColorStop(0, 'rgb(0,0,0)');
       // Strictly below the rim stop, or a core of 1 makes the two coincide and
       // canvas draws a hard-edged disc with no ramp at all.
-      grad.addColorStop(Math.min(0.995, Math.max(0, core)), 'rgba(0,0,0,1)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      grad.addColorStop(Math.min(0.995, Math.max(0, core)), 'rgb(0,0,0)');
+      // Opaque white under `darken` leaves the existing field untouched. Using
+      // a colour cap instead of transparent black also makes restamping stable:
+      // the shoreline cannot grow darker and wider after every fill wash.
+      grad.addColorStop(1, 'rgb(255,255,255)');
       g.save();
       g.translate(x, py);
       g.scale(rx, ry);
@@ -262,6 +260,50 @@ export class Snowfield {
       g.arc(0, 0, 1, 0, Math.PI * 2);
       g.fill();
       g.restore();
+    }
+    this.dirty = true;
+  }
+
+  // An irregular shoreline, supplied as nested rings from outside to the exact
+  // water edge. Each ring caps the field at a darker level than the one outside
+  // it; the final shoreline polygon is black. `darken` makes that cap idempotent
+  // and preserves an even deeper footprint that happens to cross the band.
+  _shoreHole(feature) {
+    const g = this.g;
+    const at = { x: 0, y: 0, stretch: 1 };
+    if (!feature._maskRings) {
+      this._at(feature.dir, at);
+      const cx = at.x;
+      feature._maskRings = feature.rings.map((ring) => {
+        const points = new Float32Array(ring.length * 2);
+        for (let i = 0; i < ring.length; i++) {
+          this._at(ring[i], at);
+          let x = at.x;
+          while (x - cx > W / 2) x -= W;
+          while (x - cx < -W / 2) x += W;
+          points[i * 2] = x;
+          points[i * 2 + 1] = at.y;
+        }
+        return points;
+      });
+    }
+
+    g.globalCompositeOperation = 'darken';
+    const rings = feature._maskRings;
+    const last = rings.length - 1;
+    for (let i = 0; i < rings.length; i++) {
+      const points = rings[i];
+      const value = last > 0 ? Math.round(255 * (last - i) / last) : 0;
+      g.fillStyle = `rgb(${value},${value},${value})`;
+      for (const dx of [-W, 0, W]) {
+        g.beginPath();
+        g.moveTo(points[0] + dx, points[1]);
+        for (let p = 2; p < points.length; p += 2) {
+          g.lineTo(points[p] + dx, points[p + 1]);
+        }
+        g.closePath();
+        g.fill();
+      }
     }
     this.dirty = true;
   }
@@ -333,11 +375,10 @@ export class Snowfield {
     // THE HOLES LAST, and in a pass of their own rather than in the loop above.
     //
     // They have to win outright. A hole is not a preference about where snow
-    // gathers, it is the one place there must be NO snow — because the shell has
-    // no faces there and its rim has to be buried before it arrives. A drift or
-    // a wall's bank landing on top of one would lift the sheet straight back out
-    // of the ground and hand the rim back. Ordering the array would do it too,
-    // and this cannot be got wrong by someone appending a feature later.
+    // gathers: roofs need the shell's cut edge buried, while ponds need the
+    // continuous shell sunk beneath their water. A drift or a wall's bank
+    // landing on top would undo either effect. Ordering the array would work
+    // too, but this cannot be got wrong by someone appending a feature later.
     //
     // KEPT, not just drawn, because `_fill` washes white over the WHOLE canvas
     // and would quietly fill them back in — see _stampHoles.
@@ -355,19 +396,16 @@ export class Snowfield {
   //
   // `_fill` is a flat white fillRect over the entire map — that is the whole
   // trick of it, one call to put snow back everywhere at once. It has no idea
-  // some of the map is load-bearing. Measured: sixty seconds of heavy snowfall
-  // took the middle of the lake from 0.000 to 0.761, far past the 0.257 where
-  // the shell breaks the turf, so the rims rose back out of the ground during
-  // any long fall and the see-through drift came back with them.
-  //
-  // Re-stamping is the cheap half of that fix's two options. The other is to
-  // teach `_fill` a mask of where it may wash, which is a second full-canvas
-  // operation per wash; this is four gradient fills, at most six times a second,
-  // and only while it is actually snowing.
+  // that roofs and water must stay excluded. Re-stamping the small set of local
+  // shapes is cheaper than applying a second full-canvas mask after every wash.
   _stampHoles() {
     if (!this.holes || !this.holes.length) return;
     const at = { x: 0, y: 0, stretch: 1 };
     for (const f of this.holes) {
+      if (f.rings) {
+        this._shoreHole(f);
+        continue;
+      }
       this._at(f.dir, at);
       const r = this._radiiXY(f.rx, f.ry, at);
       // The band is a distance on the ground, so it is the same on both axes —
@@ -507,10 +545,9 @@ export class Snowfield {
   // it would have gone on rounding it away forever. Each spot saves up
   // separately until its own next wash is worth drawing.
   //
-  // `flowMs` is WORLD time. `fallMs` remains wall time, matching `_fill`: heat
-  // under an active lamp must cancel the fresh accumulation at that spot as
-  // well as melt what was already there, without making a hand-wound day erase
-  // every footprint on the planet. `count` is how many pooled spots are live.
+  // `flowMs` and `fallMs` are elapsed wall time. Heat under an active lamp must
+  // cancel the fresh accumulation at that spot as well as melt what was already
+  // there. `count` is how many pooled spots are live.
   thaw(spots, flowMs, count = spots.length, fallMs = 0, flakes = 0) {
     if (!this.laid || !count) return;
     const rate = CONFIG.weather.thawRate;
@@ -541,11 +578,9 @@ export class Snowfield {
   // see a print appear, and on the vast majority of frames `dirty` is false and
   // this does nothing at all.
   //
-  // THE FILL IS ON THE WALL CLOCK, DELIBERATELY, and it was on the world clock
-  // for one day. The reasoning that put it there sounded right — the sky lays
-  // snow at world speed on a hand-wound day, so surely it fills prints at world
-  // speed too — and what it actually did was saturate the map. At 120× the wash
-  // is 3% a frame: the whole field hit flat white in about two seconds of
+  // THE FILL IS ON THE WALL CLOCK, DELIBERATELY. It was once multiplied by the
+  // old manual-time time-lapse, and at 120× the wash became 3% a frame: the
+  // whole field hit flat white in about two seconds of
   // snowfall, which erased the drifts and the banks `fresh` had just laid, ate
   // every footprint the moment it was stamped, and left the lamps' melt losing
   // a race it is supposed to win. Reported as "walking leaves no trail and the
@@ -553,11 +588,10 @@ export class Snowfield {
   //
   // The principle that decides it: A PRINT RACES THE WALKER WHO MADE IT, and
   // every walker — the cast and the player alike — moves on the wall clock.
-  // Winding the day faster does not make anybody walk faster, so it must not
-  // make their trail close faster either. The aftermath values in weather.js
-  // scale by `clockRate` because they race the SCHEDULE; this one races people.
-  // The lamps' `thaw` below stays on world time by the same test — it races the
-  // night, not anybody's feet.
+  // Moving the clock to another hour does not make anybody walk faster, so it
+  // must not make their trail close faster either. The weather aftermath and
+  // lamp thaw now share this same clock, so every visible snow process keeps a
+  // consistent pace.
   update(dtMs, flakes) {
     this.clock += dtMs;
     if (!this.laid) return;

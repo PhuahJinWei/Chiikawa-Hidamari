@@ -249,12 +249,30 @@ export class Hand {
     this.meshHolder = null;
   }
 
-  clear() {
+  clear(immediate = false) {
     this._want = 0;
     // The mesh goes at once rather than at the end of the shrink — its owner
     // is about to stand it back up in the world, and it cannot be in two
     // places. The card keeps the soft exit; it is only a picture.
     this._dropMesh();
+    // Returning from a native share sheet is not an ordinary put-away gesture.
+    // Mobile browsers may freeze the page before the soft exit has advanced,
+    // leaving the last card attached even though the inventory is already
+    // empty. Resume reconciliation asks for a hard clear so render state cannot
+    // outlive its source of truth.
+    if (immediate) {
+      this._scale = 0;
+      this._kind = null;
+      this._canvas = null;
+      this.card.visible = false;
+      this.group.scale.setScalar(0);
+      if (this._tex) {
+        this._tex.dispose();
+        this._tex = null;
+        this.mat.map = null;
+        this.mat.needsUpdate = true;
+      }
+    }
   }
 
   update(t, airborne) {

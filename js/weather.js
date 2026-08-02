@@ -32,11 +32,11 @@
 // 24-hour axis and read back by whatever the clock currently says.
 //
 // So: same date, same weather, on every device and after every reload, with
-// nothing written down. Setting the hour by hand replays the same day faster,
-// which is exactly what you want while working on it.
+// nothing written down. Setting the hour by hand moves to another point in the
+// same day, then lets that day continue at its ordinary pace.
 
 import { CONFIG } from './config.js';
-import { nowHours, activePhase, clockRate } from './daylight.js';
+import { nowHours, activePhase } from './daylight.js';
 // One way only — sphere.js has no dependency but three.js, which is what makes
 // it safe for this file to reach down into. See isWater at the foot of the file.
 import { inLake } from './sphere.js';
@@ -453,8 +453,7 @@ function schedule() {
 //
 // The ramp is measured in HOURS OF THE WORLD rather than in seconds, and that
 // is what lets one number serve two clocks. A front rolling in over a third of
-// an hour is twenty real minutes on the wall clock and about eight seconds on
-// the hand-wound one — in both cases it is the same fraction of the day, so
+// the configured fraction of an hour whichever clock supplied the reading, so
 // dragging the time control shows you a front arriving rather than a front
 // snapping on.
 function readAt(hours) {
@@ -489,10 +488,9 @@ function mixInto(out, a, b, t) {
 
 // --------------------------------------------------------------------- the hand
 //
-// A weather set by hand, exactly as an hour can be. Unlike the hour there is no
-// fast clock behind it: a chosen weather simply STAYS, because unlike the hour
-// it is not something the world is expected to move on from — you picked rain
-// to look at rain.
+// A weather set by hand, exactly as an hour can be. A chosen weather simply
+// STAYS, because unlike the hour it is not something the world is expected to
+// move on from — you picked rain to look at rain.
 let hand = null;
 
 export function setWeatherOverride(key) {
@@ -600,27 +598,11 @@ export function tickWeather(dtMs, tMs) {
 
   // --------------------------------------------------------------- aftermath
   //
-  // WHAT THE SKY LEAVES BEHIND, and all three of them run on WORLD time rather
-  // than on the wall.
-  //
-  // That distinction did not exist until the hour could be wound by hand, and
-  // its absence was a real bug. The schedule above reads `nowHours`, so a fast
-  // day drags the fronts along with it at a hundred and twenty times the wall
-  // clock; these three counted plain milliseconds and did not move. The melt is
-  // the one where it showed: a twenty-minute time constant is a FORTY-HOUR one
-  // in world terms at that rate, so winter would end on the schedule and the
-  // drifts would still be standing days of sky later, under a summer sun, with
-  // the cast in coats because the cover said so.
-  //
-  // The sky's own ease below is deliberately NOT scaled, and the two are
-  // different questions: that one is smoothing a button press so a hand-picked
-  // weather does not cut between frames, which is a fact about frames. These are
-  // durations the world is meant to feel — how long a puddle lasts, how long a
-  // winter does — and a world running at speed should feel them at speed.
-  //
-  // On the real clock `clockRate` is exactly 1 and every number below is the
-  // number it always was.
-  const flow = dtMs * clockRate();
+  // WHAT THE SKY LEAVES BEHIND. Manual time is an offset clock, not a time-lapse,
+  // so scheduled and hand-picked weather share the same elapsed milliseconds.
+  // Puddles, snow, thaw and ice therefore keep their authored visible pace no
+  // matter where the player moved the clock.
+  const flow = dtMs;
 
   // The ground filling and draining. `drops` is the tap; nothing else feeds it,
   // so a sky that clears leaves the water exactly where it was and lets it go
